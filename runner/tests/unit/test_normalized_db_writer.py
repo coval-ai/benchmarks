@@ -416,17 +416,6 @@ async def test_exact_capture_replay_serializes_and_promotes_pending_run(
             finished_at=finished_at,
             allow_capture_recovery=True,
         )
-
-        async with pool.connection() as conn:
-            refresh_count = await (
-                await conn.execute(
-                    """SELECT count(*) FROM benchmarks_v2.dashboard_source_refreshes
-                       WHERE bucket_at = %s""",
-                    (_NOW,),
-                )
-            ).fetchone()
-        assert refresh_count is not None
-        assert refresh_count["count"] == 1
     finally:
         await pool.close()
 
@@ -584,6 +573,8 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
                 "p25",
                 "p50",
                 "p75",
+                "p90",
+                "p95",
                 "max_value",
                 "value_sum",
                 "sample_count",

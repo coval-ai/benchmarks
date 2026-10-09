@@ -30,7 +30,6 @@ import psycopg
 
 from coval_bench.config import get_settings
 from coval_bench.db.dashboard_aggregates import refresh_backfilled_dashboard
-from coval_bench.db.dashboard_source import mark_source_hour_dirty
 from coval_bench.db.metric_definitions import register_metric_definitions_sync
 from coval_bench.s2s.fetch_v2v import _normalized_dataset_sha256
 
@@ -773,7 +772,6 @@ WHERE bucket_at=%(bucket)s AND benchmark='S2S'
 
 
 def _refresh(cur: psycopg.Cursor[Any], bucket: datetime) -> None:
-    mark_source_hour_dirty(cur, bucket)
     params = {"bucket": bucket}
     cur.execute(
         "SELECT pg_advisory_xact_lock(hashtextextended('metric_values_by_bucket',extract(epoch FROM %(bucket)s::timestamptz)::bigint))",

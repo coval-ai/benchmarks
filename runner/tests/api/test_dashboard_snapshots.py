@@ -10,10 +10,13 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-from coval_bench.db.dashboard_hourly import refresh_hourly_aggregates
 from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
 from tests.api.conftest import _insert_run, _make_db_url
-from tests.api.test_aggregates import _insert_normalized_bucket, _insert_normalized_metric
+from tests.api.test_aggregates import (
+    _insert_normalized_bucket,
+    _insert_normalized_metric,
+    _publish_timeline_test_hours,
+)
 
 
 @pytest.mark.asyncio
@@ -97,7 +100,7 @@ async def test_saved_summary_freshness_allows_hourly_maintenance(
 
 
 @pytest.mark.asyncio
-async def test_saved_hours_partial_boundaries_and_stale_queue(
+async def test_saved_buckets_serve_only_closed_intervals(
     client: AsyncClient,
     app: FastAPI,
     postgresql: Any,
@@ -121,40 +124,27 @@ async def test_saved_hours_partial_boundaries_and_stale_queue(
             value_sum=value,
             sample_count=count,
         )
+    await _publish_timeline_test_hours(postgresql)
     params = {
         "benchmark": "STT",
         "dataset": "stt-v2",
         "since": (start + dt.timedelta(minutes=15)).isoformat(),
         "until": (start + dt.timedelta(minutes=135)).isoformat(),
     }
-    assert (await client.get("/v1/results/timeline", params=params)).status_code == 503
-    # Only the complete middle hour needs a saved state; no summary is required.
-    await refresh_hourly_aggregates(app.state.pool, hours=[start + dt.timedelta(hours=1)])
     response = await client.get("/v1/results/timeline", params=params)
     assert response.status_code == 200, response.text
     body = response.json()
-    assert [p["value"] for p in body["points"]] == [10, 16, 30]
-    assert [p["sample_count"] for p in body["points"]] == [1, 5, 1]
-    assert body["materialization"]["stale"] is False
-    assert dt.datetime.fromisoformat(body["latest_source_at"]) == start + dt.timedelta(hours=2)
-    async with app.state.pool.connection() as conn:
-        await conn.execute(
-            "INSERT INTO benchmarks_v2.dashboard_source_refreshes(bucket_at) VALUES (%s)",
-            (start + dt.timedelta(minutes=30),),
-        )
-    stale = (await client.get("/v1/results/timeline", params=params)).json()
-    assert stale["materialization"]["stale"] is True
-    # Both partial boundaries inside one hour must read each source once.
+    # Only the hour that lies wholly inside the bounds is served; no partial reads.
+    assert [p["value"] for p in body["points"]] == [16]
+    assert [p["sample_count"] for p in body["points"]] == [5]
+    assert dt.datetime.fromisoformat(body["latest_source_at"]) == start + dt.timedelta(minutes=90)
+    assert "materialization" not in body
     narrow = await client.get(
         "/v1/results/timeline",
-        params={**params, "until": (start + dt.timedelta(minutes=45)).isoformat()},
+        params={**params, "until": (start + dt.timedelta(minutes=105)).isoformat()},
     )
     assert narrow.status_code == 200, narrow.text
-    assert [p["value"] for p in narrow.json()["points"]] == [10]
-    assert narrow.json()["materialization"] == {"refreshed_at": None, "stale": True}
-    async with app.state.pool.connection() as conn:
-        await conn.execute("UPDATE benchmarks_v2.dashboard_hourly_state SET refreshed_at=NULL")
-    assert (await client.get("/v1/results/timeline", params=params)).status_code == 503
+    assert narrow.json()["points"] == []
 
 
 @pytest.mark.asyncio

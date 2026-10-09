@@ -35,8 +35,6 @@ import structlog
 from cachetools import TTLCache
 from fastapi import APIRouter, Depends, HTTPException, Query
 from posthog import Posthog
-from psycopg import AsyncConnection
-from psycopg import errors as psycopg_errors
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
@@ -73,8 +71,6 @@ from coval_bench.api.schemas import (
     TimelineResponse,
 )
 from coval_bench.config import DATASET_ALL, Settings
-from coval_bench.db.dashboard_contracts import DEFINITION_REVISION, aggregation_fingerprint
-from coval_bench.db.dashboard_hourly import floor_hour
 from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
 from coval_bench.registries import (
     METRIC_SPECS,
@@ -197,91 +193,6 @@ _SAVED_STATS_BY_DATASET_SQL_TEMPLATE = _STATS_BY_DATASET_SQL_TEMPLATE.replace(
     " FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id",
 )
 
-_WER_SPLIT_COMPLETE = (
-    "COUNT(wer_insertions_pct) = COUNT(*) AND COUNT(wer_deletions_pct) = COUNT(*)"
-    " AND COUNT(wer_substitutions_pct) = COUNT(*)"
-)
-_WER_COUNTS_COMPLETE = (
-    "COUNT(reference_words) = COUNT(*) AND COUNT(substitution_count) = COUNT(*)"
-    " AND COUNT(deletion_count) = COUNT(*) AND COUNT(insertion_count) = COUNT(*)"
-)
-
-
-def _pooled(counts: str) -> str:
-    return (
-        f"CASE WHEN {_WER_COUNTS_COMPLETE}"
-        f" THEN (100 * SUM({counts}) / NULLIF(SUM(reference_words), 0))::float8 END"
-    )
-
-
-def _mean_split(column: str) -> str:
-    return f"CASE WHEN {_WER_SPLIT_COMPLETE} THEN AVG({column})::float8 END"
-
-
-_POOLED_TOTAL = _pooled("substitution_count + deletion_count + insertion_count")
-
-# Successful evaluations project their immutable values in the completion
-# transaction. Observation/run metadata and time boundaries remain live. TTFA
-# components expand once here, including evaluations without a literal primary key.
-_NORMALIZED_STATS_SQL = f"""
-WITH evaluations AS (
- SELECT o.provider, o.model, o.dataset_id, m.id AS metric_id, m.code AS metric_type,
-        e.value, e.roundtrip, e.leading_silence,
-        e.wer_insertions_pct, e.wer_deletions_pct, e.wer_substitutions_pct,
-        e.substitution_count, e.deletion_count, e.insertion_count, e.reference_words
- FROM benchmarks_v2.dashboard_metric_values e
-JOIN benchmarks_v2.metrics m
-   ON m.id = e.metric_id
- JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
- JOIN benchmarks_v2.runs r ON r.id = o.run_id
- WHERE o.status = 'succeeded' AND r.status IN ('succeeded', 'partial')
-   AND e.metric_version = 'v1' AND e.evaluation_variant = 'default'
-   AND o.benchmark = %(benchmark)s
-   AND o.captured_at >= NOW() - %(interval)s::interval
-   AND (%(dataset)s = '__all__' OR o.dataset_id = %(dataset)s)
-), public_values AS (
- SELECT e.provider, e.model, e.dataset_id, p.metric_id, public_metric.code AS metric_type, p.value,
-        p.wer_insertions_pct, p.wer_deletions_pct, p.wer_substitutions_pct,
-        p.substitution_count, p.deletion_count, p.insertion_count, p.reference_words
- FROM evaluations e
- CROSS JOIN LATERAL (VALUES
-   (e.metric_id, e.metric_type, e.value, e.wer_insertions_pct, e.wer_deletions_pct,
-    e.wer_substitutions_pct, e.substitution_count, e.deletion_count,
-    e.insertion_count, e.reference_words),
-   (benchmarks_v2.metric_id_for_code('TTFARoundtrip'), 'TTFARoundtrip',
-    CASE WHEN e.metric_type = 'TTFA' THEN e.roundtrip END,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL),
-   (benchmarks_v2.metric_id_for_code('TTFALeadingSilence'), 'TTFALeadingSilence',
-    CASE WHEN e.metric_type = 'TTFA' THEN e.leading_silence END,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL)
- ) AS p(metric_id, metric_type, value, wer_insertions_pct, wer_deletions_pct,
-        wer_substitutions_pct, substitution_count, deletion_count,
-        insertion_count, reference_words)
- JOIN benchmarks_v2.metrics public_metric ON public_metric.id = p.metric_id
- WHERE p.value IS NOT NULL
-)
-SELECT provider, model, metric_type, AVG(value)::float8 AS mean_value,
- COALESCE({_POOLED_TOTAL}, AVG(value))::float8 AS avg_value,
- COALESCE(STDDEV_SAMP(value), 0)::float8 AS stddev_value,
- PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY value)::float8 AS p25,
- PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY value)::float8 AS p50,
- PERCENTILE_CONT(.75) WITHIN GROUP (ORDER BY value)::float8 AS p75,
- PERCENTILE_CONT(.9) WITHIN GROUP (ORDER BY value)::float8 AS p90,
- PERCENTILE_CONT(.95) WITHIN GROUP (ORDER BY value)::float8 AS p95,
- PERCENTILE_CONT(.99) WITHIN GROUP (ORDER BY value)::float8 AS p99,
- MIN(value)::float8 AS min_value, MAX(value)::float8 AS max_value, COUNT(*)::int AS sample_count,
- COALESCE({_pooled("insertion_count")}, {_mean_split("wer_insertions_pct")}) AS wer_insertions_pct,
- COALESCE({_pooled("deletion_count")}, {_mean_split("wer_deletions_pct")}) AS wer_deletions_pct,
- COALESCE({_pooled("substitution_count")}, {_mean_split("wer_substitutions_pct")})
-   AS wer_substitutions_pct,
- {_POOLED_TOTAL} AS pooled_value,
- {_pooled("insertion_count")} AS pooled_insertions_pct,
- {_pooled("deletion_count")} AS pooled_deletions_pct,
- {_pooled("substitution_count")} AS pooled_substitutions_pct
-FROM public_values
-GROUP BY provider, model, metric_id, metric_type ORDER BY provider, model, metric_type
-"""  # noqa: S608
-
 _NORMALIZED_DATASETS_SQL = """
 SELECT DISTINCT dataset_id
 FROM {view}
@@ -290,21 +201,6 @@ WHERE benchmark = %(benchmark)s
   AND primary_sample_count > 0
 ORDER BY dataset_id
 """
-
-_NORMALIZED_STATS_BY_DATASET_SQL = (
-    _NORMALIZED_STATS_SQL.replace(
-        "   AND (%(dataset)s = '__all__' OR o.dataset_id = %(dataset)s)\n", ""
-    )
-    .replace(
-        "GROUP BY provider, model, metric_id, metric_type ORDER BY provider, model, metric_type",
-        "GROUP BY dataset_id, provider, model, metric_id, metric_type "
-        "ORDER BY dataset_id, provider, model, metric_type",
-    )
-    .replace(
-        "SELECT provider, model, metric_type, AVG(value)::float8 AS mean_value",
-        "SELECT dataset_id, provider, model, metric_type, AVG(value)::float8 AS mean_value",
-    )
-)
 
 # Pooled WER needs all four count rows covering the same clips as the primary row.
 _BUCKET_COUNTS_COMPLETE = "COUNT(*) = 5 AND MIN(sample_count) = MAX(sample_count)"
@@ -377,8 +273,11 @@ WITH rules AS (
  )
 ), source AS (
 """
-_NORMALIZED_AVERAGE_SOURCE_SQL = """
+# Full 1h/4h buckets are read exactly as the hourly fill wrote them. A bucket
+# that has not closed yet is simply absent, so the newest interval lags by one.
+_NORMALIZED_SAVED_AVERAGE_SOURCE_SQL = """
  SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS source_at,
+        MAX(b.latest_source_at) AS latest_source_at,
         r.method, r.fallback, r.scale,
         MAX(b.value_sum) FILTER (WHERE b.value_key = 'primary') AS primary_sum,
         MAX(b.sample_count) FILTER (WHERE b.value_key = 'primary') AS sample_count,
@@ -387,59 +286,13 @@ _NORMALIZED_AVERAGE_SOURCE_SQL = """
         (COUNT(*) = cardinality(r.numerator_keys) + 2
          AND MIN(b.sample_count) = MAX(b.sample_count)
          AND BOOL_AND(b.unit = r.units ->> b.value_key)) AS complete
- FROM benchmarks_v2.metric_values_by_bucket b
- JOIN benchmarks_v2.metrics m
-   ON m.id = b.metric_id
- JOIN rules r ON r.metric_type = m.code AND r.metric_version = b.metric_version
- WHERE b.evaluation_variant = 'default'
-   AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
-   AND b.bucket_at >= %(since)s AND b.bucket_at < %(until)s
-   AND (b.value_key = 'primary' OR b.value_key = ANY(r.numerator_keys)
-        OR b.value_key = r.denominator_key)
- GROUP BY b.provider, b.model, m.code, b.bucket_at,
-          r.method, r.fallback, r.scale, r.numerator_keys
- HAVING COUNT(*) FILTER (WHERE b.value_key = 'primary') = 1
-    AND COUNT(*) FILTER (WHERE b.value_key = 'primary'
-                         AND b.unit = r.units ->> 'primary') = 1
-"""
-
-# Full UTC hours use the writer-maintained sufficient statistics.  The two raw
-# branches are deliberately restricted to the partial boundary hours, so a
-# boundary is never counted again after its hourly row is published.
-_NORMALIZED_SAVED_AVERAGE_SOURCE_SQL = """
- SELECT h.provider, h.model, m.code AS metric_type, h.latest_source_at AS source_at,
-        r.method, r.fallback, r.scale, h.primary_sum, h.sample_count,
-        h.numerator_sum AS numerator, h.denominator_sum AS denominator,
-        h.coverage_complete AS complete
- FROM benchmarks_v2.dashboard_hourly_aggregates h
- JOIN benchmarks_v2.metrics m ON m.id = h.metric_id
- JOIN rules r ON r.metric_type = m.code AND r.metric_version = h.metric_version
- WHERE h.benchmark = %(benchmark)s AND h.dataset_id = %(dataset)s
-   AND h.evaluation_variant = 'default'
-   AND h.hour_at >= date_trunc('hour', %(since)s::timestamptz, 'UTC')
-       + CASE WHEN %(since)s::timestamptz = date_trunc('hour', %(since)s::timestamptz, 'UTC')
-              THEN interval '0' ELSE interval '1 hour' END
-   AND h.hour_at + interval '1 hour' <= %(until)s::timestamptz
- UNION ALL
- SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS source_at,
-        r.method, r.fallback, r.scale,
-        MAX(b.value_sum) FILTER (WHERE b.value_key = 'primary'),
-        MAX(b.sample_count) FILTER (WHERE b.value_key = 'primary'),
-        SUM(b.value_sum) FILTER (WHERE b.value_key = ANY(r.numerator_keys)),
-        SUM(b.value_sum) FILTER (WHERE b.value_key = r.denominator_key),
-        (COUNT(*) = cardinality(r.numerator_keys) + 2
-         AND MIN(b.sample_count) = MAX(b.sample_count)
-         AND BOOL_AND(b.unit = r.units ->> b.value_key))
- FROM benchmarks_v2.metric_values_by_bucket b
- JOIN benchmarks_v2.metrics m
-   ON m.id = b.metric_id
+ FROM benchmarks_v2.dashboard_bucket_aggregates b
+ JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
  JOIN rules r ON r.metric_type = m.code AND r.metric_version = b.metric_version
  WHERE b.evaluation_variant = 'default' AND b.benchmark = %(benchmark)s
-   AND b.dataset_id = %(dataset)s AND b.bucket_at >= %(since)s AND b.bucket_at < %(until)s
-   AND ((%(since)s::timestamptz > date_trunc('hour', %(since)s::timestamptz, 'UTC')
-         AND b.bucket_at < date_trunc('hour', %(since)s::timestamptz, 'UTC') + interval '1 hour')
-        OR (%(until)s::timestamptz > date_trunc('hour', %(until)s::timestamptz, 'UTC')
-            AND b.bucket_at >= date_trunc('hour', %(until)s::timestamptz, 'UTC')))
+   AND b.dataset_id = %(dataset)s AND b.interval_seconds = %(bucket_seconds)s
+   AND b.bucket_at >= %(since)s
+   AND b.bucket_at + b.interval_seconds * interval '1 second' <= %(until)s
    AND (b.value_key = 'primary' OR b.value_key = ANY(r.numerator_keys)
         OR b.value_key = r.denominator_key)
  GROUP BY b.provider, b.model, m.code, b.bucket_at,
@@ -449,7 +302,7 @@ _NORMALIZED_SAVED_AVERAGE_SOURCE_SQL = """
 """
 _LEGACY_AVERAGE_SOURCE_SQL = """
  SELECT b.provider, b.model, b.metric_type, b.bucket_at AS source_at,
-        r.method, r.fallback, r.scale,
+        b.bucket_at AS latest_source_at, r.method, r.fallback, r.scale,
         b.value_sum AS primary_sum, b.sample_count,
         NULL::float8 AS numerator, NULL::float8 AS denominator, FALSE AS complete
  FROM benchmarks_v2.results_by_bucket b
@@ -463,7 +316,7 @@ _TIMELINE_AVERAGE_TAIL_SQL = """
         to_timestamp(floor(extract(epoch FROM source_at) / %(bucket_seconds)s)
                      * %(bucket_seconds)s) AS scheduled_at,
         SUM(primary_sum)::float8 / NULLIF(SUM(sample_count), 0) AS mean_value,
-        SUM(sample_count) AS sample_count, MAX(source_at) AS latest_source_at,
+        SUM(sample_count) AS sample_count, MAX(latest_source_at) AS latest_source_at,
         CASE WHEN BOOL_AND(complete) AND SUM(denominator) > 0
              THEN scale * SUM(numerator)::float8 / NULLIF(SUM(denominator), 0)
         END AS ratio_value
@@ -482,105 +335,56 @@ SELECT provider, model, metric_type, scheduled_at, sample_count, latest_source_a
 FROM grouped ORDER BY scheduled_at, provider, model, metric_type
 """
 
-_TIMELINE_ALLOWED_BUCKETS = (3600, 7200, 14400, 21600, 43200)
+_TIMELINE_ALLOWED_BUCKETS = (3600, 14400)
 
 _PERCENTILE_METRICS = frozenset(
     {"WER", "TTFT", "TTFS", "AudioToFinal", "TTFA", "TTFARoundtrip", "TTFALeadingSilence", "V2V"}
 )
-_LEGACY_BUCKET_SQL = (
-    "COALESCE(rn.scheduled_at, to_timestamp(floor(extract(epoch FROM r.created_at) / 1800) * 1800))"
-)
+# The dashboard names TTFA's roundtrip and leading-silence parts as if they were
+# metrics; in storage they are value keys on the single TTFA evaluation.
+_PERCENTILE_VALUE_KEYS: dict[str, tuple[str, str]] = {
+    "TTFARoundtrip": ("TTFA", "roundtrip"),
+    "TTFALeadingSilence": ("TTFA", "leading_silence"),
+}
+_PERCENTILE_COLUMNS = {"p50": "b.p50", "p90": "b.p90", "p95": "b.p95"}
 
-# Exact normalized values are read from observations and grouped by a run's
-# schedule slot. Legacy rows retain the existing 30-minute created_at fallback.
-_NORMALIZED_PERCENTILE_SQL = """
-WITH source AS (
- SELECT o.provider, o.model, o.dataset_id, o.benchmark,
-        r.scheduled_at AS source_at,
-        m.code AS metric_type, e.value, e.roundtrip, e.leading_silence
- FROM benchmarks_v2.dashboard_metric_values e
- JOIN benchmarks_v2.metrics m
-   ON m.id = COALESCE(e.metric_id, benchmarks_v2.metric_id_for_code(e.metric_type))
- JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
- JOIN benchmarks_v2.runs r ON r.id = o.run_id
- WHERE o.status = 'succeeded' AND r.status IN ('succeeded', 'partial')
-   AND e.metric_version = 'v1' AND e.evaluation_variant = 'default'
-   AND o.benchmark = %(benchmark)s
-   AND m.code = CASE WHEN %(metric_type)s IN ('TTFARoundtrip', 'TTFALeadingSilence')
-                     THEN 'TTFA' ELSE %(metric_type)s END
-   AND r.scheduled_at IS NOT NULL AND r.scheduled_at >= %(since)s AND r.scheduled_at < %(until)s
-   AND (%(dataset)s = '__all__' OR o.dataset_id = %(dataset)s)
-), observation_values AS (
- SELECT provider, model, source_at,
-        CASE WHEN %(metric_type)s = 'TTFARoundtrip' THEN roundtrip
-             WHEN %(metric_type)s = 'TTFALeadingSilence' THEN leading_silence
-             ELSE value END AS value
- FROM source
-), grouped AS (
- SELECT provider, model, {bucket_expr} AS bucket_at, COUNT(value)::int AS sample_count,
-        MAX(source_at) AS latest_source_at,
-        percentile_cont(%(percentile)s) WITHIN GROUP (ORDER BY value)::float8 AS value
- FROM observation_values
- WHERE value IS NOT NULL AND value NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)
- GROUP BY provider, model, {bucket_expr}
-)
-SELECT provider, model, %(metric_type)s AS metric_type, bucket_at AS scheduled_at,
-       value, sample_count, latest_source_at, 'percentile' AS aggregation_method
-FROM grouped ORDER BY scheduled_at, provider, model
+_RUN_PERCENTILE_SQL = """
+SELECT b.provider, b.model, %(metric_type)s AS metric_type, b.bucket_at AS scheduled_at,
+       {column} AS value, b.sample_count, b.bucket_at AS latest_source_at,
+       'percentile' AS aggregation_method
+FROM benchmarks_v2.metric_values_by_bucket b
+JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
+WHERE b.metric_version = 'v1' AND b.evaluation_variant = 'default'
+  AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
+  AND m.code = %(base_metric)s AND b.value_key = %(value_key)s
+  AND b.bucket_at >= %(since)s AND b.bucket_at < %(until)s
+ORDER BY scheduled_at, provider, model
 """
 
-_LEGACY_PERCENTILE_SQL = """
-WITH source AS (
- SELECT r.provider, r.model, r.metric_type,
-        __LEGACY_BUCKET__ AS source_at,
-        r.metric_value AS value
- FROM benchmarks_v2.results r
- JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
- WHERE r.status = 'success' AND rn.status IN ('succeeded', 'partial')
-   AND r.benchmark = %(benchmark)s AND r.metric_type = %(metric_type)s
-   AND __LEGACY_BUCKET__ >= %(since)s
-   AND __LEGACY_BUCKET__ < %(until)s
-   AND (
-     %(dataset)s = '__all__'
-     OR (CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1' ELSE rn.dataset_id END) = %(dataset)s
-   )
-), grouped AS (
- SELECT provider, model, {bucket_expr} AS bucket_at, COUNT(value)::int AS sample_count,
-        MAX(source_at) AS latest_source_at,
-        percentile_cont(%(percentile)s) WITHIN GROUP (ORDER BY value)::float8 AS value
- FROM source
- WHERE value IS NOT NULL
-   AND value NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)
- GROUP BY provider, model, {bucket_expr}
-)
-SELECT provider, model, %(metric_type)s AS metric_type, bucket_at AS scheduled_at,
-       value, sample_count, latest_source_at, 'percentile' AS aggregation_method
-FROM grouped ORDER BY scheduled_at, provider, model
+_BUCKET_PERCENTILE_SQL = """
+SELECT b.provider, b.model, %(metric_type)s AS metric_type, b.bucket_at AS scheduled_at,
+       {column} AS value, b.sample_count, b.latest_source_at,
+       'percentile' AS aggregation_method
+FROM benchmarks_v2.dashboard_bucket_aggregates b
+JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
+WHERE b.metric_version = 'v1' AND b.evaluation_variant = 'default'
+  AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
+  AND b.interval_seconds = %(bucket_seconds)s
+  AND m.code = %(base_metric)s AND b.value_key = %(value_key)s
+  AND b.bucket_at >= %(since)s
+  AND b.bucket_at + b.interval_seconds * interval '1 second' <= %(until)s
+ORDER BY scheduled_at, provider, model
 """
 
 
 def _timeline_bucket_seconds(duration_seconds: float) -> int:
-    """Choose roughly 200 points with one hour as the finest average interval."""
-    target = max(3600.0, duration_seconds / 200.0)
-    for seconds in _TIMELINE_ALLOWED_BUCKETS:
-        if seconds >= target:
-            return seconds
-    days = (int(target) + 86399) // 86400
-    return days * 86400
+    """Hourly buckets up to roughly 200 points, four-hour buckets beyond that."""
+    return 3600 if duration_seconds / 200.0 <= 3600 else 14400
 
 
-def _exact_percentile_sql(normalized: bool, aggregation: str) -> str:
-    """Render the exact query with a safe, server-selected bucket expression."""
-    bucket_expr = (
-        "source_at"
-        if aggregation == "run"
-        else (
-            "to_timestamp(floor(extract(epoch FROM source_at) / "
-            "%(bucket_seconds)s) * %(bucket_seconds)s)"
-        )
-    )
-    query = _NORMALIZED_PERCENTILE_SQL if normalized else _LEGACY_PERCENTILE_SQL
-    return query.replace("__LEGACY_BUCKET__", _LEGACY_BUCKET_SQL).format(bucket_expr=bucket_expr)
+def _percentile_sql(aggregation: str, statistic: str) -> str:
+    query = _RUN_PERCENTILE_SQL if aggregation == "run" else _BUCKET_PERCENTILE_SQL
+    return query.format(column=_PERCENTILE_COLUMNS[statistic])
 
 
 def _validate_percentile_request(
@@ -619,48 +423,6 @@ def _timeline_average_sql(normalized: bool) -> tuple[str, dict[str, Any]]:
         _TIMELINE_RULES_SQL + source + _TIMELINE_AVERAGE_TAIL_SQL,
         {"aggregation_rules": Jsonb(rules)},
     )
-
-
-async def _hourly_materialization(
-    conn: AsyncConnection[Any], since: dt.datetime, until: dt.datetime
-) -> dict[str, Any] | None:
-    """Check saved full-hour coverage in the caller's repeatable-read snapshot."""
-    first = floor_hour(since)
-    full_start = first if since == first else first + dt.timedelta(hours=1)
-    full_end = floor_hour(until)
-    row = await (
-        await conn.execute(
-            """SELECT COUNT(*) AS expected,
-                  COUNT(s.refreshed_at) AS present,
-                  COALESCE(BOOL_OR(s.dirty), false) AS dirty,
-                  MIN(s.refreshed_at) AS refreshed_at
-           FROM generate_series(%(start)s::timestamptz,
-                                %(end)s::timestamptz - interval '1 hour',
-                                interval '1 hour') g(hour_at)
-           LEFT JOIN benchmarks_v2.dashboard_hourly_state s
-             ON s.hour_at=g.hour_at AND s.definition_revision=%(revision)s
-            AND s.definition_fingerprint=%(fingerprint)s""",
-            {
-                "start": full_start,
-                "end": full_end,
-                "revision": DEFINITION_REVISION,
-                "fingerprint": aggregation_fingerprint(),
-            },
-        )
-    ).fetchone()
-    if row is None or row["present"] != row["expected"]:
-        raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready")
-    queued = await (
-        await conn.execute(
-            """SELECT EXISTS (SELECT 1 FROM benchmarks_v2.dashboard_source_refreshes
-             WHERE bucket_at >= %(since)s AND bucket_at < %(until)s) AS pending""",
-            {"since": since, "until": until},
-        )
-    ).fetchone()
-    return {
-        "refreshed_at": row["refreshed_at"],
-        "stale": bool(row["dirty"]) or bool(queued and queued["pending"]),
-    }
 
 
 def _visible(row: dict[str, Any], hidden: frozenset[tuple[str, str]]) -> bool:
@@ -868,11 +630,13 @@ async def get_results_timeline(
 
     async def fill() -> TimelineResponse:
         normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
-        materialization = None
         rule_params: dict[str, Any] = {}
         if statistic != "default":
-            sql = _exact_percentile_sql(normalized, aggregation)
-            rule_params = {"percentile": {"p50": 0.5, "p90": 0.9, "p95": 0.95}[statistic]}
+            sql = _percentile_sql(aggregation, statistic)
+            base_metric, value_key = _PERCENTILE_VALUE_KEYS.get(
+                metric_type or "", (metric_type, "primary")
+            )
+            rule_params = {"base_metric": base_metric, "value_key": value_key}
         elif aggregation == "run":
             sql = _NORMALIZED_TIMELINE_SQL if normalized else _TIMELINE_SQL
         else:
@@ -893,19 +657,9 @@ async def get_results_timeline(
             "metric_type": metric_type,
         }
         params.update(rule_params)
-        async with dashboard_read(pool, saved=normalized) as conn:
-            if normalized and aggregation == "average" and statistic == "default":
-                materialization = await _hourly_materialization(conn, since, until)
-            try:
-                if statistic != "default":
-                    await conn.execute("SET LOCAL statement_timeout = '5s'")
-                rows = await (await conn.execute(sql, params)).fetchall()
-            except psycopg_errors.QueryCanceled as exc:
-                if statistic == "default":
-                    raise
-                raise HTTPException(
-                    status_code=503, detail="timeline_percentile_unavailable"
-                ) from exc
+        # Percentiles only exist in normalized storage, whatever the read flag says.
+        async with dashboard_read(pool, saved=normalized or statistic != "default") as conn:
+            rows = await (await conn.execute(sql, params)).fetchall()
         visible_rows = [
             row
             for row in rows
@@ -947,7 +701,6 @@ async def get_results_timeline(
                 (row.get("latest_source_at", row.get("scheduled_at")) for row in visible_rows),
                 default=None,
             ),
-            materialization=materialization,
         )
 
     cache_key = (
@@ -964,14 +717,7 @@ async def get_results_timeline(
         settings.normalized_dashboard_reads_enabled,
         tuple(sorted(hidden)),
     )
-    if (
-        statistic == "default"
-        and aggregation == "average"
-        and reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
-    ):
-        response, cache_status = await fill(), "bypass"
-    else:
-        response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
+    response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
     capture_api_event(
         posthog_client,
         "results_timeline_queried",

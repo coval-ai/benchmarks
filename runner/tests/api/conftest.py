@@ -311,6 +311,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
             conn.execute(
                 f"ALTER TABLE benchmarks_v2.{table} VALIDATE CONSTRAINT {table}_metric_id_fkey"
             )  # noqa: S608 — fixed fixture table names.
+        closed_buckets = import_module(
+            "coval_bench.db.migrations.versions.20261008_0044_closed_bucket_rollups"
+        )
+        with patch.object(closed_buckets, "op", SimpleNamespace(execute=conn.execute)):
+            closed_buckets.upgrade()
         # Per-window stats materialized views (model_stats + leaderboard).
         # Mirrors migration 20260715_0010: per-dataset rows plus pooled rows
         # under the '__all__' sentinel, and 20260804_0014's WER breakdown.

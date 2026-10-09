@@ -34,7 +34,6 @@ from google.cloud import storage
 
 from coval_bench.config import get_settings
 from coval_bench.db.dashboard_aggregates import refresh_backfilled_dashboard
-from coval_bench.db.dashboard_source import mark_source_hour_dirty
 from coval_bench.db.metric_definitions import register_metric_definitions_sync
 from coval_bench.observation_artifacts import (
     prepare_provider_transcript,
@@ -1560,7 +1559,6 @@ def _insert_plan(
 
 def _refresh_bucket(cur: psycopg.Cursor[tuple[Any, ...]], bucket_at: datetime) -> None:
     """Refresh only STT/TTS rows; S2S owns its independent rollup population."""
-    mark_source_hour_dirty(cur, bucket_at)
     params = {"bucket": bucket_at}
     cur.execute(
         "SELECT pg_advisory_xact_lock(hashtextextended('metric_values_by_bucket', extract(epoch FROM %(bucket)s::timestamptz)::bigint))",

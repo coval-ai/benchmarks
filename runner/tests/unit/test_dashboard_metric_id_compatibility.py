@@ -34,7 +34,7 @@ from coval_bench.db.writer import RunWriter
 
 from . import test_normalized_db_writer as writer_seed
 from .conftest import async_dsn, open_pool
-from .test_dashboard_hourly import _bucket
+from .test_dashboard_buckets import _bucket
 
 metric_ids_pg = postgresql("pg_proc")
 _HOUR = datetime(2026, 9, 14, 12, tzinfo=UTC)
@@ -42,7 +42,6 @@ _AS_OF = _HOUR + timedelta(hours=1)
 _VIEWS = tuple(f"normalized_results_{window}" for window in ("24h", "7d", "30d"))
 _RETAINED = (
     "dashboard_hourly_state",
-    "dashboard_source_refreshes",
     "runs",
     "benchmark_observations",
     "metric_evaluations",

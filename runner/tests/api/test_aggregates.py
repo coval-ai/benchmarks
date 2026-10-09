@@ -28,11 +28,10 @@ from coval_bench.api.common import (
 from coval_bench.api.routers.aggregates import (
     _NORMALIZED_DATASETS_SQL,
     _NORMALIZED_SERIES_SQL,
-    _NORMALIZED_STATS_BY_DATASET_SQL,
-    _NORMALIZED_STATS_SQL,
     _NORMALIZED_TIMELINE_SQL,
     _timeline_bucket_seconds,
 )
+from coval_bench.db.dashboard_buckets import BUCKET_INTERVALS, fill_bucket
 from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
 from coval_bench.db.metric_definitions import register_metric_definitions
 from coval_bench.registries import METRIC_SPECS, TIMELINE_AGGREGATION_RULES, Metric
@@ -189,8 +188,6 @@ def test_normalized_query_constants_start_with_sql() -> None:
     """Comments beside triple-quote openers must not become literal SQL."""
     for query in (
         _NORMALIZED_DATASETS_SQL,
-        _NORMALIZED_STATS_SQL,
-        _NORMALIZED_STATS_BY_DATASET_SQL,
         _NORMALIZED_SERIES_SQL,
         _NORMALIZED_TIMELINE_SQL,
     ):
@@ -442,27 +439,6 @@ async def test_dataset_filter_splits_and_default_pools(
     ).json()
     assert missing["model_stats"] == []
     assert missing["datasets"] == ["stt-v1", "stt-v3"]
-
-
-async def test_normalized_raw_dataset_query_resolves_metric_ids(postgresql: Any) -> None:
-    from coval_bench.api.routers.aggregates import _NORMALIZED_STATS_BY_DATASET_SQL
-    from tests.api.conftest import _make_db_url
-
-    run_id = await _insert_run(postgresql, dataset_id="stt-v2")
-    await _insert_normalized_wer(postgresql, run_id, dataset_id="stt-v2", value=6.0)
-    async with (
-        await psycopg.AsyncConnection.connect(_make_db_url(postgresql)) as conn,
-        conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
-    ):
-        await cur.execute(
-            _NORMALIZED_STATS_BY_DATASET_SQL,
-            {"benchmark": "STT", "interval": "7 days"},
-        )
-        rows = await cur.fetchall()
-    assert len(rows) == 1
-    assert rows[0]["dataset_id"] == "stt-v2"
-    assert rows[0]["metric_type"] == "WER"
-    assert rows[0]["avg_value"] == pytest.approx(6.0)
 
 
 async def test_normalized_dashboard_reads_are_flagged_and_pool_datasets(
@@ -1542,11 +1518,11 @@ async def test_include_series_cache_variants_do_not_cross_serve(
 
 
 def test_timeline_bucket_chooser_is_smallest_supported_interval() -> None:
-    """Adaptive ranges stay at or below roughly 200 points without tiny buckets."""
+    """Hourly buckets until 200 points would be exceeded, then the four-hour rollup."""
     assert _timeline_bucket_seconds(1) == 3600
     assert _timeline_bucket_seconds(200 * 3600) == 3600
-    assert _timeline_bucket_seconds(201 * 3600) == 7200
-    assert _timeline_bucket_seconds(200 * 86400) == 86400
+    assert _timeline_bucket_seconds(201 * 3600) == 14400
+    assert _timeline_bucket_seconds(30 * 86400) == 14400
 
 
 async def test_timeline_rejects_invalid_custom_bounds(client: AsyncClient) -> None:
@@ -1619,7 +1595,7 @@ async def test_timeline_historical_bounds_groups_cache_and_visibility(
         METRIC_SPECS[Metric.TTFS].model_copy(update={"display_name": "Future metric"}),
     )
     app.state.settings.normalized_dashboard_reads_enabled = normalized
-    start = datetime(2026, 1, 1, 0, 30, tzinfo=dt.UTC)
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=dt.UTC)
     end = start + timedelta(days=7)
     rows = [
         ("nova-3", "TTFS", "__all__", start - timedelta(seconds=1), 1000, 1),
@@ -1850,7 +1826,7 @@ async def test_normalized_timeline_uses_registered_phonetic_ratio(
         (start + timedelta(hours=5), [("primary", 80, 1), ("correct", 8, 2), ("reference", 10, 1)]),
         (
             start + timedelta(hours=5, minutes=15),
-            [("primary", 160, 2), ("correct", 16, 1), ("reference", 20, 2)],
+            [("primary", 160, 2), ("correct", 16, 2), ("reference", 20, 2)],
         ),
     ]
     async with await psycopg.AsyncConnection.connect(
@@ -2027,7 +2003,12 @@ async def test_timeline_ratio_without_fallback_is_unavailable_on_either_storage_
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = normalized
     if normalized:
-        await _insert_normalized_bucket(postgresql, dataset_id="__all__")
+        await _insert_normalized_bucket(
+            postgresql,
+            dataset_id="__all__",
+            bucket_at=datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
+            - timedelta(hours=2),
+        )
     else:
         run_id = await _insert_run(postgresql, scheduled_at=datetime.now(dt.UTC))
         await _insert_result(postgresql, run_id, metric_value=3)
@@ -2041,9 +2022,37 @@ async def test_timeline_ratio_without_fallback_is_unavailable_on_either_storage_
     assert point["sample_count"] > 0
 
 
+_MERGE_SOURCE_ROWS_SQL = """
+INSERT INTO benchmarks_v2.dashboard_bucket_aggregates
+(provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
+ value_key, unit, interval_seconds, bucket_at, min_value, p25, p50, p75, p90, p95,
+ max_value, value_sum, sample_count, latest_source_at)
+SELECT provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
+       value_key, MAX(unit), %(interval)s,
+       to_timestamp(floor(extract(epoch FROM bucket_at) / %(interval)s) * %(interval)s),
+       MIN(min_value), MIN(p25), MIN(p50), MAX(p75), MAX(p75), MAX(p75), MAX(max_value),
+       SUM(value_sum), SUM(sample_count)::int, MAX(bucket_at)
+FROM benchmarks_v2.metric_values_by_bucket
+GROUP BY provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
+         value_key,
+         to_timestamp(floor(extract(epoch FROM bucket_at) / %(interval)s) * %(interval)s)
+"""
+
+
 async def _publish_timeline_test_hours(postgresql: Any) -> None:
-    """Prepare occupied and empty hours before testing saved timeline readers."""
-    from coval_bench.db.dashboard_hourly import floor_hour, refresh_hourly_aggregates
+    """Roll seeded per-run source rows into every 1h/4h bucket, closed or not."""
+    from tests.api.conftest import _make_db_url
+
+    async with await psycopg.AsyncConnection.connect(
+        _make_db_url(postgresql), autocommit=True
+    ) as conn:
+        await conn.execute("TRUNCATE benchmarks_v2.dashboard_bucket_aggregates")
+        for interval in BUCKET_INTERVALS:
+            await conn.execute(_MERGE_SOURCE_ROWS_SQL, {"interval": interval})
+
+
+async def _fill_timeline_buckets(postgresql: Any) -> None:
+    """Fill every 1h/4h bucket containing a scheduled run from its raw observations."""
     from tests.api.conftest import _make_db_url
 
     async with AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]](
@@ -2054,36 +2063,37 @@ async def _publish_timeline_test_hours(postgresql: Any) -> None:
         kwargs={"row_factory": psycopg.rows.dict_row},
     ) as pool:
         async with pool.connection() as conn:
-            bounds = await (
+            rows = await (
                 await conn.execute(
-                    "SELECT min(bucket_at) AS first, max(bucket_at) AS last "
-                    "FROM benchmarks_v2.metric_values_by_bucket"
+                    "SELECT DISTINCT scheduled_at FROM benchmarks_v2.runs"
+                    " WHERE scheduled_at IS NOT NULL"
                 )
-            ).fetchone()
-        assert bounds is not None
-        now = datetime.now(dt.UTC)
-        first = floor_hour(min(now - timedelta(days=30), bounds["first"] or now))
-        last = floor_hour(max(now + timedelta(days=1), bounds["last"] or now))
-        hours = [
-            first + timedelta(hours=i)
-            for i in range(int((last - first).total_seconds() / 3600) + 1)
-        ]
-        await refresh_hourly_aggregates(pool, hours=hours)
+            ).fetchall()
+        for row in rows:
+            for interval in BUCKET_INTERVALS:
+                await fill_bucket(pool, interval_seconds=interval, bucket_at=row["scheduled_at"])
 
 
 async def test_exact_percentiles_are_observation_weighted_and_metadata_rich(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    """Percentiles use every eligible legacy observation, rather than run medians."""
+    """Percentiles use every eligible observation in the bucket, rather than run medians."""
     scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
-    # Two distinct source slots fall in one hourly output interval, with
-    # unequal sample counts. Averaging their medians would incorrectly give 5.
+    # Two distinct run slots fall in one hourly bucket, with unequal sample
+    # counts. Averaging their medians would incorrectly give 5.
     for offset, values in ((5, (1.0,)), (35, (9.0, 9.0, 9.0))):
         run_id = await _insert_run(
             postgresql, scheduled_at=scheduled - timedelta(hours=1) + timedelta(minutes=offset)
         )
         for value in values:
-            await _insert_result(postgresql, run_id, metric_type="TTFT", metric_value=value)
+            await _insert_normalized_metric(
+                postgresql,
+                run_id,
+                dataset_id="stt-v1",
+                metric_type="TTFT",
+                values={"primary": value},
+            )
+    await _fill_timeline_buckets(postgresql)
 
     for statistic, expected in (("p50", 9.0), ("p90", 9.0), ("p95", 9.0)):
         response = await client.get(
@@ -2108,10 +2118,9 @@ async def test_exact_percentiles_are_observation_weighted_and_metadata_rich(
         assert body["points"][0]["insufficient_samples"] is True
 
 
-@pytest.mark.parametrize("normalized", [False, True])
 @pytest.mark.parametrize("window,bucket_seconds", [("7d", 3600), ("30d", 14400)])
 async def test_exact_percentile_preserves_latest_source_timestamp(
-    client: AsyncClient, postgresql: Any, normalized: bool, window: str, bucket_seconds: int
+    client: AsyncClient, postgresql: Any, window: str, bucket_seconds: int
 ) -> None:
     now = datetime.now(dt.UTC)
     bucket_start = now.replace(
@@ -2121,17 +2130,10 @@ async def test_exact_percentile_preserves_latest_source_timestamp(
         run_id = await _insert_run(
             postgresql, scheduled_at=bucket_start + timedelta(minutes=offset)
         )
-        if normalized:
-            await _insert_normalized_metric(
-                postgresql,
-                run_id,
-                dataset_id="stt-v1",
-                metric_type="TTFT",
-                values={"primary": value},
-            )
-        else:
-            await _insert_result(postgresql, run_id, metric_type="TTFT", metric_value=value)
-    client._transport.app.state.settings.normalized_dashboard_reads_enabled = normalized  # type: ignore[attr-defined]
+        await _insert_normalized_metric(
+            postgresql, run_id, dataset_id="stt-v1", metric_type="TTFT", values={"primary": value}
+        )
+    await _fill_timeline_buckets(postgresql)
 
     response = await client.get(
         "/v1/results/timeline",
@@ -2190,7 +2192,7 @@ async def test_timeline_echoes_metric_type_for_empty_results_and_cached_repeats(
 async def test_exact_percentile_reads_normalized_observations_and_excludes_null_schedule(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
+    scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
     included = await _insert_run(postgresql, scheduled_at=scheduled)
     await _insert_normalized_metric(
         postgresql,
@@ -2207,7 +2209,7 @@ async def test_exact_percentile_reads_normalized_observations_and_excludes_null_
         metric_type="TTFT",
         values={"primary": 999.0},
     )
-    client._transport.app.state.settings.normalized_dashboard_reads_enabled = True  # type: ignore[attr-defined]
+    await _fill_timeline_buckets(postgresql)
     response = await client.get(
         "/v1/results/timeline",
         params={"benchmark": "STT", "window": "7d", "statistic": "p95", "metric_type": "TTFT"},
@@ -2222,7 +2224,7 @@ async def test_exact_percentile_reads_normalized_observations_and_excludes_null_
 async def test_exact_wer_percentile_does_not_pool_reference_words(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
+    scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
     for value, substitutions, references in ((10.0, 1.0, 10.0), (90.0, 90.0, 100.0)):
         run_id = await _insert_run(postgresql, scheduled_at=scheduled)
         await _insert_normalized_metric(
@@ -2238,7 +2240,7 @@ async def test_exact_wer_percentile_does_not_pool_reference_words(
                 "reference_words": references,
             },
         )
-    client._transport.app.state.settings.normalized_dashboard_reads_enabled = True  # type: ignore[attr-defined]
+    await _fill_timeline_buckets(postgresql)
     response = await client.get(
         "/v1/results/timeline",
         params={"benchmark": "STT", "window": "7d", "statistic": "p50", "metric_type": "WER"},
@@ -2268,7 +2270,7 @@ async def test_exact_normalized_ttfa_components_use_parent_observations(
                 "leading_silence": silence,
             },
         )
-    client._transport.app.state.settings.normalized_dashboard_reads_enabled = True  # type: ignore[attr-defined]
+    await _fill_timeline_buckets(postgresql)
     for metric_type, expected in (("TTFARoundtrip", 5.0), ("TTFALeadingSilence", 4.0)):
         response = await client.get(
             "/v1/results/timeline",
@@ -2295,10 +2297,20 @@ async def test_exact_percentile_runtime_matrix_and_cache_identity(
     now = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
     inside = await _insert_run(postgresql, scheduled_at=now - timedelta(hours=1))
     outside = await _insert_run(postgresql, scheduled_at=now - timedelta(days=2))
-    await _insert_result(postgresql, inside, metric_type="TTFT", metric_value=0.0)
-    await _insert_result(postgresql, inside, metric_type="TTFT", metric_value=10.0)
-    await _insert_result(postgresql, inside, metric_type="WER", metric_value=40.0)
-    await _insert_result(postgresql, outside, metric_type="TTFT", metric_value=999.0)
+    for run_id, metric_type, value in (
+        (inside, "TTFT", 0.0),
+        (inside, "TTFT", 10.0),
+        (inside, "WER", 40.0),
+        (outside, "TTFT", 999.0),
+    ):
+        await _insert_normalized_metric(
+            postgresql,
+            run_id,
+            dataset_id="stt-v1",
+            metric_type=metric_type,
+            values={"primary": value},
+        )
+    await _fill_timeline_buckets(postgresql)
 
     responses = {}
     for statistic, expected in (("p50", 5.0), ("p95", 9.5)):
@@ -2347,16 +2359,17 @@ async def test_exact_percentile_runtime_matrix_and_cache_identity(
 async def test_exact_percentile_ttfa_component_and_hidden_model_filter(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
+    scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
     run_id = await _insert_run(postgresql, scheduled_at=scheduled)
-    await _insert_result(postgresql, run_id, benchmark="TTS", metric_type="TTFA", metric_value=30.0)
-    await _insert_result(
+    await _insert_normalized_metric(
         postgresql,
         run_id,
+        dataset_id="tts-v1",
         benchmark="TTS",
-        metric_type="TTFARoundtrip",
-        metric_value=12.0,
+        metric_type="TTFA",
+        values={"primary": 30.0, "roundtrip": 12.0, "leading_silence": 18.0},
     )
+    await _fill_timeline_buckets(postgresql)
     component = await client.get(
         "/v1/results/timeline",
         params={
@@ -2387,32 +2400,6 @@ async def test_exact_percentile_ttfa_component_and_hidden_model_filter(
         assert hidden.json()["points"] == []
     finally:
         app.dependency_overrides.pop(hidden_early_access, None)
-
-
-async def test_exact_percentile_timeout_never_falls_back_to_default(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    original_execute = psycopg.AsyncConnection.execute
-
-    async def cancel_percentile(
-        conn: psycopg.AsyncConnection[Any], query: Any, *args: Any, **kwargs: Any
-    ) -> Any:
-        if isinstance(query, str) and "percentile_cont(%(percentile)s)" in query:
-            raise psycopg.errors.QueryCanceled("synthetic timeout")
-        return await original_execute(conn, query, *args, **kwargs)
-
-    params = {"benchmark": "STT", "statistic": "p95", "metric_type": "TTFT"}
-    with monkeypatch.context() as patch:
-        patch.setattr(psycopg.AsyncConnection, "execute", cancel_percentile)
-        response = await client.get("/v1/results/timeline", params=params)
-    assert response.status_code == 503
-    assert response.json() == {"detail": "timeline_percentile_unavailable"}
-    app = client._transport.app  # type: ignore[attr-defined]
-    # The shared cache briefly coalesces failures; clear it to retry the query.
-    app.state.response_cache.clear()
-    recovered = await client.get("/v1/results/timeline", params=params)
-    assert recovered.status_code == 200
-    assert recovered.json()["statistic"] == "p95"
 
 
 @pytest.mark.parametrize(

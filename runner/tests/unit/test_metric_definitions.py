@@ -3,7 +3,6 @@
 """Metric identities retain references without changing raw metric codes."""
 
 import asyncio
-from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, cast
 
@@ -11,28 +10,25 @@ import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
 
-from coval_bench.db.dashboard_hourly import refresh_hourly_aggregates
 from coval_bench.db.metric_definitions import (
     register_metric_definitions,
-    register_metric_definitions_sync,
 )
 from coval_bench.registries.metrics import (
     METRIC_SPECS,
-    METRIC_VALUE_CONTRACTS,
-    TIMELINE_AGGREGATION_RULES,
     Metric,
 )
 
 from .conftest import apply_migrations, open_pool
-from .test_dashboard_hourly import _bucket
 
 metric_pg = postgresql("pg_proc")
 
-_INSERT_HOURLY = """
-INSERT INTO benchmarks_v2.dashboard_hourly_aggregates
+_INSERT_BUCKET = """
+INSERT INTO benchmarks_v2.dashboard_bucket_aggregates
 (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
- hour_at, primary_sum, sample_count, coverage_complete, source_count, definition_revision)
-VALUES ('p', 'm', 'STT', 'd', %s, %s, %s, '2026-09-14 12:00:00+00', 10, 1, true, 1, 2)
+ value_key, unit, interval_seconds, bucket_at, min_value, p25, p50, p75, p90, p95, max_value,
+ value_sum, sample_count, latest_source_at)
+VALUES ('p', 'm', 'STT', 'd', %s, %s, %s, 'primary', 'percent', 3600, '2026-09-14 12:00:00+00',
+        10, 10, 10, 10, 10, 10, 10, 10, 1, '2026-09-14 12:00:00+00')
 """
 
 
@@ -53,7 +49,7 @@ def test_frozen_seeds_have_generated_ids_and_current_display_names(
     ).fetchone()
     assert identity == ("bigint", "ALWAYS")
     for table in (
-        "dashboard_hourly_aggregates",
+        "dashboard_bucket_aggregates",
         "normalized_results_24h",
         "normalized_results_7d",
         "normalized_results_30d",
@@ -63,7 +59,8 @@ def test_frozen_seeds_have_generated_ids_and_current_display_names(
                WHERE attrelid=%s::regclass AND attnum>0 AND NOT attisdropped""",
             (f"benchmarks_v2.{table}",),
         ).fetchall()
-        assert ("metric_id",) in columns and ("metric_type",) in columns
+        assert ("metric_id",) in columns
+        assert (("metric_type",) in columns) == table.startswith("normalized_results_")
 
 
 @pytest.mark.parametrize(
@@ -89,7 +86,7 @@ def test_identity_and_retention_are_enforced(
     )
 
 
-def test_hourly_foreign_key_and_version_variant_identity(
+def test_bucket_foreign_key_and_version_variant_identity(
     metric_pg: psycopg.Connection[Any],
 ) -> None:
     apply_migrations(metric_pg)
@@ -98,14 +95,14 @@ def test_hourly_foreign_key_and_version_variant_identity(
     assert row is not None
     metric_id = row[0]
     for version, variant in (("v1", "default"), ("v2", "default"), ("v1", "candidate")):
-        metric_pg.execute(_INSERT_HOURLY, (metric_id, version, variant))
+        metric_pg.execute(_INSERT_BUCKET, (metric_id, version, variant))
     assert metric_pg.execute(
-        "SELECT count(*) FROM benchmarks_v2.dashboard_hourly_aggregates"
+        "SELECT count(*) FROM benchmarks_v2.dashboard_bucket_aggregates"
     ).fetchone() == (3,)
     with pytest.raises(psycopg.errors.ForeignKeyViolation), metric_pg.transaction():
-        metric_pg.execute(_INSERT_HOURLY, (-1, "v1", "default"))
+        metric_pg.execute(_INSERT_BUCKET, (-1, "v1", "default"))
     with pytest.raises(psycopg.errors.UniqueViolation), metric_pg.transaction():
-        metric_pg.execute(_INSERT_HOURLY, (metric_id, "v1", "default"))
+        metric_pg.execute(_INSERT_BUCKET, (metric_id, "v1", "default"))
     with pytest.raises(psycopg.errors.ForeignKeyViolation), metric_pg.transaction():
         metric_pg.execute("SELECT benchmarks_v2.metric_id_for_code('UnregisteredMetric')")
 
@@ -131,57 +128,6 @@ async def test_registration_retains_ids_and_deliberate_display_changes(
                 )
             ).fetchone()
             assert label == {"display_name": "Error rate"}
-    finally:
-        await pool.close()
-
-
-@pytest.mark.asyncio
-async def test_future_metric_is_registered_before_hourly_publication(
-    metric_pg: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    class FutureMetric(StrEnum):
-        LATENCY = "FutureLatency"
-
-    apply_migrations(metric_pg)
-    metric_pg.autocommit = True
-    future = cast(Metric, FutureMetric.LATENCY)
-    spec = METRIC_SPECS[Metric.TTFT].model_copy(update={"display_name": "Future latency"})
-    contract = METRIC_VALUE_CONTRACTS[(Metric.TTFT, "v1")].model_copy(update={"metric": future})
-    monkeypatch.setitem(METRIC_SPECS, future, spec)
-    monkeypatch.setitem(METRIC_VALUE_CONTRACTS, (future, "v1"), contract)
-    monkeypatch.setitem(TIMELINE_AGGREGATION_RULES, future.value, contract)
-    hour = datetime(2026, 9, 14, 12, tzinfo=UTC)
-    assert (
-        metric_pg.execute(
-            "SELECT id FROM benchmarks_v2.metrics WHERE code=%s", (future.value,)
-        ).fetchone()
-        is None
-    )
-    registered_id = register_metric_definitions_sync(metric_pg)[future.value]
-    _bucket(metric_pg, hour, [(future.value, "primary", "seconds", 12.0, 3)])
-    pool = await open_pool(metric_pg)
-    try:
-        assert await refresh_hourly_aggregates(pool, hours=[hour]) == 1
-        first = metric_pg.execute(
-            "SELECT id FROM benchmarks_v2.metrics WHERE code=%s", (future.value,)
-        ).fetchone()
-        assert first is not None and first[0] == registered_id
-        assert await refresh_hourly_aggregates(pool, hours=[hour]) == 1
-        assert (
-            metric_pg.execute(
-                "SELECT id FROM benchmarks_v2.metrics WHERE code=%s", (future.value,)
-            ).fetchone()
-            == first
-        )
-        rows = metric_pg.execute(
-            """SELECT m.code, a.metric_id, a.primary_sum, a.sample_count
-               FROM benchmarks_v2.dashboard_hourly_aggregates a
-               JOIN benchmarks_v2.metrics m ON m.id=a.metric_id"""
-        ).fetchall()
-        assert rows == [(future.value, first[0], 12.0, 3)]
-        assert metric_pg.execute(
-            "SELECT DISTINCT metric_type FROM benchmarks_v2.metric_values_by_bucket"
-        ).fetchall() == [(future.value,)]
     finally:
         await pool.close()
 
