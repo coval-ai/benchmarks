@@ -21,6 +21,7 @@ Test catalogue
 11. test_shared_run_excludes_dedicated — default run never touches dedicated endpoints
 12. test_dedicated_run_only_dedicated  — source='dedicated' runs only dedicated endpoints
 13. test_dedicated_run_serialized      — source='dedicated' streams one clip at a time
+14. test_guava_runs_daily_not_shared   — shared-source Guava stays on the daily job
 """
 
 from __future__ import annotations
@@ -1729,6 +1730,51 @@ async def test_dedicated_run_serialized(audio_file: Path, settings: Settings) ->
 
     assert max_concurrent == 1, f"max concurrent was {max_concurrent}"
     assert summary.total_results >= 10
+
+
+# ---------------------------------------------------------------------------
+# 14. test_guava_runs_daily_not_shared
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["shared", "dedicated"])
+async def test_guava_runs_daily_not_shared(
+    audio_file: Path, settings: Settings, source: Literal["shared", "dedicated"]
+) -> None:
+    """Guava is labelled shared-inference but runs only in the daily job."""
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
+    shared_cls = MagicMock(return_value=provider_inst)
+    guava_cls = MagicMock(return_value=provider_inst)
+
+    stt_providers = {"deepgram": shared_cls, "guava": guava_cls}
+    matrix = [
+        *_paused_registry(Benchmark.STT),
+        _stt_entry("deepgram", "nova-2"),
+        _stt_entry("guava", "daytona-stt", source=Source.SHARED_INFERENCE),
+    ]
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers=stt_providers,
+        run=run,
+        writer=writer,
+    ) as _:
+        await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            source=source,
+            matrix_overrides=matrix,
+        )
+
+    assert guava_cls.called is (source == "dedicated")
+    assert shared_cls.called is (source == "shared")
 
 
 # ---------------------------------------------------------------------------
