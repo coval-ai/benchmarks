@@ -54,7 +54,7 @@ def upgrade() -> None:
       ON benchmarks_v2.dashboard_rollups (grain, bucket_at);
 
     CREATE TABLE benchmarks_v2.dashboard_rollup_fills (
-      grain TEXT NOT NULL CHECK (grain IN ('1h', '4h')),
+      grain TEXT NOT NULL CHECK (grain IN ('run', '1h', '4h')),
       bucket_at TIMESTAMPTZ NOT NULL,
       filled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (grain, bucket_at)

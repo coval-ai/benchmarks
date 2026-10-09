@@ -104,7 +104,12 @@ async def test_fill_groups_observations_per_dataset_and_pooled(
             ("__all__", 29.0),
             ("observation-dataset", 29.0),
         ]
-        assert ledger == {"n": 1}  # run slots are rebuilt, never ledgered
+        assert ledger == {"n": 1}
+        async with pool.connection() as conn:
+            open_grains = await (
+                await conn.execute("SELECT grain FROM benchmarks_v2.dashboard_rollup_fills")
+            ).fetchall()
+        assert [row["grain"] for row in open_grains] == ["run"]
     finally:
         await pool.close()
 
@@ -132,6 +137,8 @@ async def test_missing_buckets_skip_open_filled_and_in_progress_intervals(
         pending = await missing_rollups(pool, grain="1h", as_of=as_of)
         assert hour - timedelta(hours=1) not in pending
         assert hour - timedelta(hours=2) in pending
+        pending = await missing_rollups(pool, grain="1h", as_of=as_of + timedelta(hours=12))
+        assert hour - timedelta(hours=1) in pending
     finally:
         await pool.close()
 
@@ -161,5 +168,21 @@ async def test_fill_closed_buckets_commits_one_at_a_time_until_the_deadline(
                 )
             ).fetchall()
         assert [f["grain"] for f in fills] == list(GRAINS)
+        async with pool.connection() as conn:
+            await conn.execute(
+                "INSERT INTO benchmarks_v2.dashboard_rollup_fills (grain, bucket_at)"
+                " VALUES ('1h', %s)",
+                (as_of - timedelta(days=31),),
+            )
+        await fill_closed_rollups(pool, as_of=as_of)
+        async with pool.connection() as conn:
+            stale = await (
+                await conn.execute(
+                    "SELECT count(*) AS n FROM benchmarks_v2.dashboard_rollup_fills"
+                    " WHERE bucket_at <= %s",
+                    (as_of - timedelta(days=31),),
+                )
+            ).fetchone()
+        assert stale == {"n": 0}
     finally:
         await pool.close()

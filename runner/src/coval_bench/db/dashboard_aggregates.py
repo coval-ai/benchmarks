@@ -18,6 +18,7 @@ logger = structlog.get_logger(__name__)
 
 _MAINTENANCE_TIMEOUT_SECONDS = 540
 _SUMMARY_RESERVE_SECONDS = 120
+_FILL_SLACK_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -41,11 +42,11 @@ async def refresh_dashboard_aggregates(
     failures: list[Exception] = []
     filled = 0
     remaining = 0
+    fill_deadline = deadline - _SUMMARY_RESERVE_SECONDS
     try:
-        async with asyncio.timeout_at(deadline - _SUMMARY_RESERVE_SECONDS):
-            result = await fill_closed_rollups(
-                pool, as_of=at, deadline=deadline - _SUMMARY_RESERVE_SECONDS
-            )
+        # The loop stops starting fills at fill_deadline; the slack lets the last one finish.
+        async with asyncio.timeout_at(fill_deadline + _FILL_SLACK_SECONDS):
+            result = await fill_closed_rollups(pool, as_of=at, deadline=fill_deadline)
         filled, remaining = result.filled, result.remaining
     except Exception as exc:
         failures.append(exc)

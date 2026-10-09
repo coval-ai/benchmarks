@@ -285,8 +285,6 @@ FROM (
 ) buckets ORDER BY scheduled_at, provider, model, metric_type
 """  # noqa: S608
 
-_TIMELINE_ALLOWED_BUCKETS = (3600, 14400)
-
 _PERCENTILE_METRICS = frozenset(
     {"WER", "TTFT", "TTFS", "AudioToFinal", "TTFA", "TTFARoundtrip", "TTFALeadingSilence", "V2V"}
 )
@@ -590,16 +588,7 @@ async def get_results_timeline(
             points=[
                 TimelinePoint.model_validate(
                     {
-                        **(
-                            row
-                            if "value" in row
-                            else {
-                                **row,
-                                "value": row["value_sum"] / row["sample_count"]
-                                if row["metric_type"] == "WER"
-                                else row["p50"],
-                            }
-                        ),
+                        **row,
                         "insufficient_samples": statistic != "default"
                         and not has_enough_samples(benchmark, row.get("sample_count") or 0),
                     }
