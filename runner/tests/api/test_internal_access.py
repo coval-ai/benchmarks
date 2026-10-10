@@ -25,10 +25,9 @@ from tests.api.conftest import (
     EA_ORG,
     EA_ORG_OTHER,
     EA_PROVIDER,
-    _fill_timeline_buckets,
     _insert_run,
     _insert_value,
-    _publish_windows,
+    _publish,
     add_models,
     bearer,
 )
@@ -67,8 +66,7 @@ async def _seed_ea_and_public_rows(postgresql: Any) -> None:
     run_id = await _insert_run(postgresql, scheduled_at=datetime.now(UTC))
     for provider, model in ((_EA_PROVIDER, _EA_MODEL), ("deepgram", "nova-3")):
         await _insert_value(postgresql, run_id, 3.5, provider=provider, model=model)
-    await _fill_timeline_buckets(postgresql)
-    await _publish_windows(postgresql)
+    await _publish(postgresql)
 
 
 def _models_in(results: list[dict[str, Any]]) -> set[tuple[str, str]]:
@@ -202,7 +200,7 @@ async def test_vary_lists_the_proof_header(
     client: AsyncClient, postgresql: Any, path: str, params: dict[str, str] | None
 ) -> None:
     """Every embargo-gated endpoint varies on the bearer proof and nothing retired."""
-    await _publish_windows(postgresql)
+    await _publish(postgresql)
     response = await client.get(path, params=params)
     assert response.status_code == 200
     vary = response.headers["Vary"]
@@ -249,7 +247,7 @@ async def test_two_org_grants_never_share_a_timeline_cache_entry(
     run_id = await _insert_run(postgresql, scheduled_at=datetime.now(UTC))
     for model in (_EA_MODEL, EA_MODEL_OTHER):
         await _insert_value(postgresql, run_id, 3.5, provider=_EA_PROVIDER, model=model)
-    await _fill_timeline_buckets(postgresql)
+    await _publish(postgresql)
 
     params = {"benchmark": "STT", "window": "24h"}
 

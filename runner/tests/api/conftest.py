@@ -645,8 +645,19 @@ async def _insert_run(postgresql: Any, **kwargs: Any) -> int:
         await aconn.close()
 
 
-async def _publish_windows(postgresql: Any) -> None:
-    """Publish the dashboard window snapshot the aggregate readers serve."""
+async def _publish(postgresql: Any) -> None:
+    """Build the rollups and publish the window views the dashboard reads."""
+    async with await psycopg.AsyncConnection.connect(
+        _make_db_url(postgresql), row_factory=psycopg.rows.dict_row
+    ) as conn:
+        rows = await (
+            await conn.execute(
+                "SELECT DISTINCT scheduled_at FROM benchmarks_v2.runs"
+                " WHERE scheduled_at IS NOT NULL"
+            )
+        ).fetchall()
+        async with conn.transaction():
+            await rebuild_slots(conn, [row["scheduled_at"] for row in rows])
     pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]] = AsyncConnectionPool(
         conninfo=_make_db_url(postgresql),
         min_size=1,
@@ -659,21 +670,6 @@ async def _publish_windows(postgresql: Any) -> None:
         await refresh_window_views(pool)
     finally:
         await pool.close()
-
-
-async def _fill_timeline_buckets(postgresql: Any) -> None:
-    """Rebuild every run slot and the 1h/4h buckets containing it from raw observations."""
-    async with await psycopg.AsyncConnection.connect(
-        _make_db_url(postgresql), row_factory=psycopg.rows.dict_row
-    ) as conn:
-        rows = await (
-            await conn.execute(
-                "SELECT DISTINCT scheduled_at FROM benchmarks_v2.runs"
-                " WHERE scheduled_at IS NOT NULL"
-            )
-        ).fetchall()
-        async with conn.transaction():
-            await rebuild_slots(conn, [row["scheduled_at"] for row in rows])
 
 
 _WER_COUNT_KEYS = ("substitution_count", "deletion_count", "insertion_count", "reference_words")

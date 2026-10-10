@@ -18,10 +18,9 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from tests.api.conftest import (
-    _fill_timeline_buckets,
     _insert_run,
     _insert_value,
-    _publish_windows,
+    _publish,
 )
 
 AppFactory = Callable[[dict[str, str] | None], Awaitable[FastAPI]]
@@ -33,8 +32,7 @@ async def test_large_aggregates_response_is_gzipped(client: AsyncClient, postgre
     for i in range(12):
         for value in (1.0, 2.0, 3.0, 4.0):
             await _insert_value(postgresql, run_id, value, provider=f"prov{i}", model=f"model{i}")
-    await _fill_timeline_buckets(postgresql)
-    await _publish_windows(postgresql)
+    await _publish(postgresql)
 
     response = await client.get(
         "/v1/results/aggregates",
@@ -50,7 +48,7 @@ async def test_large_aggregates_response_is_gzipped(client: AsyncClient, postgre
 
 async def test_small_response_is_not_compressed(client: AsyncClient, postgresql: Any) -> None:
     """Responses under the size threshold are sent uncompressed."""
-    await _publish_windows(postgresql)
+    await _publish(postgresql)
     response = await client.get(
         "/v1/results/aggregates",
         params={"benchmark": "STT"},

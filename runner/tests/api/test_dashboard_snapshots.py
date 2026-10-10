@@ -11,8 +11,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 from coval_bench.db.dashboard_windows import refresh_window_views
-from tests.api.conftest import _insert_metric, _insert_run, _make_db_url
-from tests.api.test_aggregates import _insert_bucket, _publish_timeline_test_hours
+from tests.api.conftest import _insert_metric, _insert_run, _insert_value, _make_db_url, _publish
 
 
 @pytest.mark.asyncio
@@ -102,22 +101,18 @@ async def test_saved_buckets_serve_only_whole_intervals_and_flag_a_stuck_queue(
     start = dt.datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0) - dt.timedelta(
         hours=4
     )
-    for minutes, value, count in [
-        (0, 999, 1),
-        (30, 10, 1),
-        (60, 20, 2),
-        (90, 60, 3),
-        (120, 30, 1),
-        (150, 999, 1),
+    for minutes, values in [
+        (0, [999]),
+        (30, [10]),
+        (60, [10, 10]),
+        (90, [20, 20, 20]),
+        (120, [30]),
+        (150, [999]),
     ]:
-        await _insert_bucket(
-            postgresql,
-            dataset_id="stt-v2",
-            bucket_at=start + dt.timedelta(minutes=minutes),
-            value_sum=value,
-            sample_count=count,
-        )
-    await _publish_timeline_test_hours(postgresql)
+        run_id = await _insert_run(postgresql, scheduled_at=start + dt.timedelta(minutes=minutes))
+        for value in values:
+            await _insert_value(postgresql, run_id, value, dataset_id="stt-v2")
+    await _publish(postgresql)
     params = {
         "benchmark": "STT",
         "dataset": "stt-v2",
