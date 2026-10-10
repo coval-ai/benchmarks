@@ -61,11 +61,11 @@ class SonioxSTTProvider(STTProvider):
         total_start = time.monotonic()
 
         try:
-            async with ws_client.connect(_WS_URL) as ws:
+            headers = {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
+            async with ws_client.connect(_WS_URL, additional_headers=headers) as ws:
                 await ws.send(
                     json.dumps(
                         {
-                            "api_key": self._api_key.get_secret_value(),
                             "model": self._model,
                             "audio_format": "pcm_s16le",
                             "sample_rate": sample_rate,

@@ -49,7 +49,7 @@ async def test_soniox_tts_happy_path(fake_settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
-async def test_soniox_tts_url_and_in_band_auth(fake_settings: Settings) -> None:
+async def test_soniox_tts_url_and_header_auth(fake_settings: Settings) -> None:
     ws = FakeWebSocket(_audio_events([make_pcm_bytes(240)]))
     captured: dict[str, object] = {}
 
@@ -68,11 +68,12 @@ async def test_soniox_tts_url_and_in_band_auth(fake_settings: Settings) -> None:
 
     assert result.error is None
     assert captured["url"] == _WS_URL
-    # Soniox authenticates in-band, not via an Authorization header.
-    assert "additional_headers" not in captured["kwargs"]  # type: ignore[operator]
+    assert captured["kwargs"]["additional_headers"] == {  # type: ignore[index]
+        "Authorization": "Bearer test-soniox-key"
+    }
 
     config = json.loads(ws.sent[0])
-    assert config["api_key"] == "test-soniox-key"
+    assert "api_key" not in config
     assert config["model"] == "tts-rt-v1"
     assert config["voice"] == "Adrian"
     assert config["audio_format"] == "pcm_s16le"
@@ -91,7 +92,7 @@ async def test_soniox_tts_sends_config_then_text(fake_settings: Settings) -> Non
         await provider.synthesize("Hello world")
 
     sent_json = [json.loads(m) for m in ws.sent if isinstance(m, str)]
-    assert "api_key" in sent_json[0]
+    assert "api_key" not in sent_json[0]
     assert sent_json[1]["text"] == "Hello world"
     assert sent_json[1]["text_end"] is True
     # All frames in a synthesis share one stream_id.
