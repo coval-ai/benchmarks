@@ -22,9 +22,9 @@ logger = structlog.get_logger(__name__)
 
 DEFINITION_REVISION = DEFINITION_REVISION
 WINDOW_VIEWS = {
-    "24h": "benchmarks_v2.normalized_results_24h",
-    "7d": "benchmarks_v2.normalized_results_7d",
-    "30d": "benchmarks_v2.normalized_results_30d",
+    "24h": "benchmarks_v2.results_24h",
+    "7d": "benchmarks_v2.results_7d",
+    "30d": "benchmarks_v2.results_30d",
 }
 _WINDOWS = {"24h": "24 hours", "7d": "7 days", "30d": "30 days"}
 

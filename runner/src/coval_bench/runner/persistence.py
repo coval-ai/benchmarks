@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: ANN401 -- adapter composes lazy runtime collaborators from orchestrator.
-"""Frozen capture and durable replay for normalized benchmark results."""
+"""Frozen capture and durable replay for benchmark results."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ logger = structlog.get_logger("coval_bench.runner")
 
 
 class FrozenEvaluation(BaseModel):
-    """Schema-checked normalized evaluation payload used during replay."""
+    """Schema-checked evaluation payload used during replay."""
 
     model_config = ConfigDict(extra="forbid")
 

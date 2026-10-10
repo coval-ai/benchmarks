@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     tts_dataset_id: str = "tts-v1"
     # Unset: falls back to dataset_sample_size.
     tts_dataset_sample_size: int | None = None
-    # Private bucket for normalized observation artifacts and capture envelopes.
+    # Private bucket for observation artifacts and capture envelopes.
     # Benchmark entrypoints fail closed without it; the API does not need it.
     benchmark_artifact_bucket: str = ""
     # Fernet key shared by API instances for authenticated results cursors.

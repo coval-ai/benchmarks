@@ -186,7 +186,7 @@ class RunWriter:
         return Run.model_validate(dict(row))
 
     async def preflight_required_capture_schema(self) -> None:
-        """Fail before provider work when normalized capture/publication is unavailable."""
+        """Fail before provider work when capture/publication is unavailable."""
         required = (
             "runs",
             "metrics",
@@ -210,9 +210,7 @@ class RunWriter:
                 for row in await cur.fetchall()
             ]
         if missing:
-            raise RuntimeError(
-                "required normalized capture schema is unavailable: " + ", ".join(missing)
-            )
+            raise RuntimeError("required capture schema is unavailable: " + ", ".join(missing))
         await self._assert_required_capture_privileges()
 
     async def _assert_required_capture_privileges(self) -> None:
@@ -244,9 +242,7 @@ class RunWriter:
                 for row in await cur.fetchall()
             ]
         if denied:
-            raise RuntimeError(
-                "required normalized capture privileges unavailable: " + ", ".join(denied)
-            )
+            raise RuntimeError("required capture privileges unavailable: " + ", ".join(denied))
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 """SELECT table_name
@@ -264,8 +260,7 @@ class RunWriter:
             ]
         if denied_sequences:
             raise RuntimeError(
-                "required normalized capture sequence privileges unavailable: "
-                + ", ".join(denied_sequences)
+                "required capture sequence privileges unavailable: " + ", ".join(denied_sequences)
             )
 
     async def insert_observation(self, observation: Observation) -> Observation:
@@ -612,7 +607,7 @@ class RunWriter:
             )
         return stored
 
-    # Database transitions are guarded by validate_metric_transition() in the normalized migration.
+    # Database transitions are guarded by validate_metric_transition() in the storage migration.
     async def start_metric_evaluation_exact(
         self, evaluation_id: UUID, *, started_at: datetime
     ) -> MetricEvaluation:
@@ -1034,7 +1029,7 @@ class RunWriter:
         metric_type: str,
         benchmark: str = "S2S",
     ) -> bool:
-        """Check normalized observation/evaluation storage for an import key.
+        """Check observation/evaluation storage for an import key.
 
         The parent run status is the only lifecycle filter.  In particular, a
         failed evaluation still counts as ingested so a missing metric can be

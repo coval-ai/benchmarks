@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Real-Postgres coverage for normalized benchmark storage."""
+"""Real-Postgres coverage for benchmark storage."""
 
 from __future__ import annotations
 

@@ -55,17 +55,16 @@ The web FE lives in the private `coval-ai/benchmarks-web` repo — run it agains
 
 All env vars are documented in `src/coval_bench/config.py`. Provider keys are optional; tests don't need them.
 
-### Normalized capture and recovery
+### Capture and recovery
 
-Benchmark writes always go through a fail-closed normalized capture, so the
+Benchmark writes always go through a fail-closed capture, so the
 runner and the S2S/LLM fetch require `BENCHMARK_ARTIFACT_BUCKET`. Before provider
-warmup or Coval run fetches, the runner verifies the dataset hashes, normalized
+warmup or Coval run fetches, the runner verifies the dataset hashes, the storage
 database schema, and private GCS create/read/list access.
 
 For each completed provider call, the first acknowledged durable write is an
-immutable GCS envelope containing the frozen legacy rows, normalized evaluation
-shape, original timestamps and artifact bytes. Database and artifact replay then
-uses that envelope. A storage or database backlog leaves an otherwise successful
+immutable GCS envelope containing the evaluation shape, original timestamps and
+artifact bytes. Database and artifact replay then uses that envelope. A storage or database backlog leaves an otherwise successful
 run `partial` with `normalized capture pending`; recovery promotes it to the
 provider-derived sealed status only after all receipts exist and the dashboard
 repair enqueue commits. Genuine provider failures remain captured failures.

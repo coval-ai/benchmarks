@@ -55,7 +55,7 @@ __all__ = [
 
 
 class ProcessingStatus(StrEnum):
-    """Shared lifecycle status for normalized work rows."""
+    """Shared lifecycle status for work rows."""
 
     QUEUED = "queued"
     RUNNING = "running"
@@ -162,7 +162,7 @@ class ObservationArtifact(BaseModel):
 
 
 class Observation(BaseModel):
-    """Normalized raw benchmark capture, independently of a metric result."""
+    """Raw benchmark capture, independently of a metric result."""
 
     id: UUID | None = None
     run_id: int

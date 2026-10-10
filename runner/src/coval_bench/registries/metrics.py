@@ -63,7 +63,7 @@ class MetricSpec(BaseModel, frozen=True):
 
 
 class MetricValueDefinition(BaseModel, frozen=True):
-    """One value in the normalized, versioned metric result contract."""
+    """One value in the versioned metric result contract."""
 
     key: str
     unit: str
@@ -219,8 +219,7 @@ def _primary(metric: Metric) -> MetricValueDefinition:
     )
 
 
-# This is deliberately independent from the legacy result-column layout.  A
-# metric implementation can add a new version without changing public rows.
+# A metric implementation can add a new version without changing public rows.
 METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
     (metric, "v1"): MetricValueContract(
         metric=metric,
@@ -296,7 +295,7 @@ def validate_metric_values(
     version: str,
     values: tuple[tuple[str, str, float, MetricValueRole], ...],
 ) -> None:
-    """Validate one normalized metric evaluation before it reaches the DB.
+    """Validate one metric evaluation before it reaches the DB.
 
     Values are ``(key, unit, value, value_role)`` tuples so the persistence
     layer remains free to use its own Pydantic input models.

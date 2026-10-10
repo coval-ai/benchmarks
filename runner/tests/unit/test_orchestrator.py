@@ -53,7 +53,7 @@ from coval_bench.config import Settings
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
 from coval_bench.registries import RegisteredModel, Source
-from coval_bench.runner import normalized
+from coval_bench.runner import persistence
 from coval_bench.runner.gate import ModelGate
 from coval_bench.runner.orchestrator import (
     ProviderReliability,
@@ -190,7 +190,7 @@ def _good_transcription() -> TranscriptionResult:
 def _make_stub_writer(run: Run) -> MagicMock:
     writer = MagicMock()
     writer.start_run = AsyncMock(return_value=run)
-    writer._normalized_rows = []
+    writer._persisted_rows = []
     writer.capture_results = AsyncMock()
     writer.finish_run = AsyncMock()
     writer.finish_run_exact = writer.finish_run
@@ -227,7 +227,7 @@ async def _orchestrator_env(  # noqa: ANN202
         run = _make_run()
     if writer is None:
         writer = _make_stub_writer(run)
-    writer._normalized_rows = []
+    writer._persisted_rows = []
     if stt_items is None:
         stt_items = [_make_dataset_item(audio_path)]
     if tts_items is None:
@@ -302,13 +302,13 @@ async def _orchestrator_env(  # noqa: ANN202
             return_value=(None, "a" * 64),
         ),
         patch(
-            "coval_bench.runner.normalized.persist_capture", new_callable=AsyncMock
+            "coval_bench.runner.persistence.persist_capture", new_callable=AsyncMock
         ) as persist_capture,
     ):
 
         async def _persist_capture(**kwargs: Any) -> str:
             rows = _CAPTURED_RESULTS.pop(id(kwargs["envelope"]))
-            writer._normalized_rows.extend(rows)
+            writer._persisted_rows.extend(rows)
             await writer.capture_results(rows, created_at=kwargs["envelope"].payload["captured_at"])
             return "completed"
 
@@ -329,7 +329,7 @@ async def _orchestrator_env(  # noqa: ANN202
 # Results handed to each envelope, keyed by envelope identity, so capture fakes
 # can report what was captured without decoding the frozen payload.
 _CAPTURED_RESULTS: dict[int, list[Any]] = {}
-_prepare_capture_envelope = normalized.prepare_capture_envelope
+_prepare_capture_envelope = persistence.prepare_capture_envelope
 
 
 def _prepare_and_keep_results(**kwargs: Any) -> Any:
@@ -341,7 +341,7 @@ def _prepare_and_keep_results(**kwargs: Any) -> Any:
 async def _capture_rows(**kwargs: Any) -> str:
     writer = kwargs["writer"]
     rows = _CAPTURED_RESULTS.pop(id(kwargs["envelope"]))
-    writer._normalized_rows.extend(rows)
+    writer._persisted_rows.extend(rows)
     await writer.capture_results(rows, created_at=kwargs["envelope"].payload["captured_at"])
     return "completed"
 
@@ -350,7 +350,7 @@ async def _capture_rows(**kwargs: Any) -> str:
 def _local_capture(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep orchestration tests local while exercising required capture routing."""
     monkeypatch.setattr(
-        "coval_bench.runner.normalized.prepare_capture_envelope", _prepare_and_keep_results
+        "coval_bench.runner.persistence.prepare_capture_envelope", _prepare_and_keep_results
     )
     monkeypatch.setattr("google.cloud.storage.Client", MagicMock(return_value=object()))
     monkeypatch.setattr("coval_bench.runner.capture.preflight_capture_storage", MagicMock())
@@ -358,7 +358,7 @@ def _local_capture(monkeypatch: pytest.MonkeyPatch) -> None:
         "coval_bench.runner.capture.upload_run_state", MagicMock(return_value=(None, "a" * 64))
     )
     monkeypatch.setattr(
-        "coval_bench.runner.normalized.persist_capture", AsyncMock(side_effect=_capture_rows)
+        "coval_bench.runner.persistence.persist_capture", AsyncMock(side_effect=_capture_rows)
     )
     monkeypatch.setattr(
         "coval_bench.runner.orchestrator._get_manifest_sha256", lambda: lambda _dataset_id: "a" * 64
@@ -366,7 +366,7 @@ def _local_capture(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _write_wav(path: Path) -> None:
-    """Audio fixtures must be valid for the normalized capture envelope."""
+    """Audio fixtures must be valid for the capture envelope."""
     with wave.open(str(path), "wb") as stream:
         stream.setnchannels(1)
         stream.setsampwidth(2)
@@ -444,8 +444,8 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings, snapshot_fail
     assert summary.fail_count == 0
     writer.start_run.assert_awaited_once()
     assert writer.start_run.await_args.kwargs["dataset_id"] == settings.dataset_id
-    # Each provider × item is captured through the normalized envelope.
-    assert len(writer._normalized_rows) >= 2
+    # Each provider × item is captured through the capture envelope.
+    assert len(writer._persisted_rows) >= 2
     writer.finish_run.assert_awaited_once()
     assert writer.finish_run.await_args.args == (1,)
     assert writer.finish_run.await_args.kwargs["status"] is RunStatus.SUCCEEDED
@@ -575,7 +575,7 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
 async def test_refresh_series_bucket_retries_transient_failure(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A transient normalized refresh failure is retried independently."""
+    """A transient refresh failure is retried independently."""
     from coval_bench.runner import orchestrator
 
     monkeypatch.setattr(orchestrator, "_BUCKET_REFRESH_RETRY_DELAY_S", 0.0)
@@ -591,7 +591,7 @@ async def test_refresh_series_bucket_retries_transient_failure(
 async def test_refresh_series_bucket_never_raises(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Exhausting normalized attempts logs and returns instead of raising."""
+    """Exhausting refresh attempts logs and returns instead of raising."""
     from coval_bench.runner import orchestrator
 
     monkeypatch.setattr(orchestrator, "_BUCKET_REFRESH_RETRY_DELAY_S", 0.0)
@@ -825,7 +825,7 @@ async def test_retry_telemetry_captures_diagnostics_and_ignores_callback_errors(
 
 @pytest.mark.asyncio
 async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
-    """Provider calls and normalized writes both stay within the eight-item cap."""
+    """Provider calls and capture writes both stay within the eight-item cap."""
     max_concurrent = 0
     current_concurrent = 0
     persistence_current = 0
@@ -2025,8 +2025,8 @@ def _only_stt_matrix(provider: str, model: str) -> list[RegisteredModel]:
 
 
 def _recorded_rows(writer: MagicMock) -> list[Result]:
-    """All Result rows carried by normalized capture envelopes in the run."""
-    return list(writer._normalized_rows)
+    """All Result rows carried by capture envelopes in the run."""
+    return list(writer._persisted_rows)
 
 
 def _events(captured: list[MutableMapping[str, Any]], name: str) -> list[MutableMapping[str, Any]]:
@@ -2195,7 +2195,7 @@ async def test_stt_missing_final_carries_finalization_reason(
 
 
 @pytest.mark.asyncio
-async def test_stt_normalized_timing_includes_finalization_diagnostics(
+async def test_stt_timing_includes_finalization_diagnostics(
     audio_file: Path, settings: Settings
 ) -> None:
     configured = settings.model_copy(update={"benchmark_artifact_bucket": "private-artifacts"})
@@ -2215,8 +2215,8 @@ async def test_stt_normalized_timing_includes_finalization_diagnostics(
         writer=writer,
     ):
         with patch(
-            "coval_bench.runner.normalized.prepare_capture_envelope",
-            side_effect=normalized.prepare_capture_envelope,
+            "coval_bench.runner.persistence.prepare_capture_envelope",
+            side_effect=persistence.prepare_capture_envelope,
         ) as prepare:
             await _run_stt_item(
                 entry=_stt_entry("deepgram", "flux-general-en"),
@@ -3530,7 +3530,7 @@ async def test_sigterm_reports_dead_provider_from_a_completed_phase(
 
 
 # ---------------------------------------------------------------------------
-# Normalized capture lifecycle
+# Capture lifecycle
 # ---------------------------------------------------------------------------
 
 
@@ -3661,7 +3661,7 @@ async def test_required_capture_final_receipt_failure_leaves_run_partial(
             patch("coval_bench.runner.capture.preflight_capture_storage"),
             patch("coval_bench.runner.capture.upload_run_state", side_effect=_upload_state),
             patch(
-                "coval_bench.runner.normalized.persist_capture",
+                "coval_bench.runner.persistence.persist_capture",
                 new_callable=AsyncMock,
                 return_value="completed",
             ),
@@ -3716,7 +3716,7 @@ async def test_required_tts_cleanup_waits_for_durable_capture_ack(
                 side_effect=RuntimeError("whisper unavailable"),
             ),
             patch(
-                "coval_bench.runner.normalized.persist_capture",
+                "coval_bench.runner.persistence.persist_capture",
                 new_callable=AsyncMock,
                 return_value=outcome,
             ) as persist,

@@ -23,7 +23,7 @@ from coval_bench.db.models import Result, ResultStatus, Run, RunStatus
 from coval_bench.logging import log_run_failed, log_run_partial, log_run_unmapped_persona
 from coval_bench.registries import Benchmark, Metric
 from coval_bench.registries.models import RegisteredModel
-from coval_bench.runner import normalized
+from coval_bench.runner import persistence
 from coval_bench.runner.capture import (
     ImportRunClaim,
     RunSeal,
@@ -61,7 +61,7 @@ def _settings(**kwargs: Any) -> Settings:
 # Results handed to each envelope, keyed by envelope identity, so capture fakes
 # can report what was captured without decoding the frozen payload.
 _CAPTURED_RESULTS: dict[int, list[Any]] = {}
-_prepare_capture_envelope = normalized.prepare_capture_envelope
+_prepare_capture_envelope = persistence.prepare_capture_envelope
 
 
 def _prepare_and_keep_results(**kwargs: Any) -> Any:
@@ -74,7 +74,7 @@ def _prepare_and_keep_results(**kwargs: Any) -> Any:
 def _local_capture(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mock external storage while keeping required importer dispatch under test."""
     monkeypatch.setattr(
-        "coval_bench.runner.normalized.prepare_capture_envelope", _prepare_and_keep_results
+        "coval_bench.runner.persistence.prepare_capture_envelope", _prepare_and_keep_results
     )
     monkeypatch.setattr("google.cloud.storage.Client", MagicMock(return_value=object()))
     monkeypatch.setattr("coval_bench.runner.capture.preflight_capture_storage", MagicMock())
@@ -93,7 +93,7 @@ def _local_capture(monkeypatch: pytest.MonkeyPatch) -> None:
         return "completed"
 
     monkeypatch.setattr(
-        "coval_bench.runner.normalized.persist_capture", AsyncMock(side_effect=persist)
+        "coval_bench.runner.persistence.persist_capture", AsyncMock(side_effect=persist)
     )
 
 
@@ -1323,7 +1323,7 @@ async def test_each_dataset_publishes_its_own_sample_tick(
 
 
 @pytest.mark.asyncio
-async def test_fetch_and_write_v2v_noop_skips_matview_refresh(
+async def test_fetch_and_write_v2v_noop_tick_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
@@ -2417,7 +2417,7 @@ def test_cli_no_providers_alerts_failed_exit_nonzero(monkeypatch: pytest.MonkeyP
         ),
     ],
 )
-async def test_required_s2s_and_llm_capture_precedes_legacy_and_marks_backlog_partial(
+async def test_required_s2s_and_llm_capture_marks_backlog_partial(
     monkeypatch: pytest.MonkeyPatch,
     spec: AgentSpec,
     condition: DatasetMetrics,
@@ -2427,7 +2427,7 @@ async def test_required_s2s_and_llm_capture_precedes_legacy_and_marks_backlog_pa
     writer.finish_run_exact = AsyncMock()
     persist = AsyncMock(return_value="pending")
     upload_state = MagicMock(return_value=("gs://private/state", "a" * 64))
-    monkeypatch.setattr("coval_bench.runner.normalized.persist_capture", persist)
+    monkeypatch.setattr("coval_bench.runner.persistence.persist_capture", persist)
     monkeypatch.setattr("coval_bench.runner.capture.upload_run_state", upload_state)
     monkeypatch.setattr(fetch_v2v, "upload_import_run_claim", lambda _c, _b, claim: claim)
     metric_id = next(iter(metric_ids.values()))
@@ -2479,7 +2479,7 @@ async def test_required_import_restart_reuses_durable_claim_run(
     writer.finish_run_exact = AsyncMock()
     persist = AsyncMock(return_value="completed")
     upload_state = MagicMock(return_value=("gs://private/state", "a" * 64))
-    monkeypatch.setattr("coval_bench.runner.normalized.persist_capture", persist)
+    monkeypatch.setattr("coval_bench.runner.persistence.persist_capture", persist)
     monkeypatch.setattr("coval_bench.runner.capture.upload_run_state", upload_state)
     coval_run = CovalRun(run_id="external-run", create_time=datetime(2026, 9, 17, tzinfo=UTC))
     identity = fetch_v2v._import_identity(
@@ -2532,7 +2532,7 @@ async def test_required_import_adopts_concurrent_seal_without_failing_run(
     writer = _stub_writer()
     writer.finish_run_exact = AsyncMock()
     persist = AsyncMock(return_value="completed")
-    monkeypatch.setattr("coval_bench.runner.normalized.persist_capture", persist)
+    monkeypatch.setattr("coval_bench.runner.persistence.persist_capture", persist)
     coval_run = CovalRun(run_id="external-run", create_time=datetime(2026, 9, 17, tzinfo=UTC))
     identity = fetch_v2v._import_identity(
         spec=SPEC,
@@ -2624,7 +2624,7 @@ async def test_required_import_manifest_failure_remains_resumable(
     writer = _stub_writer()
     writer.finish_run_exact = AsyncMock()
     persist = AsyncMock(return_value="completed")
-    monkeypatch.setattr("coval_bench.runner.normalized.persist_capture", persist)
+    monkeypatch.setattr("coval_bench.runner.persistence.persist_capture", persist)
     coval_run = CovalRun(run_id="external-run", create_time=datetime(2026, 9, 17, tzinfo=UTC))
     identity = fetch_v2v._import_identity(
         spec=SPEC,
@@ -2694,7 +2694,7 @@ async def test_required_import_manifest_failure_remains_resumable(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("snapshot_failure", [False, True])
-async def test_fetch_and_write_v2v_propagates_normalized_gate(
+async def test_fetch_and_write_v2v_propagates_capture_gate(
     monkeypatch: pytest.MonkeyPatch,
     snapshot_failure: bool,
 ) -> None:

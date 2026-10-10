@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: E501, S608
-"""Drop the legacy results table, its window matviews, and its bucket rollup."""
+"""Drop the legacy results storage and give the window views its freed names."""
 
 from __future__ import annotations
 
@@ -13,6 +13,8 @@ branch_labels = None
 depends_on = None
 
 _WINDOWS = {"24h": "24:00:00", "7d": "7 days", "30d": "30 days"}
+
+_INDEX_SUFFIXES = ("key", "lookup", "metric_id_lookup")
 
 _WER_PART = (
     "CASE WHEN count(r.wer_insertions_pct) = count(*) AND count(r.wer_deletions_pct) = count(*)"
@@ -26,10 +28,21 @@ def upgrade() -> None:
         op.execute(f"DROP MATERIALIZED VIEW IF EXISTS benchmarks_v2.results_{window}")
     op.execute("DROP TABLE IF EXISTS benchmarks_v2.results_by_bucket")
     op.execute("DROP TABLE IF EXISTS benchmarks_v2.results")
+    _rename_windows("normalized_results", "results")
+
+
+def _rename_windows(old: str, new: str) -> None:
+    for window in _WINDOWS:
+        op.execute(f"ALTER MATERIALIZED VIEW benchmarks_v2.{old}_{window} RENAME TO {new}_{window}")
+        for suffix in _INDEX_SUFFIXES:
+            op.execute(
+                f"ALTER INDEX benchmarks_v2.{old}_{window}_{suffix} RENAME TO {new}_{window}_{suffix}"
+            )
 
 
 def downgrade() -> None:
     """Recreate the legacy objects empty; dropped rows are not restored."""
+    _rename_windows("results", "normalized_results")
     op.execute("""
     CREATE TABLE benchmarks_v2.results (
       id BIGSERIAL PRIMARY KEY,

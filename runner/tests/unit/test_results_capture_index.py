@@ -11,7 +11,7 @@ import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
 
-from tests.unit.test_normalized_metric_id_migration import _dsn, _migrate
+from tests.unit.test_metric_id_migration import _dsn, _migrate
 
 pg_conn = postgresql("pg_proc")
 _INDEX_NAME = "benchmark_observations_capture_order_idx"

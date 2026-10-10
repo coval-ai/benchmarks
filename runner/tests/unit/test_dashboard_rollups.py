@@ -16,7 +16,7 @@ from coval_bench.db.dashboard_rollups import (
 )
 from coval_bench.db.models import MetricValue, RunStatus
 from coval_bench.db.writer import RunWriter
-from tests.unit import test_normalized_db_writer as storage
+from tests.unit import test_db_storage as storage
 from tests.unit.conftest import apply_migrations
 
 pg_conn = postgresql("pg_proc")

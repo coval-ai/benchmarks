@@ -197,7 +197,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 created_at     timestamptz NOT NULL DEFAULT now()
             )
         """)
-        # Additive normalized storage (mirrors migration 20260818_0018).
+        # Storage tables (mirrors migration 20260818_0018).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.benchmark_observations (
                 id uuid PRIMARY KEY, run_id bigint NOT NULL REFERENCES benchmarks_v2.runs(id),
@@ -271,11 +271,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
             "CREATE FUNCTION benchmarks_v2.guard_immutable_preprocessing_artifact()", start
         )
         conn.execute(lifecycle_sql[start:end])
-        normalized_metric_ids = import_module(
+        metric_ids_migration = import_module(
             "coval_bench.db.migrations.versions.20260915_0036_normalized_metric_ids"
         )
-        with patch.object(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute)):
-            normalized_metric_ids.upgrade()
+        with patch.object(metric_ids_migration, "op", SimpleNamespace(execute=conn.execute)):
+            metric_ids_migration.upgrade()
         for table in ("metric_evaluations", "dashboard_metric_values", "metric_values_by_bucket"):
             conn.execute(f"ALTER TABLE benchmarks_v2.{table} ALTER COLUMN metric_id SET NOT NULL")  # noqa: S608 — fixed fixture table names.
             conn.execute(
@@ -286,6 +286,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(closed_buckets, "op", SimpleNamespace(execute=conn.execute)):
             closed_buckets.upgrade()
+        legacy_drop = import_module(
+            "coval_bench.db.migrations.versions.20261010_0045_drop_legacy_results"
+        )
+        with patch.object(legacy_drop, "op", SimpleNamespace(execute=conn.execute)):
+            legacy_drop.upgrade()
         # Model/tag registry tables (mirrors migration 20260824_0020).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.models (
@@ -674,7 +679,7 @@ async def _fill_timeline_buckets(postgresql: Any) -> None:
 _WER_COUNT_KEYS = ("substitution_count", "deletion_count", "insertion_count", "reference_words")
 
 
-async def _insert_normalized_metric(
+async def _insert_metric(
     postgresql: Any,
     run_id: int,
     *,
@@ -691,7 +696,7 @@ async def _insert_normalized_metric(
     model: str = "nova-3",
     captured_at: datetime | None = None,
 ) -> None:
-    """Seed one normalized evaluation."""
+    """Seed one evaluation."""
     observation_id, evaluation_id = uuid4(), uuid4()
     async with await psycopg.AsyncConnection.connect(
         _make_db_url(postgresql), autocommit=True
@@ -749,8 +754,8 @@ async def _insert_value(
     metric_type: str = "WER",
     **kwargs: Any,
 ) -> None:
-    """Seed one normalized evaluation carrying only a primary value."""
-    await _insert_normalized_metric(
+    """Seed one evaluation carrying only a primary value."""
+    await _insert_metric(
         postgresql,
         run_id,
         dataset_id=dataset_id,

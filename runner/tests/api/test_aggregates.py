@@ -32,7 +32,7 @@ from coval_bench.db.metric_definitions import register_metric_definitions
 from coval_bench.registries import METRIC_SPECS, Metric
 from tests.api.conftest import (
     _fill_timeline_buckets,
-    _insert_normalized_metric,
+    _insert_metric,
     _insert_run,
     _insert_value,
     _make_db_url,
@@ -40,11 +40,11 @@ from tests.api.conftest import (
 )
 
 
-async def _insert_normalized_wer_with_counts(
+async def _insert_wer_with_counts(
     postgresql: Any, run_id: int, *, counts: tuple[int, int, int], reference_words: int
 ) -> None:
     substitutions, deletions, insertions = counts
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         run_id,
         dataset_id="stt-v2",
@@ -59,10 +59,8 @@ async def _insert_normalized_wer_with_counts(
     )
 
 
-async def _insert_normalized_wer(
-    postgresql: Any, run_id: int, *, dataset_id: str, value: float
-) -> None:
-    await _insert_normalized_metric(
+async def _insert_wer(postgresql: Any, run_id: int, *, dataset_id: str, value: float) -> None:
+    await _insert_metric(
         postgresql,
         run_id,
         dataset_id=dataset_id,
@@ -76,7 +74,7 @@ async def _insert_normalized_wer(
     )
 
 
-async def _insert_normalized_bucket(
+async def _insert_bucket(
     postgresql: Any,
     *,
     dataset_id: str,
@@ -123,7 +121,7 @@ def test_intervals_cover_every_window() -> None:
     assert set(WINDOW_VIEWS) == set(get_args(WindowLiteral))
 
 
-def test_normalized_query_constants_start_with_sql() -> None:
+def test_query_constants_start_with_sql() -> None:
     """Comments beside triple-quote openers must not become literal SQL."""
     for query in (
         _DATASETS_SQL,
@@ -133,10 +131,8 @@ def test_normalized_query_constants_start_with_sql() -> None:
         assert query.lstrip().startswith(("SELECT", "WITH"))
 
 
-def test_normalized_dataset_listing_excludes_pooled_sentinel() -> None:
-    assert all(
-        view.startswith("benchmarks_v2.normalized_results_") for view in WINDOW_VIEWS.values()
-    )
+def test_dataset_listing_excludes_pooled_sentinel() -> None:
+    assert all(view.startswith("benchmarks_v2.results_") for view in WINDOW_VIEWS.values())
 
 
 async def test_empty_db_returns_empty_blocks(client: AsyncClient, postgresql: Any) -> None:
@@ -161,7 +157,7 @@ async def test_llm_instruction_following_is_served_by_aggregates(
     """The LLM board's pass rate is read here, not from the leaderboard."""
     run_id = await _insert_run(postgresql, dataset_id="llm-dental-v1")
     for value in (100.0, 100.0, 0.0):
-        await _insert_normalized_metric(
+        await _insert_metric(
             postgresql,
             run_id,
             dataset_id="llm-dental-v1",
@@ -199,7 +195,7 @@ async def test_wer_breakdown_averages_and_reconciles(client: AsyncClient, postgr
     """Each error type averages independently, and the three sum to avg_value."""
     run_id = await _insert_run(postgresql)
     for ins, dele, sub in ((1.0, 2.0, 3.0), (3.0, 4.0, 11.0)):
-        await _insert_normalized_metric(
+        await _insert_metric(
             postgresql,
             run_id,
             dataset_id="stt-v1",
@@ -229,7 +225,7 @@ async def test_wer_breakdown_null_when_any_component_missing(
     """A row carrying only some components nulls the whole split — two real
     averages beside a null third could never reconcile with avg_value."""
     run_id = await _insert_run(postgresql)
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         run_id,
         dataset_id="stt-v1",
@@ -277,11 +273,11 @@ async def test_dataset_filter_splits_and_default_pools(
     assert missing["datasets"] == ["stt-v1", "stt-v3"]
 
 
-async def test_normalized_stats_expand_ttfa_and_filter_ineligible_rows(
+async def test_stats_expand_ttfa_and_filter_ineligible_rows(
     client: AsyncClient, postgresql: Any
 ) -> None:
     valid_run = await _insert_run(postgresql, dataset_id="tts-v1")
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         valid_run,
         dataset_id="tts-v1",
@@ -296,7 +292,7 @@ async def test_normalized_stats_expand_ttfa_and_filter_ineligible_rows(
         {"evaluation_variant": "ensemble"},
     )
     for overrides in ineligible:
-        await _insert_normalized_metric(
+        await _insert_metric(
             postgresql,
             valid_run,
             dataset_id="tts-v1",
@@ -306,7 +302,7 @@ async def test_normalized_stats_expand_ttfa_and_filter_ineligible_rows(
             **overrides,
         )
     failed_run = await _insert_run(postgresql, dataset_id="tts-v1", status="failed")
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         failed_run,
         dataset_id="tts-v1",
@@ -334,12 +330,12 @@ async def test_normalized_stats_expand_ttfa_and_filter_ineligible_rows(
     assert len({row[1] for row in ids}) == 3
 
 
-async def test_normalized_component_only_ttfa_is_visible_and_discovers_dataset(
+async def test_component_only_ttfa_is_visible_and_discovers_dataset(
     client: AsyncClient, postgresql: Any
 ) -> None:
     """TTFA components remain public when the primary role has another key."""
     run_id = await _insert_run(postgresql, dataset_id="tts-components-v1")
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         run_id,
         dataset_id="tts-components-v1",
@@ -380,10 +376,10 @@ async def test_normalized_component_only_ttfa_is_visible_and_discovers_dataset(
     }
 
 
-async def test_normalized_stats_pool_scope_and_group_exact_distribution(
+async def test_stats_pool_scope_and_group_exact_distribution(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    """Pooled and per dataset normalized stats preserve exact sample math."""
+    """Pooled and per dataset stats preserve exact sample math."""
     run_v1 = await _insert_run(postgresql, dataset_id="stt-v1")
     run_v3 = await _insert_run(postgresql, dataset_id="stt-v3")
     for run_id, dataset_id, values in (
@@ -391,7 +387,7 @@ async def test_normalized_stats_pool_scope_and_group_exact_distribution(
         (run_v3, "stt-v3", (3.0, 4.0)),
     ):
         for value in values:
-            await _insert_normalized_metric(
+            await _insert_metric(
                 postgresql,
                 run_id,
                 dataset_id=dataset_id,
@@ -441,7 +437,7 @@ async def test_projection_reads_current_metadata_eligibility_and_window(
     """Persisted values never freeze live observation/run attributes or time bounds."""
 
     run_id = await _insert_run(postgresql, dataset_id="stt-v2")
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql, run_id, dataset_id="stt-v2", metric_type="WER", values={"primary": 10.0}
     )
     app = client._transport.app  # type: ignore[attr-defined]
@@ -497,12 +493,10 @@ async def test_projection_reads_current_metadata_eligibility_and_window(
         assert body["datasets"] == []
 
 
-async def test_normalized_wer_zero_reference_falls_back_to_mean(
-    client: AsyncClient, postgresql: Any
-) -> None:
+async def test_wer_zero_reference_falls_back_to_mean(client: AsyncClient, postgresql: Any) -> None:
     """Complete count rows with no reference words cannot produce a ratio."""
     run_id = await _insert_run(postgresql, dataset_id="stt-v2")
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         run_id,
         dataset_id="stt-v2",
@@ -528,12 +522,12 @@ async def test_normalized_wer_zero_reference_falls_back_to_mean(
     assert stat["pooled_value"] is None
 
 
-async def test_normalized_wer_count_and_split_cohorts_fall_back_independently(
+async def test_wer_count_and_split_cohorts_fall_back_independently(
     client: AsyncClient, postgresql: Any
 ) -> None:
     """Incomplete count or split cohorts cannot manufacture pooled breakdowns."""
     run_id = await _insert_run(postgresql, dataset_id="stt-v2")
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         run_id,
         dataset_id="stt-v2",
@@ -549,7 +543,7 @@ async def test_normalized_wer_count_and_split_cohorts_fall_back_independently(
             "reference_words": 10.0,
         },
     )
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         run_id,
         dataset_id="stt-v2",
@@ -571,12 +565,12 @@ async def test_normalized_wer_count_and_split_cohorts_fall_back_independently(
     assert stat["wer_insertions_pct"] is None
 
 
-async def test_normalized_ttfa_derived_name_collision_keeps_public_count(
+async def test_ttfa_derived_name_collision_keeps_public_count(
     client: AsyncClient, postgresql: Any
 ) -> None:
     """A native metric sharing a TTFA component name joins the same final group."""
     run_id = await _insert_run(postgresql, dataset_id="tts-v1")
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         run_id,
         dataset_id="tts-v1",
@@ -584,7 +578,7 @@ async def test_normalized_ttfa_derived_name_collision_keeps_public_count(
         metric_type="TTFA",
         values={"primary": 120.0, "roundtrip": 75.0, "leading_silence": 45.0},
     )
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         run_id,
         dataset_id="tts-v1",
@@ -607,17 +601,11 @@ async def test_normalized_ttfa_derived_name_collision_keeps_public_count(
     assert stats["TTFARoundtrip"]["mean_value"] == pytest.approx(82.5)
 
 
-async def test_normalized_pooled_wer_is_a_ratio_of_sums(
-    client: AsyncClient, postgresql: Any
-) -> None:
+async def test_pooled_wer_is_a_ratio_of_sums(client: AsyncClient, postgresql: Any) -> None:
     """One miss on a 4-word clip and a clean 36-word clip: mean 12.5, pooled 2.5."""
     run_id = await _insert_run(postgresql, dataset_id="stt-v2")
-    await _insert_normalized_wer_with_counts(
-        postgresql, run_id, counts=(1, 0, 0), reference_words=4
-    )
-    await _insert_normalized_wer_with_counts(
-        postgresql, run_id, counts=(0, 0, 0), reference_words=36
-    )
+    await _insert_wer_with_counts(postgresql, run_id, counts=(1, 0, 0), reference_words=4)
+    await _insert_wer_with_counts(postgresql, run_id, counts=(0, 0, 0), reference_words=36)
 
     app = client._transport.app  # type: ignore[attr-defined]
     await _publish_windows(postgresql)
@@ -630,7 +618,7 @@ async def test_normalized_pooled_wer_is_a_ratio_of_sums(
     board = await client.get("/v1/leaderboard", params={"metric": "WER", "benchmark": "STT"})
     assert board.json()["entries"][0]["avg"] == pytest.approx(2.5)
 
-    await _insert_normalized_wer(postgresql, run_id, dataset_id="stt-v2", value=6.0)
+    await _insert_wer(postgresql, run_id, dataset_id="stt-v2", value=6.0)
     app.state.response_cache.clear()
     await _publish_windows(postgresql)
     s = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
@@ -639,11 +627,9 @@ async def test_normalized_pooled_wer_is_a_ratio_of_sums(
     assert s["avg_value"] == pytest.approx(s["mean_value"]) == pytest.approx(31 / 3)
 
 
-async def test_normalized_bucket_pooled_wer_uses_word_totals(
-    client: AsyncClient, postgresql: Any
-) -> None:
+async def test_bucket_pooled_wer_uses_word_totals(client: AsyncClient, postgresql: Any) -> None:
     for dataset_id, sample_count in (("__all__", 2), ("stt-v2", 1)):
-        await _insert_normalized_bucket(
+        await _insert_bucket(
             postgresql,
             dataset_id=dataset_id,
             sample_count=sample_count,
@@ -710,13 +696,13 @@ async def test_timeline_averages_wer_while_series_keeps_extrema(
     assert max(p["pooled_value"] for p in series.json()["series"]) == pytest.approx(90.0)
 
 
-async def test_normalized_series_and_timeline_use_primary_v1_default_buckets(
+async def test_series_and_timeline_use_primary_v1_default_buckets(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    await _insert_normalized_bucket(postgresql, dataset_id="__all__")
-    await _insert_normalized_bucket(postgresql, dataset_id="stt-v2", value_sum=4.0, sample_count=1)
-    await _insert_normalized_bucket(postgresql, dataset_id="__all__", value_key="roundtrip")
-    await _insert_normalized_bucket(postgresql, dataset_id="__all__", metric_version="v2")
+    await _insert_bucket(postgresql, dataset_id="__all__")
+    await _insert_bucket(postgresql, dataset_id="stt-v2", value_sum=4.0, sample_count=1)
+    await _insert_bucket(postgresql, dataset_id="__all__", value_key="roundtrip")
+    await _insert_bucket(postgresql, dataset_id="__all__", metric_version="v2")
 
     await _publish_windows(postgresql)
     scoped = await client.get(
@@ -1200,7 +1186,7 @@ async def test_timeline_custom_average_weights_source_counts(
         ("complete", 0, 0, 4.75, False),
     ],
 )
-async def test_normalized_timeline_average_uses_complete_wer_pool_or_fallback(
+async def test_timeline_average_uses_complete_wer_pool_or_fallback(
     client: AsyncClient,
     postgresql: Any,
     coverage: str,
@@ -1216,7 +1202,7 @@ async def test_normalized_timeline_average_uses_complete_wer_pool_or_fallback(
         (15, 9, 3, 0, second_refs),
     ]:
         complete = coverage == "complete" or offset == 0
-        await _insert_normalized_bucket(
+        await _insert_bucket(
             postgresql,
             dataset_id="stt-v2",
             value_sum=total,
@@ -1394,7 +1380,7 @@ async def test_exact_percentiles_are_observation_weighted_and_metadata_rich(
             postgresql, scheduled_at=scheduled - timedelta(hours=1) + timedelta(minutes=offset)
         )
         for value in values:
-            await _insert_normalized_metric(
+            await _insert_metric(
                 postgresql,
                 run_id,
                 dataset_id="stt-v1",
@@ -1438,7 +1424,7 @@ async def test_exact_percentile_preserves_latest_source_timestamp(
         run_id = await _insert_run(
             postgresql, scheduled_at=bucket_start + timedelta(minutes=offset)
         )
-        await _insert_normalized_metric(
+        await _insert_metric(
             postgresql, run_id, dataset_id="stt-v1", metric_type="TTFT", values={"primary": value}
         )
     await _fill_timeline_buckets(postgresql)
@@ -1495,12 +1481,12 @@ async def test_timeline_echoes_metric_type_for_empty_results_and_cached_repeats(
         assert body["points"] == []
 
 
-async def test_exact_percentile_reads_normalized_observations_and_excludes_null_schedule(
+async def test_exact_percentile_reads_observations_and_excludes_null_schedule(
     client: AsyncClient, postgresql: Any
 ) -> None:
     scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
     included = await _insert_run(postgresql, scheduled_at=scheduled)
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         included,
         dataset_id="stt-v1",
@@ -1508,7 +1494,7 @@ async def test_exact_percentile_reads_normalized_observations_and_excludes_null_
         values={"primary": 12.0},
     )
     excluded = await _insert_run(postgresql, scheduled_at=None)
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         excluded,
         dataset_id="stt-v1",
@@ -1533,7 +1519,7 @@ async def test_exact_wer_percentile_does_not_pool_reference_words(
     scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
     for value, substitutions, references in ((10.0, 1.0, 10.0), (90.0, 90.0, 100.0)):
         run_id = await _insert_run(postgresql, scheduled_at=scheduled)
-        await _insert_normalized_metric(
+        await _insert_metric(
             postgresql,
             run_id,
             dataset_id="stt-v1",
@@ -1558,13 +1544,13 @@ async def test_exact_wer_percentile_does_not_pool_reference_words(
     assert point["value"] != pytest.approx((1.0 + 90.0) / 110.0 * 100.0)
 
 
-async def test_exact_normalized_ttfa_components_use_parent_observations(
+async def test_exact_ttfa_components_use_parent_observations(
     client: AsyncClient, postgresql: Any
 ) -> None:
     scheduled = datetime.now(dt.UTC) - timedelta(hours=1)
     run_id = await _insert_run(postgresql, dataset_id="tts-v1", scheduled_at=scheduled)
     for roundtrip, silence in ((0.0, 2.0), (10.0, 6.0)):
-        await _insert_normalized_metric(
+        await _insert_metric(
             postgresql,
             run_id,
             dataset_id="tts-v1",
@@ -1609,7 +1595,7 @@ async def test_exact_percentile_runtime_matrix_and_cache_identity(
         (inside, "WER", 40.0),
         (outside, "TTFT", 999.0),
     ):
-        await _insert_normalized_metric(
+        await _insert_metric(
             postgresql,
             run_id,
             dataset_id="stt-v1",
@@ -1667,7 +1653,7 @@ async def test_exact_percentile_ttfa_component_and_hidden_model_filter(
 ) -> None:
     scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
     run_id = await _insert_run(postgresql, scheduled_at=scheduled)
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql,
         run_id,
         dataset_id="tts-v1",

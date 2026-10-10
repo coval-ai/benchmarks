@@ -11,8 +11,8 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 from coval_bench.db.dashboard_windows import refresh_window_views
-from tests.api.conftest import _insert_normalized_metric, _insert_run, _make_db_url
-from tests.api.test_aggregates import _insert_normalized_bucket, _publish_timeline_test_hours
+from tests.api.conftest import _insert_metric, _insert_run, _make_db_url
+from tests.api.test_aggregates import _insert_bucket, _publish_timeline_test_hours
 
 
 @pytest.mark.asyncio
@@ -26,7 +26,7 @@ async def test_saved_summary_publication_readiness_cache_and_expiry(
     assert response.status_code == 503
     assert response.json()["detail"] == "dashboard_snapshot_not_ready"
     run = await _insert_run(postgresql)
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 10}
     )
     await refresh_window_views(app.state.pool)
@@ -43,7 +43,7 @@ async def test_saved_summary_publication_readiness_cache_and_expiry(
     assert leaderboard.status_code == 200, leaderboard.text
     assert leaderboard.json()["snapshot"]["generation"] == 1
     # Reads continue serving generation 1 until the writer publishes generation 2.
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 30}
     )
     assert (await client.get("/v1/results/aggregates", params=params)).json() == first
@@ -75,7 +75,7 @@ async def test_saved_summary_freshness_allows_hourly_maintenance(
     stale: bool,
 ) -> None:
     run = await _insert_run(postgresql)
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 10}
     )
     await refresh_window_views(app.state.pool)
@@ -110,7 +110,7 @@ async def test_saved_buckets_serve_only_whole_intervals_and_flag_a_stuck_queue(
         (120, 30, 1),
         (150, 999, 1),
     ]:
-        await _insert_normalized_bucket(
+        await _insert_bucket(
             postgresql,
             dataset_id="stt-v2",
             bucket_at=start + dt.timedelta(minutes=minutes),

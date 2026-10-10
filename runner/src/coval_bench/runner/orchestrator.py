@@ -801,7 +801,7 @@ async def _run_stt_item(
 
     captured_at = datetime.now(UTC)
     if writer is not None and artifact_client is not None:
-        from coval_bench.runner.normalized import persist_capture, prepare_capture_envelope
+        from coval_bench.runner.persistence import persist_capture, prepare_capture_envelope
 
         timing_events = {
             "ttft_seconds": ttft_seconds,
@@ -1081,7 +1081,7 @@ async def _run_tts_item(
             captured_at = datetime.now(UTC)
             if writer is not None and artifact_client is not None:
                 from coval_bench.observation_artifacts import snapshot_generated_audio
-                from coval_bench.runner.normalized import persist_capture, prepare_capture_envelope
+                from coval_bench.runner.persistence import persist_capture, prepare_capture_envelope
 
                 audio_snapshot = (
                     snapshot_generated_audio(audio_path) if audio_path is not None else None
@@ -1159,7 +1159,7 @@ _BUCKET_REFRESH_RETRY_DELAY_S = 0.5
 
 
 async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -> None:  # noqa: ANN401 — RunWriter, lazy-imported by the caller
-    """Best-effort refresh of the normalized rollup bucket."""
+    """Best-effort refresh of the rollup bucket."""
     refreshes: tuple[tuple[str, Callable[[], Awaitable[None]]], ...] = (
         (
             "normalized_series_bucket",
@@ -1329,7 +1329,7 @@ async def run_benchmarks(
         enabled_tts = [e for e in tts_matrix if e.collected and _runs_daily(e) == dedicated]
 
         # A TTS-only run never touches the configured STT dataset; a 'both'
-        # run's row still records the STT id. Normalized storage carries the
+        # run's row still records the STT id. Storage carries the
         # TTS dataset id per row.
         run_dataset_id = tts_dataset_id if benchmark_kind == "tts" else stt_dataset_id
 
@@ -1352,7 +1352,7 @@ async def run_benchmarks(
 
             artifact_client: Any = storage.Client()
         except Exception as exc:
-            raise RuntimeError("normalized capture client initialization failed") from exc
+            raise RuntimeError("capture client initialization failed") from exc
         if benchmark_kind in ("stt", "both") and (
             len(dataset_sha256) != 64
             or any(character not in "0123456789abcdef" for character in dataset_sha256)

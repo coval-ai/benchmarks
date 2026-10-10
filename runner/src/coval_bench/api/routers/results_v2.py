@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Evaluation-level reads from normalized benchmark storage."""
+"""Evaluation-level reads from benchmark storage."""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def _cursor_payload(
 
 
 def _unsupported_status(name: str) -> HTTPException:
-    return HTTPException(422, f"{name} is restricted for normalized results")
+    return HTTPException(422, f"{name} is restricted for results")
 
 
 def _require_cursor_key(settings: Settings = Depends(get_settings)) -> SecretStr:
@@ -142,7 +142,7 @@ async def list_results(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
 ) -> ResultsV2Response:
-    """Return one successful primary evaluation per normalized result."""
+    """Return one successful primary evaluation per result."""
     del request
     since = _utc(since, "since")
     until = _utc(until, "until")

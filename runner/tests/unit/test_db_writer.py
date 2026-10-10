@@ -135,7 +135,8 @@ def test_migration_up_down(pg_conn: psycopg.Connection[Any]) -> None:
     with pg_conn.cursor() as cur:
         cur.execute("SELECT matviewname FROM pg_matviews WHERE schemaname = 'benchmarks_v2'")
         views = {row[0] for row in cur.fetchall()}
-    assert not {"results_24h", "results_7d", "results_30d"} & views
+    assert {"results_24h", "results_7d", "results_30d"} <= views
+    assert not any(view.startswith("normalized_") for view in views)
 
     _downgrade_migrations(pg_conn)
 
@@ -281,7 +282,7 @@ def test_lifespan_pool(pg_conn: psycopg.Connection[Any]) -> None:
         conn_module._pool = original
 
 
-def test_coval_metric_ingestion_reads_normalized_storage(
+def test_coval_metric_ingestion_reads_storage(
     pg_conn: psycopg.Connection[Any],
 ) -> None:
     _apply_migrations(pg_conn)
@@ -291,7 +292,7 @@ def test_coval_metric_ingestion_reads_normalized_storage(
         try:
             writer = RunWriter(pool)
 
-            async def add_normalized(
+            async def add_evaluation(
                 *,
                 name: str,
                 benchmark: Benchmark = Benchmark.LLM,
@@ -342,34 +343,34 @@ def test_coval_metric_ingestion_reads_normalized_storage(
                         error="run failed" if run_status is RunStatus.FAILED else None,
                     )
 
-            await add_normalized(name="llm", sample_id="RLLM/sim-1")
-            await add_normalized(name="s2s", benchmark=Benchmark.S2S, sample_id="RS2S/sim-1")
-            await add_normalized(
+            await add_evaluation(name="llm", sample_id="RLLM/sim-1")
+            await add_evaluation(name="s2s", benchmark=Benchmark.S2S, sample_id="RS2S/sim-1")
+            await add_evaluation(
                 name="failed-eval-succeeded-parent",
                 benchmark=Benchmark.S2S,
                 sample_id="RFAILED-EVAL/sim-1",
                 evaluation_status=ProcessingStatus.FAILED,
             )
-            await add_normalized(
+            await add_evaluation(
                 name="failed-eval-partial-parent",
                 benchmark=Benchmark.S2S,
                 sample_id="RPARTIAL-EVAL/sim-1",
                 run_status=RunStatus.PARTIAL,
                 evaluation_status=ProcessingStatus.FAILED,
             )
-            await add_normalized(
+            await add_evaluation(
                 name="failed-parent",
                 benchmark=Benchmark.S2S,
                 sample_id="RFAILED-PARENT/sim-1",
                 run_status=RunStatus.FAILED,
             )
-            await add_normalized(
+            await add_evaluation(
                 name="running-parent",
                 benchmark=Benchmark.S2S,
                 sample_id="RRUNNING-PARENT/sim-1",
                 run_status=RunStatus.RUNNING,
             )
-            await add_normalized(
+            await add_evaluation(
                 name="different-model",
                 benchmark=Benchmark.S2S,
                 sample_id="RMODEL/sim-1",
@@ -377,13 +378,13 @@ def test_coval_metric_ingestion_reads_normalized_storage(
             )
 
             return {
-                "normalized-llm": await writer.coval_metric_ingested(
+                "llm": await writer.coval_metric_ingested(
                     provider="test-provider",
                     coval_run_id="RLLM",
                     metric_type=Metric.INSTRUCTION_FOLLOWING,
                     benchmark=Benchmark.LLM,
                 ),
-                "normalized-only-s2s": await writer.coval_metric_ingested(
+                "s2s": await writer.coval_metric_ingested(
                     provider="test-provider",
                     coval_run_id="RS2S",
                     metric_type=Metric.INSTRUCTION_FOLLOWING,
@@ -435,8 +436,8 @@ def test_coval_metric_ingestion_reads_normalized_storage(
 
     result = asyncio.run(_run())
     assert result == {
-        "normalized-llm": True,
-        "normalized-only-s2s": True,
+        "llm": True,
+        "s2s": True,
         "failed-eval-succeeded-parent": True,
         "failed-eval-partial-parent": True,
         "failed-parent": False,

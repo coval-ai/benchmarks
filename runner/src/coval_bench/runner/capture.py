@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Durable, immutable capture envelopes for normalized benchmark writes.
+"""Durable, immutable capture envelopes for benchmark writes.
 
 This module deliberately contains no database or provider calls.  Producers
 freeze their result and artifact bytes here; recovery can then replay that
@@ -371,7 +371,7 @@ def build_capture_identity(
 
 
 class CaptureEnvelope(BaseModel):
-    """Complete frozen input for one normalized observation replay."""
+    """Complete frozen input for one observation replay."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

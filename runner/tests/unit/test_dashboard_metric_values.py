@@ -13,7 +13,7 @@ import pytest
 from pytest_postgresql.factories import postgresql
 
 from coval_bench.db.writer import RunWriter
-from tests.unit import test_normalized_db_writer as storage
+from tests.unit import test_db_storage as storage
 
 pg_conn = postgresql("pg_proc")
 

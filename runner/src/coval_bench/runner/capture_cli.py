@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Operator commands for inspecting and replaying durable normalized captures."""
+"""Operator commands for inspecting and replaying durable captures."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from coval_bench.runner.capture import (
     run_prefix,
     upload_run_state,
 )
-from coval_bench.runner.normalized import CaptureOutcome, replay_capture
+from coval_bench.runner.persistence import CaptureOutcome, replay_capture
 
 
 def _storage(settings: Settings) -> tuple[storage.Client, str]:
@@ -46,7 +46,7 @@ def _json(value: object) -> None:
 
 @click.group(name="capture")
 def capture() -> None:
-    """Inspect or recover immutable normalized-capture envelopes."""
+    """Inspect or recover immutable capture envelopes."""
 
 
 @capture.command(name="status")

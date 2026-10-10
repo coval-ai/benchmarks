@@ -27,9 +27,9 @@ summary_pg = postgresql("pg_proc")
 
 def test_summary_views_cover_every_saved_window() -> None:
     assert WINDOW_VIEWS == {
-        "24h": "benchmarks_v2.normalized_results_24h",
-        "7d": "benchmarks_v2.normalized_results_7d",
-        "30d": "benchmarks_v2.normalized_results_30d",
+        "24h": "benchmarks_v2.results_24h",
+        "7d": "benchmarks_v2.results_7d",
+        "30d": "benchmarks_v2.results_30d",
     }
 
 
@@ -152,7 +152,7 @@ def test_refresh_materializes_wer_percentiles_and_pooled_values(
             assert result.status == "published"
             async with pool.connection() as conn:
                 cur = await conn.execute(
-                    "SELECT * FROM benchmarks_v2.normalized_results_24h WHERE dataset_id='d'"
+                    "SELECT * FROM benchmarks_v2.results_24h WHERE dataset_id='d'"
                 )
                 row = await cur.fetchone()
                 assert row is not None
@@ -188,9 +188,7 @@ def test_unknown_summary_metric_rolls_back_state_and_views(
                     )
                 ).fetchone()
                 before_view = await (
-                    await conn.execute(
-                        "SELECT count(*) AS n FROM benchmarks_v2.normalized_results_24h"
-                    )
+                    await conn.execute("SELECT count(*) AS n FROM benchmarks_v2.results_24h")
                 ).fetchone()
             run_id = _insert_summary_run(summary_pg, as_of)
             observation_id = uuid4()
@@ -238,9 +236,7 @@ def test_unknown_summary_metric_rolls_back_state_and_views(
                     )
                 ).fetchone()
                 after_view = await (
-                    await conn.execute(
-                        "SELECT count(*) AS n FROM benchmarks_v2.normalized_results_24h"
-                    )
+                    await conn.execute("SELECT count(*) AS n FROM benchmarks_v2.results_24h")
                 ).fetchone()
             assert after == before
             assert after_view == before_view

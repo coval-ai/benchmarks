@@ -44,7 +44,7 @@ from coval_bench.runner.capture import (
     upload_import_run_claim,
     upload_run_state,
 )
-from coval_bench.runner.normalized import (
+from coval_bench.runner.persistence import (
     CaptureOutcome,
     persist_capture,
     prepare_capture_envelope,
@@ -281,7 +281,7 @@ def _envelope(
 
 
 @pytest.mark.asyncio
-async def test_ambiguous_normalized_commit_is_discoverable_and_replays_once() -> None:
+async def test_ambiguous_commit_is_discoverable_and_replays_once() -> None:
     storage_value = _Storage()
     writer = _Writer()
     writer.fail_after_observation_once = True
@@ -362,7 +362,7 @@ async def test_envelope_with_legacy_rows_replays() -> None:
     )
     upload_envelope(client, "private", envelope)
     preserved = {name: record.payload for name, record in storage_value.objects.items()}
-    writer = _Writer()  # Deliberately exposes only normalized persistence methods.
+    writer = _Writer()  # Deliberately exposes only persistence methods.
 
     for _ in range(2):
         assert (
@@ -645,7 +645,7 @@ def test_concurrent_import_claim_adopts_the_first_run_allocation() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("denied_table", [None, "metric_values"])
-async def test_required_database_preflight_checks_normalized_privileges(
+async def test_required_database_preflight_checks_privileges(
     denied_table: str | None,
 ) -> None:
     pool = MagicMock()

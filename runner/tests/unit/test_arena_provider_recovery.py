@@ -41,7 +41,7 @@ async def _record_run(
     metric_version: str = "v1",
     variant: str = "default",
 ) -> int:
-    """One normalized benchmark run, with one terminal evaluation per entry."""
+    """One benchmark run, with one terminal evaluation per entry."""
     async with pool.connection() as conn, conn.transaction():
         conn.row_factory = psycopg.rows.dict_row
         cursor = await conn.execute(

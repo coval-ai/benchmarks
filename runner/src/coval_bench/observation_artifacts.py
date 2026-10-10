@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Immutable private GCS artifacts for normalized benchmark observations."""
+"""Immutable private GCS artifacts for benchmark observations."""
 
 from __future__ import annotations
 

@@ -135,7 +135,7 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
             family=FAMILY_DENTAL,
         ),
         # Pre-launch models under codenames: the provider and model strings are what
-        # land in the results table, so they carry no vendor identity of their own.
+        # land in stored results, so they carry no vendor identity of their own.
         AgentSpec(
             agent_id=settings.coval_s2s_gray_agent_id,
             provider="colors",
@@ -272,8 +272,8 @@ def _dataset_sha256() -> str:
         return "unknown"
 
 
-def _normalized_dataset_sha256(provenance: str) -> str:
-    """Return the normalized schema stable 64-hex dataset fingerprint.
+def _dataset_fingerprint(provenance: str) -> str:
+    """Return a stable 64-hex dataset fingerprint.
 
     Packaged datasets already carry a content SHA. Coval-hosted S2S datasets
     carry immutable test-set/persona provenance in the legacy run column, so
@@ -740,7 +740,7 @@ def _import_identity(
         provider=spec.provider,
         model=spec.model,
         dataset_id=dataset_id,
-        dataset_sha256=_normalized_dataset_sha256(dataset_sha256),
+        dataset_sha256=_dataset_fingerprint(dataset_sha256),
         persona_id=coval_run.persona_id,
     )
 
@@ -805,9 +805,9 @@ async def _ingest_run(
     if pending is None:
         pending = condition.fetched | (condition.local & frozenset(_LOCAL_SOURCES))
     if artifact_client is None or not artifact_bucket:
-        raise RuntimeError("required normalized capture is not initialized")
+        raise RuntimeError("required capture is not initialized")
     if import_identity is None or import_generation is None:
-        raise RuntimeError("required normalized capture import identity is not initialized")
+        raise RuntimeError("required capture import identity is not initialized")
     if import_claim is not None:
         pending = frozenset(Metric(metric) for metric in import_claim.metric_types)
     run_pk: int | None = None
@@ -1018,14 +1018,14 @@ async def _ingest_run(
                     )
                     continue
                 grouped.setdefault(row.audio_filename, []).append(row)
-            normalized_sha256 = _normalized_dataset_sha256(dataset_sha256 or _dataset_sha256())
+            dataset_fingerprint = _dataset_fingerprint(dataset_sha256 or _dataset_sha256())
             from coval_bench.runner.capture import (
                 RunManifest,
                 build_capture_identity,
                 identity_digest,
                 upload_run_state,
             )
-            from coval_bench.runner.normalized import persist_capture, prepare_capture_envelope
+            from coval_bench.runner.persistence import persist_capture, prepare_capture_envelope
 
             expected_capture_ids = [
                 identity_digest(
@@ -1052,7 +1052,7 @@ async def _ingest_run(
                     scheduled_at=scheduled_at,
                     benchmark_kind=spec.benchmark.value.lower(),
                     source="coval-api",
-                    datasets={dataset_id: normalized_sha256},
+                    datasets={dataset_id: dataset_fingerprint},
                     expected_capture_ids=expected_capture_ids,
                 ),
             )
@@ -1067,7 +1067,7 @@ async def _ingest_run(
                 envelope = prepare_capture_envelope(
                     run_id=run_pk,
                     dataset_id=dataset_id,
-                    dataset_sha256=normalized_sha256,
+                    dataset_sha256=dataset_fingerprint,
                     sample_id=sample_id,
                     entry=spec,
                     benchmark=spec.benchmark,
@@ -1395,7 +1395,7 @@ async def _fetch_one_provider(
             import_claim: ImportRunClaim | None = None
             import_generation: int | None = None
             if artifact_client is None:
-                raise RuntimeError("required normalized capture storage is unavailable")
+                raise RuntimeError("required capture storage is unavailable")
             import_identity_value = _import_identity(
                 spec=spec,
                 coval_run=coval_run,
