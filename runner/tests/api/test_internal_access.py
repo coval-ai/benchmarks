@@ -26,7 +26,6 @@ from tests.api.conftest import (
     EA_ORG_OTHER,
     EA_PROVIDER,
     _fill_timeline_buckets,
-    _insert_result,
     _insert_run,
     _insert_value,
     _publish_windows,
@@ -70,17 +69,6 @@ async def _seed_ea_and_public_rows(postgresql: Any) -> None:
         await _insert_value(postgresql, run_id, 3.5, provider=provider, model=model)
     await _fill_timeline_buckets(postgresql)
     await _publish_windows(postgresql)
-
-
-@pytest.mark.usefixtures("early_access_registry")
-async def test_v2_does_not_read_legacy_results(client: AsyncClient, postgresql: Any) -> None:
-    run_id = await _insert_run(postgresql)
-    await _insert_result(postgresql, run_id, provider=_EA_PROVIDER, model=_EA_MODEL)
-    await _insert_result(postgresql, run_id, provider="deepgram", model="nova-3")
-    for headers in ({}, _internal_headers()):
-        response = await client.get("/v2/results", params={"benchmark": "STT"}, headers=headers)
-        assert response.status_code == 200
-        assert response.json() == {"results": [], "next_cursor": None}
 
 
 def _models_in(results: list[dict[str, Any]]) -> set[tuple[str, str]]:

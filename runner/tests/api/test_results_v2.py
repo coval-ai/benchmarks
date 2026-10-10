@@ -29,7 +29,6 @@ from tests.api.conftest import (
     EA_MODEL,
     EA_ORG,
     EA_PROVIDER,
-    _insert_result,
     _insert_run,
     _make_db_url,
     add_models,
@@ -779,9 +778,7 @@ async def test_default_rows_and_parent_status_filters(client: AsyncClient, postg
 
 
 @pytest.mark.asyncio
-async def test_all_status_filters_include_every_independent_state_and_ignore_legacy(
-    client: AsyncClient, postgresql: Any
-) -> None:
+async def test_all_status_filters_are_rejected(client: AsyncClient, postgresql: Any) -> None:
     cases = (
         ("succeeded", "succeeded"),
         ("partial", "running"),
@@ -793,7 +790,6 @@ async def test_all_status_filters_include_every_independent_state_and_ignore_leg
         run_id = await _insert_run(postgresql, status=run_status)
         run_ids.append(run_id)
         await _insert_evaluation(postgresql, run_id, status=evaluation_status, value=None)
-    await _insert_result(postgresql, run_ids[0], provider="legacy-only", model="legacy")
 
     response = await client.get(
         "/v2/results", params={"evaluation_status": "all", "run_status": "all"}

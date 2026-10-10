@@ -37,8 +37,6 @@ from coval_bench.db.models import (
     ObservationSourceKind,
     ObservationStatus,
     ProcessingStatus,
-    Result,
-    ResultStatus,
     Run,
     RunStatus,
 )
@@ -114,20 +112,6 @@ async def _make_pool(
     return pool
 
 
-def _coval_result(run_id: int, *, benchmark: Benchmark, coval_run_id: str) -> Result:
-    return Result(
-        run_id=run_id,
-        provider="test-provider",
-        model="test-model",
-        benchmark=benchmark,
-        metric_type=Metric.INSTRUCTION_FOLLOWING,
-        metric_value=100.0,
-        metric_units="percent",
-        audio_filename=f"{coval_run_id}/simulation-1",
-        status=ResultStatus.SUCCESS,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -145,22 +129,13 @@ def test_migration_up_down(pg_conn: psycopg.Connection[Any]) -> None:
         )
         tables = {row[0] for row in cur.fetchall()}
     assert "runs" in tables
-    assert "results" in tables
-    assert "results_by_bucket" in tables
     assert "llm_turns" in tables
+    assert not {"results", "results_by_bucket"} & tables
 
     with pg_conn.cursor() as cur:
         cur.execute("SELECT matviewname FROM pg_matviews WHERE schemaname = 'benchmarks_v2'")
         views = {row[0] for row in cur.fetchall()}
-    assert "results_24h" in views
-
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = 'benchmarks_v2' AND table_name = 'results'"
-        )
-        columns = {row[0] for row in cur.fetchall()}
-    assert {"http_version", "submit_to_headers_ms"} <= columns
+    assert not {"results_24h", "results_7d", "results_30d"} & views
 
     _downgrade_migrations(pg_conn)
 
@@ -171,53 +146,6 @@ def test_migration_up_down(pg_conn: psycopg.Connection[Any]) -> None:
         )
         schemas = cur.fetchall()
     assert schemas == []
-
-
-def test_migration_backfills_existing_results(pg_conn: psycopg.Connection[Any]) -> None:
-    """Upgrade to 0005, seed results, upgrade to head — the 0006 backfill
-    fills the bucket."""
-    cfg = _alembic_cfg(_async_dsn(pg_conn))
-    alembic_command.upgrade(cfg, "20260611_0005")
-
-    pg_conn.autocommit = True
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO benchmarks_v2.runs "
-            "(runner_sha, dataset_id, dataset_sha256, status, scheduled_at) "
-            "VALUES ('s', 'd', 'h', 'succeeded', now() - interval '1 hour') RETURNING id"
-        )
-        seed = cur.fetchone()
-        assert seed is not None
-        run_id = seed[0]
-        for value in (1.0, 3.0):
-            cur.execute(
-                "INSERT INTO benchmarks_v2.results "
-                "(run_id, provider, model, benchmark, metric_type, metric_value, "
-                " metric_units, status) "
-                "VALUES (%s, 'openai', 'whisper-1', 'STT', 'WER', %s, 'ratio', 'success')",
-                (run_id, value),
-            )
-
-    # Same as `coval-bench db migrate`.
-    cfg.attributes["allow_metric_code_cleanup"] = True
-    alembic_command.upgrade(cfg, "head")
-
-    with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-        cur.execute(
-            "SELECT dataset_id, min_value, p50, max_value, value_sum, sample_count "
-            "FROM benchmarks_v2.results_by_bucket "
-            "WHERE provider = 'openai' AND model = 'whisper-1' AND metric_type = 'WER'"
-        )
-        rows = cur.fetchall()
-
-    # One per-dataset row plus the pooled '__all__' row, identical stats here.
-    assert {row["dataset_id"] for row in rows} == {"d", "__all__"}
-    for row in rows:
-        assert row["sample_count"] == 2
-        assert float(row["value_sum"]) == pytest.approx(4.0)
-        assert float(row["min_value"]) == pytest.approx(1.0)
-        assert float(row["max_value"]) == pytest.approx(3.0)
-        assert float(row["p50"]) == pytest.approx(2.0)
 
 
 def test_run_lifecycle(pg_conn: psycopg.Connection[Any]) -> None:
@@ -340,21 +268,7 @@ def test_llm_benchmark_rows_are_accepted(pg_conn: psycopg.Connection[Any]) -> No
             "INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status) "
             "VALUES ('sha', 'llm-dental-v1', 'hash', 'succeeded') RETURNING id"
         )
-        run_row = cur.fetchone()
-        assert run_row is not None
-        cur.execute(
-            "INSERT INTO benchmarks_v2.results "
-            "(run_id, provider, model, benchmark, metric_type, metric_value, metric_units, status) "
-            "VALUES (%s, 'phonely', 'phonely-agent', 'LLM', 'TTFT', 0.42, 'seconds', 'success')",
-            (run_row[0],),
-        )
-        cur.execute(
-            "INSERT INTO benchmarks_v2.results_by_bucket "
-            "(provider, model, benchmark, dataset_id, metric_type, bucket_at, "
-            " min_value, p25, p50, p75, max_value, value_sum, sample_count) "
-            "VALUES ('phonely', 'phonely-agent', 'LLM', 'llm-dental-v1', 'TTFT', now(), "
-            " 0.4, 0.4, 0.42, 0.45, 0.45, 0.85, 2)"
-        )
+        assert cur.fetchone() is not None
         cur.execute(
             "INSERT INTO benchmarks_v2.models "
             "(modality, provider, model, voice, voices, creator, source, licensing, "
@@ -370,40 +284,20 @@ def test_llm_benchmark_rows_are_accepted(pg_conn: psycopg.Connection[Any]) -> No
 
 
 def test_widened_checks_are_validated_and_enforced(pg_conn: psycopg.Connection[Any]) -> None:
-    """The NOT VALID swaps end validated, and the re-added CHECKs still reject bad values."""
+    """The NOT VALID constraint swaps end validated."""
     _apply_migrations(pg_conn)
     pg_conn.autocommit = True
 
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT conname, convalidated FROM pg_constraint "
-            "WHERE conname IN ('results_benchmark_check', 'results_by_bucket_benchmark_check', "
-            " 'benchmark_observations_benchmark_check', "
+            "WHERE conname IN ('benchmark_observations_benchmark_check', "
             " 'models_modality_check', 'model_history_modality_check') "
             "ORDER BY conname"
         )
         rows = cur.fetchall()
-    assert len(rows) == 5
+    assert len(rows) == 3
     assert all(validated for _, validated in rows), rows
-
-    pg_conn.autocommit = False
-    with (
-        pytest.raises(psycopg.errors.CheckViolation),
-        pg_conn.cursor() as cur,
-    ):
-        cur.execute(
-            "INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status) "
-            "VALUES ('sha', 'ds', 'hash', 'succeeded') RETURNING id"
-        )
-        run_row = cur.fetchone()
-        assert run_row is not None
-        cur.execute(
-            "INSERT INTO benchmarks_v2.results "
-            "(run_id, provider, model, benchmark, metric_type, metric_value, metric_units, status) "
-            "VALUES (%s, 'acme', 'x', 'XYZ', 'TTFT', 1.0, 'seconds', 'success')",
-            (run_row[0],),
-        )
-    pg_conn.rollback()
 
 
 def test_pool_singleton(pg_conn: psycopg.Connection[Any]) -> None:
@@ -515,46 +409,6 @@ def test_coval_metric_ingestion_reads_normalized_storage(
                         error="run failed" if run_status is RunStatus.FAILED else None,
                     )
 
-            async def add_legacy(
-                *,
-                name: str,
-                coval_run_id: str,
-                benchmark: Benchmark = Benchmark.S2S,
-                metric_type: str = Metric.INSTRUCTION_FOLLOWING,
-                run_status: RunStatus = RunStatus.SUCCEEDED,
-            ) -> None:
-                run = await writer.start_run(dataset_id=f"legacy-{name}", dataset_sha256="b" * 64)
-                assert run.id is not None
-                result = _coval_result(run.id, benchmark=benchmark, coval_run_id=coval_run_id)
-                if metric_type != result.metric_type:
-                    result = result.model_copy(
-                        update={"metric_type": metric_type, "metric_units": "seconds"}
-                    )
-                async with pool.connection() as conn:
-                    await conn.execute(
-                        """INSERT INTO benchmarks_v2.results
-                           (run_id, provider, model, benchmark, metric_type, metric_value,
-                            metric_units, audio_filename, status)
-                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                        (
-                            result.run_id,
-                            result.provider,
-                            result.model,
-                            result.benchmark,
-                            result.metric_type,
-                            result.metric_value,
-                            result.metric_units,
-                            result.audio_filename,
-                            result.status,
-                        ),
-                    )
-                if run_status is not RunStatus.RUNNING:
-                    await writer.finish_run(
-                        run.id,
-                        status=run_status,
-                        error="run failed" if run_status is RunStatus.FAILED else None,
-                    )
-
             await add_normalized(name="llm", sample_id="RLLM/sim-1")
             await add_normalized(name="s2s", benchmark=Benchmark.S2S, sample_id="RS2S/sim-1")
             await add_normalized(
@@ -588,20 +442,6 @@ def test_coval_metric_ingestion_reads_normalized_storage(
                 sample_id="RMODEL/sim-1",
                 model="another-model",
             )
-            await add_legacy(name="llm", coval_run_id="RLLM-LEGACY", benchmark=Benchmark.LLM)
-            await add_legacy(name="succeeded", coval_run_id="RS2S-SUCCEEDED")
-            await add_legacy(
-                name="partial", coval_run_id="RS2S-PARTIAL", run_status=RunStatus.PARTIAL
-            )
-            await add_legacy(
-                name="wrong-metric",
-                coval_run_id="RS2S-WRONG-METRIC",
-                metric_type=Metric.CALL_LENGTH,
-            )
-            await add_legacy(name="failed", coval_run_id="RS2S-FAILED", run_status=RunStatus.FAILED)
-            await add_legacy(
-                name="running", coval_run_id="RS2S-RUNNING", run_status=RunStatus.RUNNING
-            )
 
             return {
                 "normalized-llm": await writer.coval_metric_ingested(
@@ -610,40 +450,9 @@ def test_coval_metric_ingestion_reads_normalized_storage(
                     metric_type=Metric.INSTRUCTION_FOLLOWING,
                     benchmark=Benchmark.LLM,
                 ),
-                "legacy-only-llm": await writer.coval_metric_ingested(
-                    provider="test-provider",
-                    coval_run_id="RLLM-LEGACY",
-                    metric_type=Metric.INSTRUCTION_FOLLOWING,
-                    benchmark=Benchmark.LLM,
-                ),
                 "normalized-only-s2s": await writer.coval_metric_ingested(
                     provider="test-provider",
                     coval_run_id="RS2S",
-                    metric_type=Metric.INSTRUCTION_FOLLOWING,
-                ),
-                "s2s-succeeded": await writer.coval_metric_ingested(
-                    provider="test-provider",
-                    coval_run_id="RS2S-SUCCEEDED",
-                    metric_type=Metric.INSTRUCTION_FOLLOWING,
-                ),
-                "s2s-partial": await writer.coval_metric_ingested(
-                    provider="test-provider",
-                    coval_run_id="RS2S-PARTIAL",
-                    metric_type=Metric.INSTRUCTION_FOLLOWING,
-                ),
-                "s2s-wrong-metric": await writer.coval_metric_ingested(
-                    provider="test-provider",
-                    coval_run_id="RS2S-WRONG-METRIC",
-                    metric_type=Metric.INSTRUCTION_FOLLOWING,
-                ),
-                "s2s-failed": await writer.coval_metric_ingested(
-                    provider="test-provider",
-                    coval_run_id="RS2S-FAILED",
-                    metric_type=Metric.INSTRUCTION_FOLLOWING,
-                ),
-                "s2s-running": await writer.coval_metric_ingested(
-                    provider="test-provider",
-                    coval_run_id="RS2S-RUNNING",
                     metric_type=Metric.INSTRUCTION_FOLLOWING,
                 ),
                 "failed-eval-succeeded-parent": await writer.coval_metric_ingested(
@@ -694,13 +503,7 @@ def test_coval_metric_ingestion_reads_normalized_storage(
     result = asyncio.run(_run())
     assert result == {
         "normalized-llm": True,
-        "legacy-only-llm": False,
         "normalized-only-s2s": True,
-        "s2s-succeeded": False,
-        "s2s-partial": False,
-        "s2s-wrong-metric": False,
-        "s2s-failed": False,
-        "s2s-running": False,
         "failed-eval-succeeded-parent": True,
         "failed-eval-partial-parent": True,
         "failed-parent": False,

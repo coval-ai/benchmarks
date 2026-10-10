@@ -312,9 +312,8 @@ class Run(BaseModel):
 
 
 class Result(BaseModel):
-    """Domain model for a row in ``benchmarks_v2.results``."""
+    """One provider measurement for one item, before it is frozen into a capture."""
 
-    id: int | None = None  # set by DB (bigserial)
     run_id: int
     provider: str
     model: str

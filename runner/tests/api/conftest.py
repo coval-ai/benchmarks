@@ -165,28 +165,6 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 error          text
             )
         """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS benchmarks_v2.results (
-                id             bigserial PRIMARY KEY,
-                run_id         bigint NOT NULL
-                    REFERENCES benchmarks_v2.runs(id) ON DELETE CASCADE,
-                provider       text NOT NULL,
-                model          text NOT NULL,
-                voice          text,
-                benchmark      text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S','LLM')),
-                metric_type    text NOT NULL,
-                metric_value   double precision,
-                metric_units   text,
-                audio_filename text,
-                transcript     text,
-                status         text NOT NULL CHECK (status IN ('success','failed')),
-                error          text,
-                created_at     timestamptz NOT NULL DEFAULT now(),
-                wer_insertions_pct    double precision,
-                wer_deletions_pct     double precision,
-                wer_substitutions_pct double precision
-            )
-        """)
         # Mock tool-call log (mirrors migration 20260826_0022).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.mock_tool_calls (
@@ -653,53 +631,6 @@ async def _insert_run(postgresql: Any, **kwargs: Any) -> int:
                  %(scheduled_at)s)
             RETURNING id
             """,
-            defaults,
-        )
-        result = await row.fetchone()
-        assert result is not None
-        return int(result[0])
-    finally:
-        await aconn.close()
-
-
-async def _insert_result(
-    postgresql: Any,
-    run_id: int,
-    *,
-    created_at: datetime | None = None,
-    **kwargs: Any,
-) -> int:
-    """Helper: insert a result row and return its id.
-
-    Pass ``created_at`` as a :class:`datetime` to override the DB default
-    (``now()``).  This is useful for seeding rows at specific points in time
-    for window-filter tests.  All other columns can be overridden via kwargs.
-    """
-    dsn = _make_db_url(postgresql)
-    aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
-    try:
-        defaults: dict[str, Any] = {
-            "run_id": run_id,
-            "provider": "deepgram",
-            "model": "nova-3",
-            "voice": None,
-            "benchmark": "STT",
-            "metric_type": "WER",
-            "metric_value": 3.5,
-            "metric_units": "%",
-            "audio_filename": "test.wav",
-            "status": "success",
-        }
-        defaults.update(kwargs)
-        if created_at is not None:
-            defaults["created_at"] = created_at
-
-        # S608 false-positive: column names are dict keys set here, never caller values.
-        columns = ", ".join(defaults)
-        placeholders = ", ".join(f"%({c})s" for c in defaults)
-        row = await aconn.execute(
-            f"INSERT INTO benchmarks_v2.results ({columns})"  # noqa: S608
-            f" VALUES ({placeholders}) RETURNING id",
             defaults,
         )
         result = await row.fetchone()
