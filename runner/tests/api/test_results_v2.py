@@ -29,7 +29,6 @@ from tests.api.conftest import (
     EA_MODEL,
     EA_ORG,
     EA_PROVIDER,
-    _insert_result,
     _insert_run,
     _make_db_url,
     add_models,
@@ -103,7 +102,7 @@ def _apply_metric_id_enforcement(dsn: str) -> None:
 def mixed_metric_id_rows(postgresql: Any) -> tuple[int, UUID, UUID]:
     """Create backfilled historical and post-0036 populated identities."""
     dsn = _make_db_url(postgresql)
-    normalized_metric_ids = import_module(
+    metric_ids_migration = import_module(
         "coval_bench.db.migrations.versions.20260915_0036_normalized_metric_ids"
     )
     with psycopg.connect(dsn, autocommit=True) as conn:
@@ -115,8 +114,8 @@ def mixed_metric_id_rows(postgresql: Any) -> tuple[int, UUID, UUID]:
                    REFERENCES benchmarks_v2.metrics(id))"""
         )
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute))
-            normalized_metric_ids.downgrade()
+            monkeypatch.setattr(metric_ids_migration, "op", SimpleNamespace(execute=conn.execute))
+            metric_ids_migration.downgrade()
         run_row = conn.execute(
             """
             INSERT INTO benchmarks_v2.runs
@@ -135,8 +134,8 @@ def mixed_metric_id_rows(postgresql: Any) -> tuple[int, UUID, UUID]:
             sample_id="historical-row",
         )
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute))
-            normalized_metric_ids.upgrade()
+            monkeypatch.setattr(metric_ids_migration, "op", SimpleNamespace(execute=conn.execute))
+            metric_ids_migration.upgrade()
         for table in (
             "metric_evaluations",
             "dashboard_metric_values",
@@ -779,9 +778,7 @@ async def test_default_rows_and_parent_status_filters(client: AsyncClient, postg
 
 
 @pytest.mark.asyncio
-async def test_all_status_filters_include_every_independent_state_and_ignore_legacy(
-    client: AsyncClient, postgresql: Any
-) -> None:
+async def test_all_status_filters_are_rejected(client: AsyncClient, postgresql: Any) -> None:
     cases = (
         ("succeeded", "succeeded"),
         ("partial", "running"),
@@ -793,7 +790,6 @@ async def test_all_status_filters_include_every_independent_state_and_ignore_leg
         run_id = await _insert_run(postgresql, status=run_status)
         run_ids.append(run_id)
         await _insert_evaluation(postgresql, run_id, status=evaluation_status, value=None)
-    await _insert_result(postgresql, run_ids[0], provider="legacy-only", model="legacy")
 
     response = await client.get(
         "/v2/results", params={"evaluation_status": "all", "run_status": "all"}

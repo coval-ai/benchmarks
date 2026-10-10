@@ -19,10 +19,11 @@ from click.testing import CliRunner
 from structlog.testing import capture_logs
 
 from coval_bench.config import ScenarioCovalIds, Settings
-from coval_bench.db.models import MetricExecutor, Result, ResultStatus, Run, RunStatus
+from coval_bench.db.models import Result, ResultStatus, Run, RunStatus
 from coval_bench.logging import log_run_failed, log_run_partial, log_run_unmapped_persona
 from coval_bench.registries import Benchmark, Metric
 from coval_bench.registries.models import RegisteredModel
+from coval_bench.runner import persistence
 from coval_bench.runner.capture import (
     ImportRunClaim,
     RunSeal,
@@ -52,18 +53,29 @@ from coval_bench.s2s.fetch_v2v import AgentSpec, CovalRun
 
 
 def _settings(**kwargs: Any) -> Settings:
-    defaults: dict[str, Any] = {
-        "normalized_dual_write_enabled": True,
-        "normalized_capture_required": True,
-        "benchmark_artifact_bucket": "test-artifacts",
-    }
+    defaults: dict[str, Any] = {"benchmark_artifact_bucket": "test-artifacts"}
     defaults.update(kwargs)
     return Settings(**defaults)
+
+
+# Results handed to each envelope, keyed by envelope identity, so capture fakes
+# can report what was captured without decoding the frozen payload.
+_CAPTURED_RESULTS: dict[int, list[Any]] = {}
+_prepare_capture_envelope = persistence.prepare_capture_envelope
+
+
+def _prepare_and_keep_results(**kwargs: Any) -> Any:
+    envelope = _prepare_capture_envelope(**kwargs)
+    _CAPTURED_RESULTS[id(envelope)] = list(kwargs["results"])
+    return envelope
 
 
 @pytest.fixture(autouse=True)
 def _local_capture(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mock external storage while keeping required importer dispatch under test."""
+    monkeypatch.setattr(
+        "coval_bench.runner.persistence.prepare_capture_envelope", _prepare_and_keep_results
+    )
     monkeypatch.setattr("google.cloud.storage.Client", MagicMock(return_value=object()))
     monkeypatch.setattr("coval_bench.runner.capture.preflight_capture_storage", MagicMock())
     monkeypatch.setattr(
@@ -74,20 +86,15 @@ def _local_capture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fetch_v2v, "upload_import_run_claim", lambda _client, _bucket, claim: claim)
 
     async def persist(**kwargs: Any) -> str:
-        rows = [Result.model_validate(row) for row in kwargs["envelope"].payload["legacy_rows"]]
+        rows = _CAPTURED_RESULTS.pop(id(kwargs["envelope"]))
         await kwargs["writer"].capture_results(
             rows, created_at=kwargs["envelope"].payload["captured_at"]
         )
         return "completed"
 
     monkeypatch.setattr(
-        "coval_bench.runner.normalized.persist_capture", AsyncMock(side_effect=persist)
+        "coval_bench.runner.persistence.persist_capture", AsyncMock(side_effect=persist)
     )
-
-    async def submit(**kwargs: Any) -> None:
-        await kwargs["writer"].capture_results(kwargs["results"], created_at=kwargs["captured_at"])
-
-    monkeypatch.setattr("coval_bench.runner.normalized.dual_write", AsyncMock(side_effect=submit))
 
 
 IDS = {Metric.V2V: "MID", Metric.INSTRUCTION_FOLLOWING: "IID"}
@@ -210,7 +217,9 @@ def _fake_client(
 
 def _stub_writer() -> MagicMock:
     writer = MagicMock()
-    writer.start_run = AsyncMock(
+    writer.coval_metric_ingested = AsyncMock(return_value=False)
+    writer.reserve_run_id = AsyncMock(return_value=1)
+    writer.ensure_capture_run = AsyncMock(
         return_value=Run(
             id=1,
             dataset_id="s2s-v1",
@@ -218,20 +227,12 @@ def _stub_writer() -> MagicMock:
             status=RunStatus.RUNNING,
         )
     )
-    writer.coval_metric_ingested = AsyncMock(return_value=False)
-    writer.get_run = AsyncMock(return_value=writer.start_run.return_value)
-    writer.reserve_run_id = AsyncMock(return_value=1)
-    writer.ensure_capture_run = AsyncMock(return_value=writer.start_run.return_value)
     writer.conversation_ttft = AsyncMock(return_value={})
-    writer.record_results = AsyncMock()
     writer.capture_results = AsyncMock()
-    writer.finish_run = AsyncMock()
     writer.finish_run_exact = AsyncMock()
     writer.mark_run_capture_pending = AsyncMock()
     writer.preflight_required_capture_schema = AsyncMock()
-    writer.refresh_bucket = AsyncMock()
     writer.rebuild_run_rollup = AsyncMock()
-    writer.refresh_stats_matviews = AsyncMock()
     writer.refresh_window_views = AsyncMock(return_value="published")
     return writer
 
@@ -249,13 +250,25 @@ async def _fetch(client: httpx.AsyncClient, writer: MagicMock) -> tuple[RunStatu
 
 
 async def _ingest_run(*args: Any, **kwargs: Any) -> RunStatus | None:
-    """Exercise transformations through the private normalized submission path."""
-    kwargs.setdefault("normalized_dual_write_enabled", True)
+    kwargs.setdefault("artifact_client", object())
+    kwargs.setdefault("artifact_bucket", "test-artifacts")
+    kwargs.setdefault(
+        "import_identity",
+        fetch_v2v._import_identity(
+            spec=kwargs["spec"],
+            coval_run=kwargs["coval_run"],
+            dataset_id=kwargs.get("dataset_id", fetch_v2v.DATASET_ID),
+            dataset_sha256=kwargs.get("dataset_sha256") or "f" * 64,
+            workspace_id=kwargs.get("workspace_id"),
+        ),
+    )
+    kwargs.setdefault("import_generation", 0)
     return await fetch_v2v._ingest_run(*args, **kwargs)
 
 
 async def _fetch_one_provider(*args: Any, **kwargs: Any) -> tuple[RunStatus, int]:
-    kwargs.setdefault("normalized_dual_write_enabled", True)
+    kwargs.setdefault("artifact_client", object())
+    kwargs.setdefault("artifact_bucket", "test-artifacts")
     return await fetch_v2v._fetch_one_provider(*args, **kwargs)
 
 
@@ -560,11 +573,11 @@ async def test_ingest_run_slots_by_create_time() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    assert writer.start_run.await_args.kwargs["scheduled_at"] == datetime(2026, 7, 7, 0, tzinfo=UTC)
-    writer.record_results.assert_not_awaited()
-    writer.refresh_bucket.assert_not_awaited()
+    assert writer.ensure_capture_run.await_args.kwargs["scheduled_at"] == datetime(
+        2026, 7, 7, 0, tzinfo=UTC
+    )
     writer.rebuild_run_rollup.assert_awaited_once_with(1)
-    assert writer.finish_run.await_args.kwargs["status"] is RunStatus.SUCCEEDED
+    assert writer.finish_run_exact.await_args.kwargs["status"] is RunStatus.SUCCEEDED
 
 
 @pytest.mark.asyncio
@@ -585,7 +598,6 @@ async def test_ingest_run_partial_and_failed() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.PARTIAL
-    writer.refresh_bucket.assert_not_awaited()
     writer.rebuild_run_rollup.assert_awaited_once_with(1)
 
     writer = _stub_writer()
@@ -600,7 +612,6 @@ async def test_ingest_run_partial_and_failed() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.FAILED
-    writer.refresh_bucket.assert_not_awaited()
     writer.rebuild_run_rollup.assert_not_awaited()
 
 
@@ -625,8 +636,8 @@ async def test_ingest_run_rollup_refresh_failure_does_not_change_status(
         )
 
     assert status is RunStatus.SUCCEEDED
-    writer.finish_run.assert_awaited_once_with(1, status=RunStatus.SUCCEEDED)
-    writer.refresh_bucket.assert_not_awaited()
+    writer.finish_run_exact.assert_awaited_once()
+    assert writer.finish_run_exact.await_args.kwargs["status"] is RunStatus.SUCCEEDED
     writer.rebuild_run_rollup.assert_awaited_once_with(1)
 
 
@@ -647,7 +658,7 @@ async def test_ingest_run_skips_before_any_write() -> None:
             )
             is None
         )
-    writer.start_run.assert_not_awaited()
+    writer.ensure_capture_run.assert_not_awaited()
 
     # Anchor present but valueless (a fully-wrecked run): still skipped.
     writer = _stub_writer()
@@ -663,7 +674,7 @@ async def test_ingest_run_skips_before_any_write() -> None:
             )
             is None
         )
-    writer.start_run.assert_not_awaited()
+    writer.ensure_capture_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -682,7 +693,6 @@ async def test_ingest_run_ignores_error_status() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -737,15 +747,15 @@ async def test_ingest_run_anchor_without_id_synthesizes_no_failures() -> None:
     assert status is RunStatus.SUCCEEDED
     rows = _captured_rows(writer)
     assert [(r.audio_filename, r.status) for r in rows] == [
-        ("R1/s1", ResultStatus.SUCCESS),
         ("R1/1", ResultStatus.SUCCESS),
+        ("R1/s1", ResultStatus.SUCCESS),
     ]
 
 
 @pytest.mark.asyncio
 async def test_fetch_one_provider_ingests_every_new_run() -> None:
     writer = _stub_writer()
-    writer.start_run = AsyncMock(
+    writer.ensure_capture_run = AsyncMock(
         side_effect=[
             Run(
                 id=i,
@@ -765,7 +775,7 @@ async def test_fetch_one_provider_ingests_every_new_run() -> None:
         status, ingested = await _fetch(client, writer)
 
     assert (status, ingested) == (RunStatus.SUCCEEDED, 2)
-    assert writer.start_run.await_count == 2
+    assert writer.ensure_capture_run.await_count == 2
     written = [c.args[0][0].audio_filename for c in writer.capture_results.await_args_list]
     assert written == ["R2/s1", "R1/s1"]
 
@@ -778,7 +788,7 @@ async def test_fetch_one_provider_noop_when_fresh() -> None:
     async with _fake_client(list_json, {}) as client:
         status, ingested = await _fetch(client, writer)
     assert (status, ingested) == (RunStatus.SUCCEEDED, 0)
-    writer.start_run.assert_not_awaited()
+    writer.ensure_capture_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -837,7 +847,6 @@ async def test_fetch_one_provider_stale_wins_over_backfill() -> None:
     async with _fake_client(list_json, _run_json(values)) as client:
         status, ingested = await _fetch(client, writer)
     assert (status, ingested) == (RunStatus.FAILED, 1)
-    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -890,7 +899,7 @@ async def test_fetch_one_provider_ingests_errored_run() -> None:
     # An EXECUTION_FAILURE stamp (one failed conversation) no longer drops the
     # run: its healthy clips ingest and count as freshness.
     writer = _stub_writer()
-    writer.start_run = AsyncMock(
+    writer.ensure_capture_run = AsyncMock(
         side_effect=[
             Run(
                 id=i,
@@ -917,7 +926,7 @@ async def test_fetch_one_provider_ingests_errored_run() -> None:
     assert (status, ingested) == (RunStatus.PARTIAL, 2)
     written = [c.args[0][0].audio_filename for c in writer.capture_results.await_args_list]
     assert written == ["R2/s1", "R2/s2", "R1/s1"]
-    partial = writer.finish_run.await_args_list[0].kwargs["status"]
+    partial = writer.finish_run_exact.await_args_list[0].kwargs["status"]
     assert partial is RunStatus.PARTIAL
 
 
@@ -948,7 +957,6 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
 
     # only openai runs (gemini unset), and it fully succeeds.
     assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
-    writer.refresh_stats_matviews.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1090,7 +1098,7 @@ async def test_text_agent_uses_instruction_as_the_clean_bank_anchor() -> None:
         status, ingested = await _fetch_llm(writer, values)
 
     assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
-    assert writer.start_run.await_args.kwargs["dataset_id"] == DATASET_ID_LLM_BANK
+    assert writer.ensure_capture_run.await_args.kwargs["dataset_id"] == DATASET_ID_LLM_BANK
     writer.conversation_ttft.assert_awaited_once_with(["s1", "s2"])
     rows = _captured_rows(writer)
     assert {(r.metric_type, r.audio_filename, r.metric_value, r.metric_units) for r in rows} == {
@@ -1143,7 +1151,7 @@ async def test_ttft_backfills_onto_an_ingested_run_once_turns_exist() -> None:
 
     status, ingested = await _fetch_llm(writer, values)
     assert (status, ingested) == (RunStatus.SUCCEEDED, 0)
-    writer.start_run.assert_not_awaited()
+    writer.ensure_capture_run.assert_not_awaited()
 
     writer.conversation_ttft = AsyncMock(return_value={"s1": 0.2})
     status, ingested = await _fetch_llm(writer, values)
@@ -1161,7 +1169,7 @@ async def test_non_clean_text_personas_are_not_ingested() -> None:
 
     assert (status, ingested) == (RunStatus.FAILED, 0)
     writer.coval_metric_ingested.assert_not_awaited()
-    writer.start_run.assert_not_awaited()
+    writer.ensure_capture_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1315,7 +1323,7 @@ async def test_each_dataset_publishes_its_own_sample_tick(
 
 
 @pytest.mark.asyncio
-async def test_fetch_and_write_v2v_noop_skips_matview_refresh(
+async def test_fetch_and_write_v2v_noop_tick_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
@@ -1341,7 +1349,6 @@ async def test_fetch_and_write_v2v_noop_skips_matview_refresh(
     statuses = await fetch_v2v.fetch_and_write_v2v(settings)
 
     assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
-    writer.refresh_stats_matviews.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1673,7 +1680,7 @@ async def test_noisy_and_clean_runs_land_in_different_datasets() -> None:
             period_seconds=10_800,
             stale_grace_seconds=5_400,
         )
-    datasets = [c.kwargs["dataset_id"] for c in writer.start_run.await_args_list]
+    datasets = [c.kwargs["dataset_id"] for c in writer.ensure_capture_run.await_args_list]
     assert datasets == ["s2s-multiturn-noisy-v1", "s2s-multiturn-v1"]
     # Both runs carry latency, but the noise dataset excludes it: only the clean
     # run writes V2V rows, and neither warns about the omission.
@@ -1683,7 +1690,7 @@ async def test_noisy_and_clean_runs_land_in_different_datasets() -> None:
         {Metric.V2V, Metric.INSTRUCTION_FOLLOWING},
     ]
     # Provenance rides along so a row says which persona produced it.
-    personas = [c.kwargs["persona_id"] for c in writer.start_run.await_args_list]
+    personas = [c.kwargs["persona_id"] for c in writer.ensure_capture_run.await_args_list]
     assert personas == ["PN", "PCLEAN"]
 
 
@@ -1729,26 +1736,15 @@ async def test_fetch_and_write_rejects_noisy_persona_without_a_test_set() -> Non
 
 
 @pytest.mark.asyncio
-async def test_fetch_and_write_rejects_a_blank_happypath_test_set() -> None:
+@pytest.mark.parametrize(
+    "setting", ["coval_s2s_happypath_test_set_id", "coval_s2s_dental_test_set_id"]
+)
+async def test_fetch_and_write_rejects_a_blank_test_set(setting: str) -> None:
     # Blank would skip its agents with only a warning, indistinguishable from unset.
     settings = _settings(
-        coval_s2s_latency_metric_id="MID",
-        coval_s2s_openai_agent_id="a1",
-        coval_s2s_happypath_test_set_id="   ",
+        coval_s2s_latency_metric_id="MID", coval_s2s_openai_agent_id="a1", **{setting: "   "}
     )
-    with pytest.raises(RuntimeError, match="coval_s2s_happypath_test_set_id must not be blank"):
-        await fetch_v2v.fetch_and_write_v2v(settings)
-
-
-@pytest.mark.asyncio
-async def test_fetch_and_write_rejects_a_blank_dental_test_set() -> None:
-    # gray/red read this one, so blank would strand both with only a warning.
-    settings = _settings(
-        coval_s2s_latency_metric_id="MID",
-        coval_s2s_openai_agent_id="a1",
-        coval_s2s_dental_test_set_id="   ",
-    )
-    with pytest.raises(RuntimeError, match="coval_s2s_dental_test_set_id must not be blank"):
+    with pytest.raises(RuntimeError, match=f"{setting} must not be blank"):
         await fetch_v2v.fetch_and_write_v2v(settings)
 
 
@@ -2133,8 +2129,7 @@ async def test_ingest_run_backfill_instruction_absent_is_noop() -> None:
             period_seconds=10_800,
         )
     assert status is None  # nothing to write -> no run row, stays retryable
-    writer.start_run.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
+    writer.ensure_capture_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2178,8 +2173,7 @@ async def test_ingest_run_latency_required_on_the_standard_caller() -> None:
             period_seconds=10_800,
         )
     assert status is None
-    writer.start_run.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
+    writer.ensure_capture_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2203,8 +2197,7 @@ async def test_ingest_run_rejects_duplicate_ids_in_the_anchor() -> None:
             period_seconds=10_800,
         )
     assert status is None
-    writer.start_run.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
+    writer.ensure_capture_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2231,8 +2224,7 @@ async def test_ingest_run_latency_absent_instruction_without_rows_is_noop(
             period_seconds=10_800,
         )
     assert status is None
-    writer.start_run.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
+    writer.ensure_capture_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2263,7 +2255,7 @@ async def test_already_ingested_instruction_only_run_is_fresh() -> None:
         )
 
     assert (status, ingested) == (RunStatus.SUCCEEDED, 0)
-    writer.start_run.assert_not_awaited()
+    writer.ensure_capture_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2292,7 +2284,7 @@ async def test_run_skipped_when_the_required_metric_is_unconfigured() -> None:
         )
     assert ingested == 0
     assert sampled == []
-    writer.start_run.assert_not_awaited()
+    writer.ensure_capture_run.assert_not_awaited()
     assert status is not RunStatus.SUCCEEDED
 
 
@@ -2310,8 +2302,7 @@ async def test_ingest_run_no_metrics_present_is_noop() -> None:
             period_seconds=10_800,
         )
     assert status is None
-    writer.start_run.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
+    writer.ensure_capture_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2412,120 +2403,6 @@ def test_cli_no_providers_alerts_failed_exit_nonzero(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_ingest_run_dual_writes_one_observation_per_conversation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    writer = _stub_writer()
-    dual_write = AsyncMock()
-    monkeypatch.setattr("coval_bench.runner.normalized.dual_write", dual_write)
-    latency = [
-        {"simulation_output_id": "s1", "value": 0.5},
-        {"simulation_output_id": "s2", "value": 0.6},
-    ]
-    instruction = [
-        {"simulation_output_id": "s1", "value": "YES"},
-        {"simulation_output_id": "s2", "value": "NO"},
-    ]
-    fixture = {
-        "run": {
-            "results": {"metrics": {"MID": {"values": latency}, "IID": {"values": instruction}}}
-        }
-    }
-
-    async with _fake_client({}, fixture) as client:
-        status = await _ingest_run(
-            client,
-            writer,
-            spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None),
-            metric_ids=IDS,
-            condition=condition_for(DATASET_ID_MULTITURN),
-            dataset_id=DATASET_ID_MULTITURN,
-            dataset_sha256="test-set:persona",
-            period_seconds=10_800,
-            normalized_dual_write_enabled=True,
-        )
-
-    assert status is RunStatus.SUCCEEDED
-    assert dual_write.await_count == 2
-    calls = {call.kwargs["sample_id"]: call.kwargs for call in dual_write.await_args_list}
-    assert set(calls) == {"R1/s1", "R1/s2"}
-    assert {row.metric_type for row in calls["R1/s1"]["results"]} == {
-        Metric.V2V,
-        Metric.INSTRUCTION_FOLLOWING,
-    }
-    assert calls["R1/s1"]["dataset_sha256"] == hashlib.sha256(b"test-set:persona").hexdigest()
-    assert calls["R1/s1"]["executor"] is MetricExecutor.COVAL_API
-    assert calls["R1/s1"]["captured_at"] == calls["R1/s2"]["captured_at"]
-    writer.record_results.assert_not_awaited()
-    for kwargs in calls.values():
-        assert kwargs["db_retry_attempts"] == 3
-        assert not any("semaphore" in key for key in kwargs)
-
-
-@pytest.mark.asyncio
-async def test_ingest_run_dual_writes_llm_rows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    writer = _stub_writer()
-    dual_write = AsyncMock()
-    monkeypatch.setattr("coval_bench.runner.normalized.dual_write", dual_write)
-    condition = DatasetMetrics(
-        benchmark=Benchmark.LLM,
-        required=Metric.INSTRUCTION_FOLLOWING,
-    )
-
-    async with _fake_client(
-        {}, _run_json([{"simulation_output_id": "s1", "value": "YES"}], metric_id="IID")
-    ) as client:
-        status = await _ingest_run(
-            client,
-            writer,
-            spec=LLM_SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None),
-            metric_ids={Metric.INSTRUCTION_FOLLOWING: "IID"},
-            condition=condition,
-            dataset_id="llm-bank-v1",
-            period_seconds=10_800,
-            normalized_dual_write_enabled=True,
-        )
-
-    assert status is RunStatus.SUCCEEDED
-    dual_write.assert_awaited_once()
-    kwargs = dual_write.await_args_list[0].kwargs
-    assert (kwargs["benchmark"], kwargs["sample_id"]) == (Benchmark.LLM, "R1/s1")
-    assert len(kwargs["results"]) == 1
-    assert kwargs["results"][0].benchmark is Benchmark.LLM
-
-
-@pytest.mark.asyncio
-async def test_ingest_run_normalized_failure_does_not_fallback_to_legacy_rows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    writer = _stub_writer()
-    dual_write = AsyncMock(side_effect=RuntimeError("normalized unavailable"))
-    monkeypatch.setattr("coval_bench.runner.normalized.dual_write", dual_write)
-    values = [{"simulation_output_id": "s1", "value": 0.5}]
-
-    async with _fake_client({}, _run_json(values)) as client:
-        status = await _ingest_run(
-            client,
-            writer,
-            spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None),
-            metric_ids=LATENCY_IDS,
-            dataset_sha256="f" * 64,
-            period_seconds=10_800,
-            normalized_dual_write_enabled=True,
-        )
-
-    assert status is RunStatus.SUCCEEDED
-    writer.record_results.assert_not_awaited()
-    writer.finish_run.assert_awaited_once()
-    dual_write.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("spec", "condition", "metric_ids"),
     [
@@ -2540,7 +2417,7 @@ async def test_ingest_run_normalized_failure_does_not_fallback_to_legacy_rows(
         ),
     ],
 )
-async def test_required_s2s_and_llm_capture_precedes_legacy_and_marks_backlog_partial(
+async def test_required_s2s_and_llm_capture_marks_backlog_partial(
     monkeypatch: pytest.MonkeyPatch,
     spec: AgentSpec,
     condition: DatasetMetrics,
@@ -2550,7 +2427,7 @@ async def test_required_s2s_and_llm_capture_precedes_legacy_and_marks_backlog_pa
     writer.finish_run_exact = AsyncMock()
     persist = AsyncMock(return_value="pending")
     upload_state = MagicMock(return_value=("gs://private/state", "a" * 64))
-    monkeypatch.setattr("coval_bench.runner.normalized.persist_capture", persist)
+    monkeypatch.setattr("coval_bench.runner.persistence.persist_capture", persist)
     monkeypatch.setattr("coval_bench.runner.capture.upload_run_state", upload_state)
     monkeypatch.setattr(fetch_v2v, "upload_import_run_claim", lambda _c, _b, claim: claim)
     metric_id = next(iter(metric_ids.values()))
@@ -2577,8 +2454,6 @@ async def test_required_s2s_and_llm_capture_precedes_legacy_and_marks_backlog_pa
             dataset_id="required-v1",
             dataset_sha256="f" * 64,
             period_seconds=10_800,
-            normalized_dual_write_enabled=True,
-            normalized_capture_required=True,
             artifact_client=object(),
             artifact_bucket="private",
             import_identity=import_identity,
@@ -2586,8 +2461,6 @@ async def test_required_s2s_and_llm_capture_precedes_legacy_and_marks_backlog_pa
         )
 
     assert status is RunStatus.PARTIAL
-    writer.record_results.assert_not_awaited()
-    writer.start_run.assert_not_awaited()
     writer.reserve_run_id.assert_awaited_once()
     writer.ensure_capture_run.assert_awaited_once()
     persist.assert_awaited_once()
@@ -2606,7 +2479,7 @@ async def test_required_import_restart_reuses_durable_claim_run(
     writer.finish_run_exact = AsyncMock()
     persist = AsyncMock(return_value="completed")
     upload_state = MagicMock(return_value=("gs://private/state", "a" * 64))
-    monkeypatch.setattr("coval_bench.runner.normalized.persist_capture", persist)
+    monkeypatch.setattr("coval_bench.runner.persistence.persist_capture", persist)
     monkeypatch.setattr("coval_bench.runner.capture.upload_run_state", upload_state)
     coval_run = CovalRun(run_id="external-run", create_time=datetime(2026, 9, 17, tzinfo=UTC))
     identity = fetch_v2v._import_identity(
@@ -2637,7 +2510,6 @@ async def test_required_import_restart_reuses_durable_claim_run(
             dataset_id="required-v1",
             dataset_sha256="f" * 64,
             period_seconds=10_800,
-            normalized_capture_required=True,
             artifact_client=object(),
             artifact_bucket="private",
             workspace_id="workspace",
@@ -2647,7 +2519,6 @@ async def test_required_import_restart_reuses_durable_claim_run(
         )
 
     assert status is RunStatus.SUCCEEDED
-    writer.start_run.assert_not_awaited()
     writer.reserve_run_id.assert_not_awaited()
     writer.ensure_capture_run.assert_awaited_once()
     assert writer.ensure_capture_run.await_args.args[0] == 41
@@ -2661,7 +2532,7 @@ async def test_required_import_adopts_concurrent_seal_without_failing_run(
     writer = _stub_writer()
     writer.finish_run_exact = AsyncMock()
     persist = AsyncMock(return_value="completed")
-    monkeypatch.setattr("coval_bench.runner.normalized.persist_capture", persist)
+    monkeypatch.setattr("coval_bench.runner.persistence.persist_capture", persist)
     coval_run = CovalRun(run_id="external-run", create_time=datetime(2026, 9, 17, tzinfo=UTC))
     identity = fetch_v2v._import_identity(
         spec=SPEC,
@@ -2699,23 +2570,17 @@ async def test_required_import_adopts_concurrent_seal_without_failing_run(
         finished_at=winner_finished_at,
         expected_capture_ids=[capture_id],
     )
-    seal_calls = 0
 
     def upload_state(
-        _client: object, _bucket: str, _run_id: int, kind: str, value: object
+        _client: object, _bucket: str, _run_id: int, kind: str, _value: object
     ) -> tuple[str, str]:
-        nonlocal seal_calls
         if kind == "seal":
-            seal_calls += 1
-            if seal_calls == 1:
-                raise ValueError("concurrent seal")
-            assert value == winner_seal
+            raise ValueError("concurrent seal")
         return f"gs://private/{kind}", "a" * 64
 
     monkeypatch.setattr("coval_bench.runner.capture.upload_run_state", upload_state)
     monkeypatch.setattr(
-        fetch_v2v,
-        "read_run_state",
+        "coval_bench.runner.capture.read_run_state",
         lambda _client, _bucket, _run_id, kind: (
             winner_seal.model_dump(mode="json") if kind == "seal" else None
         ),
@@ -2732,7 +2597,6 @@ async def test_required_import_adopts_concurrent_seal_without_failing_run(
             dataset_id="required-v1",
             dataset_sha256="f" * 64,
             period_seconds=10_800,
-            normalized_capture_required=True,
             artifact_client=object(),
             artifact_bucket="private",
             workspace_id="workspace",
@@ -2742,7 +2606,6 @@ async def test_required_import_adopts_concurrent_seal_without_failing_run(
         )
 
     assert status is RunStatus.SUCCEEDED
-    writer.finish_run.assert_not_awaited()
     writer.finish_run_exact.assert_awaited_once()
     assert writer.finish_run_exact.await_args.kwargs["finished_at"] == winner_finished_at
     assert writer.finish_run_exact.await_args.kwargs["status"] is RunStatus.SUCCEEDED
@@ -2755,7 +2618,7 @@ async def test_required_import_manifest_failure_remains_resumable(
     writer = _stub_writer()
     writer.finish_run_exact = AsyncMock()
     persist = AsyncMock(return_value="completed")
-    monkeypatch.setattr("coval_bench.runner.normalized.persist_capture", persist)
+    monkeypatch.setattr("coval_bench.runner.persistence.persist_capture", persist)
     coval_run = CovalRun(run_id="external-run", create_time=datetime(2026, 9, 17, tzinfo=UTC))
     identity = fetch_v2v._import_identity(
         spec=SPEC,
@@ -2788,7 +2651,6 @@ async def test_required_import_manifest_failure_remains_resumable(
             dataset_id="required-v1",
             dataset_sha256="f" * 64,
             period_seconds=10_800,
-            normalized_capture_required=True,
             artifact_client=object(),
             artifact_bucket="private",
             workspace_id="workspace",
@@ -2798,7 +2660,6 @@ async def test_required_import_manifest_failure_remains_resumable(
         )
 
     assert first is RunStatus.PARTIAL
-    writer.finish_run.assert_not_awaited()
     upload_state.side_effect = None
     upload_state.return_value = ("gs://private/state", "a" * 64)
 
@@ -2812,7 +2673,6 @@ async def test_required_import_manifest_failure_remains_resumable(
             dataset_id="required-v1",
             dataset_sha256="f" * 64,
             period_seconds=10_800,
-            normalized_capture_required=True,
             artifact_client=object(),
             artifact_bucket="private",
             workspace_id="workspace",
@@ -2822,14 +2682,13 @@ async def test_required_import_manifest_failure_remains_resumable(
         )
 
     assert second is RunStatus.SUCCEEDED
-    writer.finish_run.assert_not_awaited()
     writer.ensure_capture_run.assert_awaited()
     assert {call.args[0] for call in writer.ensure_capture_run.await_args_list} == {41}
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("snapshot_failure", [False, True])
-async def test_fetch_and_write_v2v_propagates_normalized_gate(
+async def test_fetch_and_write_v2v_propagates_capture_gate(
     monkeypatch: pytest.MonkeyPatch,
     snapshot_failure: bool,
 ) -> None:
@@ -2838,8 +2697,6 @@ async def test_fetch_and_write_v2v_propagates_normalized_gate(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_dental_test_set_id="TSD",
-        normalized_dual_write_enabled=True,
-        normalized_capture_required=True,
         benchmark_artifact_bucket="private-artifacts",
     )
     client = _fake_client({}, {})
@@ -2862,7 +2719,7 @@ async def test_fetch_and_write_v2v_propagates_normalized_gate(
     writer.refresh_window_views.assert_awaited_once_with()
     assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
     assert fetch_one.await_args is not None
-    assert fetch_one.await_args.kwargs["normalized_dual_write_enabled"] is True
+    assert fetch_one.await_args.kwargs["artifact_bucket"] == "private-artifacts"
 
 
 def test_scenario_personas_join_the_condition_map() -> None:
@@ -3150,7 +3007,7 @@ async def test_persisted_import_rejects_disabled_capture_before_client(
 ) -> None:
     client = MagicMock()
     monkeypatch.setattr(fetch_v2v, "_client", client)
-    configured = Settings(normalized_dual_write_enabled=False, normalized_capture_required=False)
-    with pytest.raises(RuntimeError, match="normalized persisted capture"):
+    configured = Settings(benchmark_artifact_bucket="")
+    with pytest.raises(RuntimeError, match="benchmark_artifact_bucket"):
         await fetch_v2v.fetch_and_write_v2v(configured, benchmark=benchmark)
     client.assert_not_called()

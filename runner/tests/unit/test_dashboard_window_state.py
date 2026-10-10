@@ -1,4 +1,4 @@
-"""Pure readiness checks for normalized dashboard readers."""
+"""Pure readiness checks for dashboard readers."""
 
 from __future__ import annotations
 

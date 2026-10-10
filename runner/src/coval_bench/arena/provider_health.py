@@ -5,7 +5,7 @@
 proved the key dead.
 
 The TTS benchmark pays real credits against every provider every 30 minutes, so
-normalized observations and evaluations already answer the second question. Reading
+observations and evaluations already answer the second question. Reading
 them keeps the arena free of health state of its own, and of the races that come with
 sharing state across instances. A provider returns to pairing when a later run
 synthesizes for it.

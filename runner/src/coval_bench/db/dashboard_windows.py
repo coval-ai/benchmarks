@@ -16,41 +16,21 @@ from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.dashboard_contracts import DEFINITION_REVISION, aggregation_fingerprint
 from coval_bench.db.metric_definitions import register_metric_definitions
-from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS, Metric
+from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS
 
 logger = structlog.get_logger(__name__)
 
-DEFINITION_REVISION = DEFINITION_REVISION
 WINDOW_VIEWS = {
-    "24h": "benchmarks_v2.normalized_results_24h",
-    "7d": "benchmarks_v2.normalized_results_7d",
-    "30d": "benchmarks_v2.normalized_results_30d",
+    "24h": "benchmarks_v2.results_24h",
+    "7d": "benchmarks_v2.results_7d",
+    "30d": "benchmarks_v2.results_30d",
 }
-_WINDOWS = {"24h": "24 hours", "7d": "7 days", "30d": "30 days"}
 
 
 @dataclass(frozen=True)
 class RefreshResult:
     status: Literal["published", "skipped_lock", "skipped_siblings"]
     generation: int | None = None
-
-
-def validate_window_rules() -> None:
-    """Ensure the WER contract still carries the keys the frozen projection pools."""
-    contract = METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")]
-    units = {definition.key: definition.unit for definition in contract.values}
-    expected = {
-        "primary": "percent",
-        "insertions": "percent",
-        "deletions": "percent",
-        "substitutions": "percent",
-        "substitution_count": "count",
-        "deletion_count": "count",
-        "insertion_count": "count",
-        "reference_words": "count",
-    }
-    if units != expected:
-        raise ValueError("unsupported summary WER contract")
 
 
 async def refresh_window_views(
@@ -60,7 +40,6 @@ async def refresh_window_views(
     run_id: int | None = None,
 ) -> RefreshResult:
     """Refresh all three views and publish one generation atomically."""
-    validate_window_rules()
     captured = as_of or dt.datetime.now(dt.UTC)
     if captured.tzinfo is None:
         raise ValueError("as_of must be timezone-aware")
@@ -108,12 +87,10 @@ async def refresh_window_views(
             raise ValueError("invalid metrics in summary source: " + ", ".join(invalid))
         # The defining SQL reads this transaction-local snapshot boundary.  A
         # failed refresh rolls this provisional update back with the views.
-        await conn.execute(
-            "UPDATE benchmarks_v2.dashboard_window_state SET as_of=%(as_of)s WHERE id=true",
-            {"as_of": captured},
-        )
         state = await conn.execute(
-            "SELECT generation FROM benchmarks_v2.dashboard_window_state WHERE id = true FOR UPDATE"
+            """UPDATE benchmarks_v2.dashboard_window_state SET as_of=%(as_of)s WHERE id=true
+               RETURNING generation""",
+            {"as_of": captured},
         )
         row = await state.fetchone()
         if row is None:
@@ -121,35 +98,22 @@ async def refresh_window_views(
         generation = int(row["generation"]) + 1
         for window, view in WINDOW_VIEWS.items():
             started_at = time.monotonic()
-            concurrent: bool | None = None
             logger.info(
                 "dashboard_window_refresh_started",
                 window=window,
                 view=view,
                 generation=generation,
             )
-            try:
-                populated = await conn.execute(
-                    "SELECT relispopulated FROM pg_class WHERE oid = %(view)s::regclass",
-                    {"view": view},
-                )
-                populated_row = await populated.fetchone()
-                if populated_row is None:
-                    raise RuntimeError(f"dashboard summary view is missing: {view}")
-                concurrent = bool(populated_row["relispopulated"])
-                mode = "CONCURRENTLY " if concurrent else ""
-                await conn.execute(f"REFRESH MATERIALIZED VIEW {mode}{view}")  # noqa: S608
-            except BaseException:
-                logger.error(
-                    "dashboard_window_refresh_failed",
-                    window=window,
-                    view=view,
-                    generation=generation,
-                    concurrent=concurrent,
-                    elapsed_seconds=round(time.monotonic() - started_at, 3),
-                    exc_info=True,
-                )
-                raise
+            populated = await conn.execute(
+                "SELECT relispopulated FROM pg_class WHERE oid = %(view)s::regclass",
+                {"view": view},
+            )
+            populated_row = await populated.fetchone()
+            if populated_row is None:
+                raise RuntimeError(f"dashboard summary view is missing: {view}")
+            concurrent = bool(populated_row["relispopulated"])
+            mode = "CONCURRENTLY " if concurrent else ""
+            await conn.execute(f"REFRESH MATERIALIZED VIEW {mode}{view}")  # noqa: S608
             logger.info(
                 "dashboard_window_refresh_completed",
                 window=window,

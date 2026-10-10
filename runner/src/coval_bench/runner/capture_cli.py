@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Operator commands for inspecting and replaying durable normalized captures."""
+"""Operator commands for inspecting and replaying durable captures."""
 
 from __future__ import annotations
 
@@ -17,20 +17,20 @@ from coval_bench.db.models import RunStatus
 from coval_bench.db.writer import RunWriter
 from coval_bench.runner.capture import (
     CaptureEnvelope,
-    FinalizedReceipt,
     RunManifest,
     RunSeal,
     identity_digest,
     list_envelope_uris,
     load_envelope,
     missing_expected_envelope_ids,
+    payload_digest,
     preflight_capture_storage,
     read_receipt,
     read_run_state,
     run_prefix,
     upload_run_state,
 )
-from coval_bench.runner.normalized import CaptureOutcome, replay_capture
+from coval_bench.runner.persistence import CaptureOutcome, finish_sealed_run, persist_capture
 
 
 def _storage(settings: Settings) -> tuple[storage.Client, str]:
@@ -46,7 +46,7 @@ def _json(value: object) -> None:
 
 @click.group(name="capture")
 def capture() -> None:
-    """Inspect or recover immutable normalized-capture envelopes."""
+    """Inspect or recover immutable capture envelopes."""
 
 
 @capture.command(name="status")
@@ -159,7 +159,7 @@ async def _recover(
             if read_receipt(client, bucket, envelope) is not None:
                 name = "already_completed"
             else:
-                outcome = await replay_capture(
+                outcome = await persist_capture(
                     writer=writer,
                     storage_client=client,
                     bucket=bucket,
@@ -195,33 +195,18 @@ async def _recover(
                     expected_capture_ids=manifest.expected_capture_ids,
                 )
                 _, seal_sha256 = upload_run_state(client, bucket, run_id, "seal", seal)
-                await writer.finish_run_exact(
-                    run_id,
-                    status=status,
-                    finished_at=finished_at,
-                    error=error,
-                )
             else:
                 seal = RunSeal.model_validate(seal_value)
-                _, seal_digest = upload_run_state(client, bucket, run_id, "seal", seal)
-                seal_sha256 = seal_digest
-                intended = RunStatus(seal.intended_status)
-                finish_error = None if seal.error == "normalized capture pending" else seal.error
-                await writer.finish_run_exact(
-                    run_id,
-                    status=intended,
-                    finished_at=seal.finished_at,
-                    error=finish_error,
-                    allow_capture_recovery=True,
-                )
-            upload_run_state(
-                client,
-                bucket,
-                run_id,
-                "finalized",
-                FinalizedReceipt(run_id=run_id, seal_sha256=seal_sha256),
+                seal_sha256 = payload_digest(seal_value)
+            await finish_sealed_run(
+                writer=writer,
+                storage_client=client,
+                bucket=bucket,
+                seal=seal,
+                seal_sha256=seal_sha256,
+                capture_pending=False,
             )
-            finalized = True
+            finalized = read_run_state(client, bucket, run_id, "finalized") is not None
 
     incomplete = sum(
         count

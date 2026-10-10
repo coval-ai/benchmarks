@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Immutable private GCS artifacts for normalized benchmark observations."""
+"""Immutable private GCS artifacts for benchmark observations."""
 
 from __future__ import annotations
 
@@ -140,7 +140,7 @@ def prepare_timing_events(
     )
 
 
-def _upload(
+def upload_prepared_observation_artifact(
     client: storage.Client,
     bucket_name: str,
     artifact_type: ObservationArtifactType,
@@ -149,8 +149,12 @@ def _upload(
     extension: str,
     content_type: str,
     schema_name: str,
+    schema_version: str = "v1",
     duration_ms: float | None = None,
 ) -> ObservationArtifact:
+    """Upload frozen artifact bytes without reconstructing their payload."""
+    if schema_version != "v1":
+        raise ValueError(f"unsupported observation artifact schema version {schema_version!r}")
     digest = hashlib.sha256(payload).hexdigest()
     key = _artifact_key(artifact_type, digest, extension)
     blob = client.bucket(bucket_name).blob(key)
@@ -180,83 +184,9 @@ def _upload(
     )
 
 
-def upload_prepared_observation_artifact(
-    client: storage.Client,
-    bucket_name: str,
-    artifact_type: ObservationArtifactType,
-    payload: bytes,
-    *,
-    extension: str,
-    content_type: str,
-    schema_name: str,
-    schema_version: str = "v1",
-    duration_ms: float | None = None,
-) -> ObservationArtifact:
-    """Upload frozen artifact bytes without reconstructing their payload."""
-    if schema_version != "v1":
-        raise ValueError(f"unsupported observation artifact schema version {schema_version!r}")
-    return _upload(
-        client,
-        bucket_name,
-        artifact_type,
-        payload,
-        extension=extension,
-        content_type=content_type,
-        schema_name=schema_name,
-        duration_ms=duration_ms,
-    )
-
-
-def upload_provider_transcript(
-    client: storage.Client, bucket_name: str, transcript: str
-) -> ObservationArtifact:
-    artifact_type, payload, extension, content_type, schema_name = prepare_provider_transcript(
-        transcript
-    )
-    return _upload(
-        client,
-        bucket_name,
-        artifact_type,
-        payload,
-        extension=extension,
-        content_type=content_type,
-        schema_name=schema_name,
-    )
-
-
-def upload_timing_events(
-    client: storage.Client, bucket_name: str, events: dict[str, Any]
-) -> ObservationArtifact:
-    artifact_type, payload, extension, content_type, schema_name = prepare_timing_events(events)
-    return _upload(
-        client,
-        bucket_name,
-        artifact_type,
-        payload,
-        extension=extension,
-        content_type=content_type,
-        schema_name=schema_name,
-    )
-
-
 def snapshot_generated_audio(path: Path) -> tuple[bytes, float]:
     """Read a temporary WAV before yielding to asynchronous persistence work."""
     payload = path.read_bytes()
     with wave.open(str(path), "rb") as wav:
         duration_ms = wav.getnframes() / wav.getframerate() * 1000
     return payload, duration_ms
-
-
-def upload_generated_audio(
-    client: storage.Client, bucket_name: str, payload: bytes, duration_ms: float
-) -> ObservationArtifact:
-    return _upload(
-        client,
-        bucket_name,
-        ObservationArtifactType.GENERATED_AUDIO,
-        payload,
-        extension="wav",
-        content_type="audio/wav",
-        schema_name="GeneratedAudio",
-        duration_ms=duration_ms,
-    )

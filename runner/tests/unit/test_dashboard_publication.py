@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -41,19 +40,8 @@ def test_failed_view_refresh_rolls_back_state_and_prior_views(
             broken = dict(WINDOW_VIEWS)
             broken["30d"] = "benchmarks_v2.missing_summary_view"
             monkeypatch.setattr(dashboard_windows, "WINDOW_VIEWS", broken)
-            logger = MagicMock()
-            monkeypatch.setattr(dashboard_windows, "logger", logger)
             with pytest.raises(psycopg.errors.UndefinedTable):
                 await dashboard_windows.refresh_window_views(pool, as_of=second_as_of)
-            failed = [
-                call.kwargs
-                for call in logger.error.call_args_list
-                if call.args[0] == "dashboard_window_refresh_failed"
-            ]
-            assert len(failed) == 1
-            assert failed[0]["window"] == "30d"
-            assert failed[0]["view"] == "benchmarks_v2.missing_summary_view"
-            assert failed[0]["elapsed_seconds"] >= 0
             monkeypatch.setattr(dashboard_windows, "WINDOW_VIEWS", WINDOW_VIEWS)
             async with pool.connection() as conn:
                 after = await (

@@ -11,12 +11,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 from coval_bench.db.dashboard_windows import refresh_window_views
-from tests.api.conftest import _insert_run, _make_db_url
-from tests.api.test_aggregates import (
-    _insert_normalized_bucket,
-    _insert_normalized_metric,
-    _publish_timeline_test_hours,
-)
+from tests.api.conftest import _insert_metric, _insert_run, _insert_value, _make_db_url, _publish
 
 
 @pytest.mark.asyncio
@@ -25,13 +20,12 @@ async def test_saved_summary_publication_readiness_cache_and_expiry(
     app: FastAPI,
     postgresql: Any,
 ) -> None:
-    app.state.settings.normalized_dashboard_reads_enabled = True
     params = {"benchmark": "STT", "include_series": "false"}
     response = await client.get("/v1/results/aggregates", params=params)
     assert response.status_code == 503
     assert response.json()["detail"] == "dashboard_snapshot_not_ready"
     run = await _insert_run(postgresql)
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 10}
     )
     await refresh_window_views(app.state.pool)
@@ -48,7 +42,7 @@ async def test_saved_summary_publication_readiness_cache_and_expiry(
     assert leaderboard.status_code == 200, leaderboard.text
     assert leaderboard.json()["snapshot"]["generation"] == 1
     # Reads continue serving generation 1 until the writer publishes generation 2.
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 30}
     )
     assert (await client.get("/v1/results/aggregates", params=params)).json() == first
@@ -79,9 +73,8 @@ async def test_saved_summary_freshness_allows_hourly_maintenance(
     age_minutes: int,
     stale: bool,
 ) -> None:
-    app.state.settings.normalized_dashboard_reads_enabled = True
     run = await _insert_run(postgresql)
-    await _insert_normalized_metric(
+    await _insert_metric(
         postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 10}
     )
     await refresh_window_views(app.state.pool)
@@ -105,26 +98,21 @@ async def test_saved_buckets_serve_only_whole_intervals_and_flag_a_stuck_queue(
     app: FastAPI,
     postgresql: Any,
 ) -> None:
-    app.state.settings.normalized_dashboard_reads_enabled = True
     start = dt.datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0) - dt.timedelta(
         hours=4
     )
-    for minutes, value, count in [
-        (0, 999, 1),
-        (30, 10, 1),
-        (60, 20, 2),
-        (90, 60, 3),
-        (120, 30, 1),
-        (150, 999, 1),
+    for minutes, values in [
+        (0, [999]),
+        (30, [10]),
+        (60, [10, 10]),
+        (90, [20, 20, 20]),
+        (120, [30]),
+        (150, [999]),
     ]:
-        await _insert_normalized_bucket(
-            postgresql,
-            dataset_id="stt-v2",
-            bucket_at=start + dt.timedelta(minutes=minutes),
-            value_sum=value,
-            sample_count=count,
-        )
-    await _publish_timeline_test_hours(postgresql)
+        run_id = await _insert_run(postgresql, scheduled_at=start + dt.timedelta(minutes=minutes))
+        for value in values:
+            await _insert_value(postgresql, run_id, value, dataset_id="stt-v2")
+    await _publish(postgresql)
     params = {
         "benchmark": "STT",
         "dataset": "stt-v2",
@@ -160,7 +148,6 @@ async def test_absent_saved_storage_returns_503_but_24h_timeline_still_works(
     app: FastAPI,
     postgresql: Any,
 ) -> None:
-    app.state.settings.normalized_dashboard_reads_enabled = True
     with psycopg.connect(_make_db_url(postgresql)) as conn:
         conn.execute("DROP TABLE benchmarks_v2.dashboard_window_state CASCADE")
     assert (

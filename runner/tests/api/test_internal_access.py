@@ -10,6 +10,7 @@ them everywhere, and a mapped provider org sees what its grant names.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -24,10 +25,9 @@ from tests.api.conftest import (
     EA_ORG,
     EA_ORG_OTHER,
     EA_PROVIDER,
-    _fill_buckets,
-    _insert_result,
     _insert_run,
-    _refresh_mv,
+    _insert_value,
+    _publish,
     add_models,
     bearer,
 )
@@ -63,18 +63,10 @@ def early_access_registry(postgresql: Any) -> None:
 
 
 async def _seed_ea_and_public_rows(postgresql: Any) -> None:
-    run_id = await _insert_run(postgresql)
-    await _insert_result(postgresql, run_id, provider=_EA_PROVIDER, model=_EA_MODEL)
-    await _insert_result(postgresql, run_id, provider="deepgram", model="nova-3")
-
-
-@pytest.mark.usefixtures("early_access_registry")
-async def test_v2_does_not_read_legacy_results(client: AsyncClient, postgresql: Any) -> None:
-    await _seed_ea_and_public_rows(postgresql)
-    for headers in ({}, _internal_headers()):
-        response = await client.get("/v2/results", params={"benchmark": "STT"}, headers=headers)
-        assert response.status_code == 200
-        assert response.json() == {"results": [], "next_cursor": None}
+    run_id = await _insert_run(postgresql, scheduled_at=datetime.now(UTC))
+    for provider, model in ((_EA_PROVIDER, _EA_MODEL), ("deepgram", "nova-3")):
+        await _insert_value(postgresql, run_id, 3.5, provider=provider, model=model)
+    await _publish(postgresql)
 
 
 def _models_in(results: list[dict[str, Any]]) -> set[tuple[str, str]]:
@@ -85,7 +77,6 @@ def _models_in(results: list[dict[str, Any]]) -> set[tuple[str, str]]:
 async def test_leaderboard_embargo(client: AsyncClient, postgresql: Any) -> None:
     """/v1/leaderboard strips EARLY_ACCESS models for public callers only."""
     await _seed_ea_and_public_rows(postgresql)
-    await _refresh_mv(postgresql)
 
     params = {"metric": "WER", "benchmark": "STT", "window": "24h"}
 
@@ -101,15 +92,9 @@ async def test_leaderboard_embargo(client: AsyncClient, postgresql: Any) -> None
 
 
 @pytest.mark.usefixtures("early_access_registry")
-async def test_aggregates_embargo_and_cache_isolation(client: AsyncClient, postgresql: Any) -> None:
-    """/v1/results/aggregates: internal and public views never share a cache entry.
-
-    The internal request goes first so a shared cache key would poison the
-    public response with the hidden model.
-    """
+async def test_aggregates_embargo(client: AsyncClient, postgresql: Any) -> None:
+    """/v1/results/aggregates hides EARLY_ACCESS stats and series from public callers."""
     await _seed_ea_and_public_rows(postgresql)
-    await _refresh_mv(postgresql)
-    await _fill_buckets(postgresql)
 
     params = {"benchmark": "STT", "window": "24h"}
 
@@ -131,9 +116,8 @@ async def test_aggregates_embargo_and_cache_isolation(client: AsyncClient, postg
 
 @pytest.mark.usefixtures("early_access_registry")
 async def test_timeline_embargo_and_cache_isolation(client: AsyncClient, postgresql: Any) -> None:
-    """Timeline cache entries keep the caller's embargo scope, like aggregates."""
+    """Timeline cache entries keep the caller's embargo scope."""
     await _seed_ea_and_public_rows(postgresql)
-    await _fill_buckets(postgresql)
     params = {"benchmark": "STT", "window": "24h"}
 
     internal = await client.get("/v1/results/timeline", params=params, headers=_internal_headers())
@@ -146,17 +130,9 @@ async def test_timeline_embargo_and_cache_isolation(client: AsyncClient, postgre
 
 
 @pytest.mark.usefixtures("early_access_registry")
-async def test_aggregates_by_dataset_embargo_and_cache_isolation(
-    client: AsyncClient, postgresql: Any
-) -> None:
-    """/v1/results/aggregates/by-dataset: internal and public views never share
-    a cache entry.
-
-    The internal request goes first so a shared cache key would poison the
-    public response with the hidden model.
-    """
+async def test_aggregates_by_dataset_embargo(client: AsyncClient, postgresql: Any) -> None:
+    """/v1/results/aggregates/by-dataset strips EARLY_ACCESS models for public callers."""
     await _seed_ea_and_public_rows(postgresql)
-    await _refresh_mv(postgresql)
 
     params = {"benchmark": "STT", "window": "24h"}
 
@@ -221,9 +197,10 @@ async def test_the_retired_x_headers_prove_nothing(client: AsyncClient) -> None:
     ],
 )
 async def test_vary_lists_the_proof_header(
-    client: AsyncClient, path: str, params: dict[str, str] | None
+    client: AsyncClient, postgresql: Any, path: str, params: dict[str, str] | None
 ) -> None:
     """Every embargo-gated endpoint varies on the bearer proof and nothing retired."""
+    await _publish(postgresql)
     response = await client.get(path, params=params)
     assert response.status_code == 200
     vary = response.headers["Vary"]
@@ -258,34 +235,33 @@ async def test_public_responses_are_cacheable_privileged_ones_are_not(
 
 
 @pytest.mark.usefixtures("early_access_registry")
-async def test_two_org_grants_never_share_an_aggregates_cache_entry(
+async def test_two_org_grants_never_share_a_timeline_cache_entry(
     client: AsyncClient, postgresql: Any
 ) -> None:
     """Org A then org B on the same cache: B must not see A's model.
 
-    This is the case that actually proves the cache key. Only /v1/results/aggregates
+    This is the case that actually proves the cache key. Only /v1/results/timeline
     caches, and A goes first so a key that ignored the caller would serve A's rows
     straight back to B.
     """
-    run_id = await _insert_run(postgresql)
-    await _insert_result(postgresql, run_id, provider=_EA_PROVIDER, model=_EA_MODEL)
-    await _insert_result(postgresql, run_id, provider=_EA_PROVIDER, model=EA_MODEL_OTHER)
-    await _refresh_mv(postgresql)
-    await _fill_buckets(postgresql)
+    run_id = await _insert_run(postgresql, scheduled_at=datetime.now(UTC))
+    for model in (_EA_MODEL, EA_MODEL_OTHER):
+        await _insert_value(postgresql, run_id, 3.5, provider=_EA_PROVIDER, model=model)
+    await _publish(postgresql)
 
     params = {"benchmark": "STT", "window": "24h"}
 
-    first = await client.get("/v1/results/aggregates", params=params, headers=bearer(org_id=EA_ORG))
+    first = await client.get("/v1/results/timeline", params=params, headers=bearer(org_id=EA_ORG))
     assert first.status_code == 200
     assert first.headers["X-EA-Token-Status"] == "accepted"
-    assert (_EA_PROVIDER, _EA_MODEL) in _models_in(first.json()["model_stats"])
-    assert (_EA_PROVIDER, EA_MODEL_OTHER) not in _models_in(first.json()["model_stats"])
+    assert (_EA_PROVIDER, _EA_MODEL) in _models_in(first.json()["points"])
+    assert (_EA_PROVIDER, EA_MODEL_OTHER) not in _models_in(first.json()["points"])
 
     second = await client.get(
-        "/v1/results/aggregates", params=params, headers=bearer(org_id=EA_ORG_OTHER)
+        "/v1/results/timeline", params=params, headers=bearer(org_id=EA_ORG_OTHER)
     )
     assert second.status_code == 200
-    stats = _models_in(second.json()["model_stats"])
+    stats = _models_in(second.json()["points"])
     assert (_EA_PROVIDER, EA_MODEL_OTHER) in stats
     assert (_EA_PROVIDER, _EA_MODEL) not in stats, "org A's model leaked into org B's view"
 

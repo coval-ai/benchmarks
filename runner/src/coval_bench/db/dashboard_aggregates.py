@@ -26,7 +26,7 @@ class MaintenanceResult:
     filled: int
     remaining: int
     summary: RefreshResult
-    elapsed: float = 0.0
+    elapsed: float
 
 
 async def refresh_dashboard_aggregates(

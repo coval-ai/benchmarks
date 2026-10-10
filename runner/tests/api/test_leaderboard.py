@@ -10,33 +10,16 @@ from typing import Any
 from httpx import AsyncClient
 
 from coval_bench.api.common import MIN_SCORED_SAMPLES
-from tests.api.conftest import _insert_result, _insert_run, _refresh_mv
-from tests.api.test_aggregates import _insert_normalized_metric
+from tests.api.conftest import _insert_run, _insert_value, _publish
 
 
 async def test_24h_window_sorted_ascending(client: AsyncClient, postgresql: Any) -> None:
     """window=24h returns entries sorted ascending by avg."""
     run_id = await _insert_run(postgresql)
     # Two providers with different WER values
-    await _insert_result(
-        postgresql,
-        run_id,
-        provider="deepgram",
-        model="nova-3",
-        metric_type="WER",
-        metric_value=5.0,
-        benchmark="STT",
-    )
-    await _insert_result(
-        postgresql,
-        run_id,
-        provider="deepgram",
-        model="nova-2",
-        metric_type="WER",
-        metric_value=8.0,
-        benchmark="STT",
-    )
-    await _refresh_mv(postgresql)
+    await _insert_value(postgresql, run_id, 5.0)
+    await _insert_value(postgresql, run_id, 8.0, model="nova-2")
+    await _publish(postgresql)
 
     response = await client.get(
         "/v1/leaderboard", params={"metric": "WER", "benchmark": "STT", "window": "24h"}
@@ -65,19 +48,10 @@ async def test_ttfa_stt_incompatible(client: AsyncClient) -> None:
 
 
 async def test_ttft_stt_7d_window(client: AsyncClient, postgresql: Any) -> None:
-    """window=7d serves TTFT+STT from the results_7d view."""
+    """window=7d serves TTFT+STT from the 7d snapshot."""
     run_id = await _insert_run(postgresql)
-    await _insert_result(
-        postgresql,
-        run_id,
-        provider="deepgram",
-        model="nova-3",
-        metric_type="TTFT",
-        metric_value=120.0,
-        metric_units="ms",
-        benchmark="STT",
-    )
-    await _refresh_mv(postgresql)
+    await _insert_value(postgresql, run_id, 120.0, metric_type="TTFT")
+    await _publish(postgresql)
 
     response = await client.get(
         "/v1/leaderboard",
@@ -107,18 +81,10 @@ async def test_missing_metric_returns_422(client: AsyncClient) -> None:
 
 
 async def test_30d_window(client: AsyncClient, postgresql: Any) -> None:
-    """window=30d serves from the results_30d view."""
+    """window=30d serves from the 30d snapshot."""
     run_id = await _insert_run(postgresql)
-    await _insert_result(
-        postgresql,
-        run_id,
-        provider="deepgram",
-        model="nova-2",
-        metric_type="WER",
-        metric_value=6.0,
-        benchmark="STT",
-    )
-    await _refresh_mv(postgresql)
+    await _insert_value(postgresql, run_id, 6.0, model="nova-2")
+    await _publish(postgresql)
     response = await client.get(
         "/v1/leaderboard",
         params={"metric": "WER", "benchmark": "STT", "window": "30d"},
@@ -130,25 +96,16 @@ async def test_30d_window(client: AsyncClient, postgresql: Any) -> None:
 async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any) -> None:
     """Historical rows for METRIC_EXCLUSIONS pairs are hidden from the leaderboard."""
     run_id = await _insert_run(postgresql)
-    await _insert_result(
+    await _insert_value(
         postgresql,
         run_id,
+        0.4,
         provider="assemblyai",
         model="universal-streaming",
         metric_type="TTFS",
-        metric_value=0.4,
-        benchmark="STT",
     )
-    await _insert_result(
-        postgresql,
-        run_id,
-        provider="deepgram",
-        model="nova-3",
-        metric_type="TTFS",
-        metric_value=0.6,
-        benchmark="STT",
-    )
-    await _refresh_mv(postgresql)
+    await _insert_value(postgresql, run_id, 0.6, metric_type="TTFS")
+    await _publish(postgresql)
 
     response = await client.get(
         "/v1/leaderboard", params={"metric": "TTFS", "benchmark": "STT", "window": "24h"}
@@ -164,27 +121,27 @@ async def test_s2s_leaderboard_uses_the_bank_primary_dataset(
     """The headline S2S board is the Ultra Bank set; the frozen dental rows stay out."""
     primary_run = await _insert_run(postgresql, dataset_id="s2s-bank-v1")
     dental_run = await _insert_run(postgresql, dataset_id="s2s-dental-v1")
-    await _insert_result(
+    await _insert_value(
         postgresql,
         primary_run,
+        1200.0,
         provider="openai",
         model="gpt-realtime",
         metric_type="V2V",
-        metric_value=1200.0,
-        metric_units="ms",
         benchmark="S2S",
+        dataset_id="s2s-bank-v1",
     )
-    await _insert_result(
+    await _insert_value(
         postgresql,
         dental_run,
+        900.0,
         provider="google",
         model="gemini-live",
         metric_type="V2V",
-        metric_value=900.0,
-        metric_units="ms",
         benchmark="S2S",
+        dataset_id="s2s-dental-v1",
     )
-    await _refresh_mv(postgresql)
+    await _publish(postgresql)
 
     response = await client.get("/v1/leaderboard", params={"metric": "V2V", "benchmark": "S2S"})
 
@@ -198,54 +155,32 @@ async def test_ttft_llm_uses_the_bank_primary_dataset(client: AsyncClient, postg
     """The LLM board reads the text bank dataset; rows under other datasets stay out."""
     bank_run = await _insert_run(postgresql, dataset_id="llm-bank-v1")
     other_run = await _insert_run(postgresql, dataset_id="llm-scratch-v1")
-    await _insert_result(
+    await _insert_value(
         postgresql,
         bank_run,
+        0.42,
         provider="phonely",
         model="phonely-agent",
         metric_type="TTFT",
-        metric_value=0.42,
-        metric_units="seconds",
         benchmark="LLM",
+        dataset_id="llm-bank-v1",
     )
-    await _insert_result(
+    await _insert_value(
         postgresql,
         other_run,
+        0.10,
         provider="acme",
         model="chat-1",
         metric_type="TTFT",
-        metric_value=0.10,
-        metric_units="seconds",
         benchmark="LLM",
+        dataset_id="llm-scratch-v1",
     )
-    await _refresh_mv(postgresql)
+    await _publish(postgresql)
 
-    params = {"metric": "TTFT", "benchmark": "LLM"}
-    expected = [("phonely", "phonely-agent")]
-    response = await client.get("/v1/leaderboard", params=params)
+    response = await client.get("/v1/leaderboard", params={"metric": "TTFT", "benchmark": "LLM"})
     assert response.status_code == 200
-    assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == expected
-
-    for run_id, dataset_id, provider in (
-        (bank_run, "llm-bank-v1", "phonely"),
-        (other_run, "llm-scratch-v1", "acme"),
-    ):
-        await _insert_normalized_metric(
-            postgresql,
-            run_id,
-            dataset_id=dataset_id,
-            metric_type="TTFT",
-            values={"primary": 0.42},
-            benchmark="LLM",
-            provider=provider,
-            model="normalized-model",
-        )
-    app = client._transport.app  # type: ignore[attr-defined]
-    app.state.settings.normalized_dashboard_reads_enabled = True
-    await _refresh_mv(postgresql)
-    response = await client.get("/v1/leaderboard", params=params)
     assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == [
-        ("phonely", "normalized-model")
+        ("phonely", "phonely-agent")
     ]
 
 
@@ -265,26 +200,10 @@ async def test_thin_entry_flagged_and_sunk_below_ranked(
     """
     run_id = await _insert_run(postgresql)
     # One lucky, very fast sample — would sort first on value.
-    await _insert_result(
-        postgresql,
-        run_id,
-        provider="fishaudio",
-        model="s1",
-        metric_type="WER",
-        metric_value=0.0,
-        benchmark="STT",
-    )
+    await _insert_value(postgresql, run_id, 0.0, provider="fishaudio", model="s1")
     for _ in range(MIN_SCORED_SAMPLES["STT"]):
-        await _insert_result(
-            postgresql,
-            run_id,
-            provider="deepgram",
-            model="nova-3",
-            metric_type="WER",
-            metric_value=9.0,
-            benchmark="STT",
-        )
-    await _refresh_mv(postgresql)
+        await _insert_value(postgresql, run_id, 9.0)
+    await _publish(postgresql)
 
     response = await client.get(
         "/v1/leaderboard", params={"metric": "WER", "benchmark": "STT", "window": "24h"}
@@ -306,16 +225,8 @@ async def test_entry_at_the_floor_is_not_flagged(client: AsyncClient, postgresql
     """Exactly the floor's worth of samples counts as enough."""
     run_id = await _insert_run(postgresql)
     for _ in range(MIN_SCORED_SAMPLES["STT"]):
-        await _insert_result(
-            postgresql,
-            run_id,
-            provider="deepgram",
-            model="nova-3",
-            metric_type="WER",
-            metric_value=4.0,
-            benchmark="STT",
-        )
-    await _refresh_mv(postgresql)
+        await _insert_value(postgresql, run_id, 4.0)
+    await _publish(postgresql)
 
     response = await client.get(
         "/v1/leaderboard", params={"metric": "WER", "benchmark": "STT", "window": "24h"}

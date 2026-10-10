@@ -13,7 +13,7 @@ import structlog
 from coval_bench.config import (
     SECRET_PLACEHOLDER,
     Settings,
-    require_normalized_persisted_capture,
+    require_capture_bucket,
 )
 
 
@@ -44,38 +44,7 @@ def test_real_values_pass_through_silently() -> None:
     assert not [entry for entry in logs if entry["event"] == "placeholder_secret"]
 
 
-def test_normalized_dual_write_is_default_off_and_requires_bucket() -> None:
-    assert _settings().normalized_dual_write_enabled is False
-    assert (
-        _settings(
-            normalized_dual_write_enabled="true", benchmark_artifact_bucket="private"
-        ).normalized_dual_write_enabled
-        is True
-    )
-    with pytest.raises(ValueError, match="benchmark_artifact_bucket"):
-        _settings(normalized_dual_write_enabled=True)
-
-
-def test_required_normalized_capture_requires_explicit_dual_write_and_bucket() -> None:
-    assert _settings().normalized_capture_required is False
-    with pytest.raises(ValueError, match="normalized_dual_write_enabled"):
-        _settings(normalized_capture_required=True, benchmark_artifact_bucket="private")
-    with pytest.raises(ValueError, match="benchmark_artifact_bucket"):
-        _settings(normalized_capture_required=True, normalized_dual_write_enabled=True)
-    settings = _settings(
-        normalized_capture_required=True,
-        normalized_dual_write_enabled=True,
-        benchmark_artifact_bucket="private",
-    )
-    assert settings.normalized_capture_required is True
-
-
-def test_persisted_entrypoint_guard_requires_all_capture_settings() -> None:
-    with pytest.raises(RuntimeError, match="normalized_dual_write_enabled"):
-        require_normalized_persisted_capture(_settings())
-    settings = _settings(
-        normalized_dual_write_enabled=True,
-        normalized_capture_required=True,
-        benchmark_artifact_bucket="private",
-    )
-    require_normalized_persisted_capture(settings)
+def test_persisted_entrypoint_guard_requires_capture_bucket() -> None:
+    with pytest.raises(RuntimeError, match="benchmark_artifact_bucket"):
+        require_capture_bucket(_settings())
+    require_capture_bucket(_settings(benchmark_artifact_bucket="private"))

@@ -25,55 +25,38 @@ class Snapshot:
     definition_revision: int
     stale: bool
 
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "generation": self.generation,
-            "as_of": self.as_of,
-            "published_at": self.published_at,
-            "definition_revision": self.definition_revision,
-            "stale": self.stale,
-        }
-
 
 async def require_window_state(conn: AsyncConnection[Any]) -> Snapshot:
     """Validate state and definition identity inside the caller's transaction."""
-    try:
-        result = await conn.execute(
-            """SELECT generation,as_of,published_at,definition_revision,definition_fingerprint
-               FROM benchmarks_v2.dashboard_window_state WHERE id=true"""
-        )
-    except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready") from exc
+    result = await conn.execute(
+        """SELECT generation,as_of,published_at,definition_revision,definition_fingerprint
+           FROM benchmarks_v2.dashboard_window_state WHERE id=true"""
+    )
     row = await result.fetchone()
-    if row is None:
+    if (
+        row is None
+        or row["generation"] == 0
+        or row["as_of"] is None
+        or row["published_at"] is None
+        or row["definition_revision"] != DEFINITION_REVISION
+        or row["definition_fingerprint"] != aggregation_fingerprint()
+    ):
         raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready")
-    generation = row["generation"] if isinstance(row, dict) else row[0]
-    as_of = row["as_of"] if isinstance(row, dict) else row[1]
-    published_at = row["published_at"] if isinstance(row, dict) else row[2]
-    revision = row["definition_revision"] if isinstance(row, dict) else row[3]
-    fingerprint = row["definition_fingerprint"] if isinstance(row, dict) else row[4]
-    if generation == 0 or as_of is None or published_at is None:
-        raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready")
-    if revision != DEFINITION_REVISION or fingerprint != aggregation_fingerprint():
-        raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready")
-    now = dt.datetime.now(dt.UTC)
+    as_of, published_at = row["as_of"], row["published_at"]
     # Allow two hourly maintenance intervals before warning about stale data.
-    stale = now - min(as_of, published_at) > dt.timedelta(hours=2)
-    return Snapshot(int(generation), as_of, published_at, int(revision), stale)
+    stale = dt.datetime.now(dt.UTC) - min(as_of, published_at) > dt.timedelta(hours=2)
+    return Snapshot(
+        int(row["generation"]), as_of, published_at, int(row["definition_revision"]), stale
+    )
 
 
 @asynccontextmanager
-async def dashboard_read(
-    pool: AsyncConnectionPool[Any], *, saved: bool
-) -> AsyncIterator[AsyncConnection[Any]]:
+async def dashboard_read(pool: AsyncConnectionPool[Any]) -> AsyncIterator[AsyncConnection[Any]]:
     """Read saved state and rows in one transaction, including autocommit pools."""
     try:
         async with pool.connection() as conn, conn.transaction():
             conn.row_factory = dict_row
-            if saved:
-                await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             yield conn
     except (UndefinedTable, ObjectNotInPrerequisiteState) as exc:
-        if not saved:
-            raise
         raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready") from exc

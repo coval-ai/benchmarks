@@ -30,6 +30,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import jwt
 import psycopg
@@ -48,6 +49,8 @@ from pytest_postgresql import factories
 from coval_bench.api.app import create_app
 from coval_bench.arena.moderation import ModerationResult
 from coval_bench.config import Settings
+from coval_bench.db.dashboard_rollups import rebuild_slots
+from coval_bench.db.dashboard_windows import refresh_window_views
 from coval_bench.registries import RegisteredModel
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 from tests.roster import TEST_ROSTER
@@ -139,17 +142,6 @@ def _make_db_url(postgresql: Any) -> str:
     return f"postgresql://{info.user}:{info.password or ''}@{info.host}:{info.port}/{info.dbname}"
 
 
-# Mirrors the per-window matview migrations (20260611_0005 + 20260715_0010).
-_MV_WINDOWS: dict[str, str] = {
-    "results_24h": "24 hours",
-    "results_7d": "7 days",
-    "results_30d": "30 days",
-}
-
-# Dataset attribution for aggregate rows (mirrors migration 20260715_0010).
-_DATASET_CASE_SQL = "CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1' ELSE rn.dataset_id END"
-
-
 def _load_schema(**connect_kwargs: Any) -> None:
     """Create the benchmarks_v2 schema and tables needed by the API tests.
 
@@ -171,28 +163,6 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 status         text NOT NULL
                     CHECK (status IN ('running','succeeded','partial','failed')),
                 error          text
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS benchmarks_v2.results (
-                id             bigserial PRIMARY KEY,
-                run_id         bigint NOT NULL
-                    REFERENCES benchmarks_v2.runs(id) ON DELETE CASCADE,
-                provider       text NOT NULL,
-                model          text NOT NULL,
-                voice          text,
-                benchmark      text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S','LLM')),
-                metric_type    text NOT NULL,
-                metric_value   double precision,
-                metric_units   text,
-                audio_filename text,
-                transcript     text,
-                status         text NOT NULL CHECK (status IN ('success','failed')),
-                error          text,
-                created_at     timestamptz NOT NULL DEFAULT now(),
-                wer_insertions_pct    double precision,
-                wer_deletions_pct     double precision,
-                wer_substitutions_pct double precision
             )
         """)
         # Mock tool-call log (mirrors migration 20260826_0022).
@@ -227,7 +197,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 created_at     timestamptz NOT NULL DEFAULT now()
             )
         """)
-        # Additive normalized storage (mirrors migration 20260818_0018).
+        # Storage tables (mirrors migration 20260818_0018).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.benchmark_observations (
                 id uuid PRIMARY KEY, run_id bigint NOT NULL REFERENCES benchmarks_v2.runs(id),
@@ -301,11 +271,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
             "CREATE FUNCTION benchmarks_v2.guard_immutable_preprocessing_artifact()", start
         )
         conn.execute(lifecycle_sql[start:end])
-        normalized_metric_ids = import_module(
+        metric_ids_migration = import_module(
             "coval_bench.db.migrations.versions.20260915_0036_normalized_metric_ids"
         )
-        with patch.object(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute)):
-            normalized_metric_ids.upgrade()
+        with patch.object(metric_ids_migration, "op", SimpleNamespace(execute=conn.execute)):
+            metric_ids_migration.upgrade()
         for table in ("metric_evaluations", "dashboard_metric_values", "metric_values_by_bucket"):
             conn.execute(f"ALTER TABLE benchmarks_v2.{table} ALTER COLUMN metric_id SET NOT NULL")  # noqa: S608 — fixed fixture table names.
             conn.execute(
@@ -316,74 +286,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(closed_buckets, "op", SimpleNamespace(execute=conn.execute)):
             closed_buckets.upgrade()
-        # Per-window stats materialized views (model_stats + leaderboard).
-        # Mirrors migration 20260715_0010: per-dataset rows plus pooled rows
-        # under the '__all__' sentinel, and 20260804_0014's WER breakdown.
-        # S608 false-positive: name and interval come from the _MV_WINDOWS constant.
-        for name, interval in _MV_WINDOWS.items():
-            conn.execute(f"""
-                CREATE MATERIALIZED VIEW IF NOT EXISTS benchmarks_v2.{name} AS
-                SELECT provider, model, benchmark, dataset_id, metric_type,
-                       avg_value, stddev_value, min_value,
-                       pct[1] AS p25, pct[2] AS p50, pct[3] AS p75,
-                       pct[4] AS p90, pct[5] AS p95, pct[6] AS p99,
-                       max_value, sample_count,
-                       wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct
-                FROM (
-                    SELECT r.provider, r.model, r.benchmark,
-                           COALESCE({_DATASET_CASE_SQL}, '__all__') AS dataset_id,
-                           r.metric_type,
-                           AVG(r.metric_value)::float8 AS avg_value,
-                           COALESCE(STDDEV_SAMP(r.metric_value), 0)::float8 AS stddev_value,
-                           MIN(r.metric_value)::float8 AS min_value,
-                           PERCENTILE_CONT(ARRAY[0.25, 0.5, 0.75, 0.9, 0.95, 0.99])
-                               WITHIN GROUP (ORDER BY r.metric_value)::float8[] AS pct,
-                           MAX(r.metric_value)::float8 AS max_value,
-                           COUNT(*)::int AS sample_count,
-                           CASE WHEN COUNT(r.wer_insertions_pct) = COUNT(*)
-                               AND COUNT(r.wer_deletions_pct) = COUNT(*)
-                               AND COUNT(r.wer_substitutions_pct) = COUNT(*)
-                               THEN AVG(r.wer_insertions_pct)::float8 END AS wer_insertions_pct,
-                           CASE WHEN COUNT(r.wer_insertions_pct) = COUNT(*)
-                               AND COUNT(r.wer_deletions_pct) = COUNT(*)
-                               AND COUNT(r.wer_substitutions_pct) = COUNT(*)
-                               THEN AVG(r.wer_deletions_pct)::float8 END AS wer_deletions_pct,
-                           CASE WHEN COUNT(r.wer_insertions_pct) = COUNT(*)
-                               AND COUNT(r.wer_deletions_pct) = COUNT(*)
-                               AND COUNT(r.wer_substitutions_pct) = COUNT(*)
-                               THEN AVG(r.wer_substitutions_pct)::float8
-                               END AS wer_substitutions_pct
-                    FROM benchmarks_v2.results r
-                    JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
-                    WHERE r.status = 'success'
-                      AND rn.status IN ('succeeded', 'partial')
-                      AND r.metric_value IS NOT NULL
-                      AND r.created_at >= now() - INTERVAL '{interval}'
-                    GROUP BY GROUPING SETS (
-                        (r.provider, r.model, r.benchmark, r.metric_type, {_DATASET_CASE_SQL}),
-                        (r.provider, r.model, r.benchmark, r.metric_type)
-                    )
-                ) stats
-            """)  # noqa: S608
-        # Series rollup table (mirrors migrations 20260611_0006 + 20260715_0010).
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS benchmarks_v2.results_by_bucket (
-                provider      text NOT NULL,
-                model         text NOT NULL,
-                benchmark     text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S','LLM')),
-                dataset_id    text NOT NULL,
-                metric_type   text NOT NULL,
-                bucket_at     timestamptz NOT NULL,
-                min_value     double precision NOT NULL,
-                p25           double precision NOT NULL,
-                p50           double precision NOT NULL,
-                p75           double precision NOT NULL,
-                max_value     double precision NOT NULL,
-                value_sum     double precision NOT NULL,
-                sample_count  integer NOT NULL,
-                PRIMARY KEY (provider, model, benchmark, dataset_id, metric_type, bucket_at)
-            )
-        """)
+        legacy_drop = import_module(
+            "coval_bench.db.migrations.versions.20261010_0045_drop_legacy_results"
+        )
+        with patch.object(legacy_drop, "op", SimpleNamespace(execute=conn.execute)):
+            legacy_drop.upgrade()
         # Model/tag registry tables (mirrors migration 20260824_0020).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.models (
@@ -738,121 +645,117 @@ async def _insert_run(postgresql: Any, **kwargs: Any) -> int:
         await aconn.close()
 
 
-async def _insert_result(
+async def _publish(postgresql: Any) -> None:
+    """Build the rollups and publish the window views the dashboard reads."""
+    async with await psycopg.AsyncConnection.connect(
+        _make_db_url(postgresql), row_factory=psycopg.rows.dict_row
+    ) as conn:
+        rows = await (
+            await conn.execute(
+                "SELECT DISTINCT scheduled_at FROM benchmarks_v2.runs"
+                " WHERE scheduled_at IS NOT NULL"
+            )
+        ).fetchall()
+        async with conn.transaction():
+            await rebuild_slots(conn, [row["scheduled_at"] for row in rows])
+    pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]] = AsyncConnectionPool(
+        conninfo=_make_db_url(postgresql),
+        min_size=1,
+        max_size=1,
+        open=False,
+        kwargs={"autocommit": True, "row_factory": psycopg.rows.dict_row},
+    )
+    await pool.open()
+    try:
+        await refresh_window_views(pool)
+    finally:
+        await pool.close()
+
+
+_WER_COUNT_KEYS = ("substitution_count", "deletion_count", "insertion_count", "reference_words")
+
+
+async def _insert_metric(
     postgresql: Any,
     run_id: int,
     *,
-    created_at: datetime | None = None,
+    dataset_id: str,
+    metric_type: str,
+    values: dict[str, float],
+    primary_key: str = "primary",
+    benchmark: str = "STT",
+    observation_status: str = "succeeded",
+    evaluation_status: str = "succeeded",
+    metric_version: str = "v1",
+    evaluation_variant: str = "default",
+    provider: str = "deepgram",
+    model: str = "nova-3",
+    captured_at: datetime | None = None,
+) -> None:
+    """Seed one evaluation."""
+    observation_id, evaluation_id = uuid4(), uuid4()
+    async with await psycopg.AsyncConnection.connect(
+        _make_db_url(postgresql), autocommit=True
+    ) as conn:
+        await conn.execute(
+            """INSERT INTO benchmarks_v2.benchmark_observations
+               (id, run_id, dataset_id, provider, model, benchmark, captured_at, status)
+               VALUES (%s, %s, %s, %s, %s, %s, COALESCE(%s, now()), %s)""",
+            (
+                observation_id,
+                run_id,
+                dataset_id,
+                provider,
+                model,
+                benchmark,
+                captured_at,
+                observation_status,
+            ),
+        )
+        await conn.execute(
+            """INSERT INTO benchmarks_v2.metric_evaluations
+               (id, observation_id, metric_type, metric_version, evaluation_variant, status)
+               VALUES (%s, %s, %s, %s, %s, 'queued')""",
+            (evaluation_id, observation_id, metric_type, metric_version, evaluation_variant),
+        )
+        await conn.execute(
+            "UPDATE benchmarks_v2.metric_evaluations SET status = 'running' WHERE id = %s",
+            (evaluation_id,),
+        )
+        for key, component in values.items():
+            await conn.execute(
+                """INSERT INTO benchmarks_v2.metric_values
+                   (metric_evaluation_id, value_key, unit, value, value_role)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (
+                    evaluation_id,
+                    key,
+                    "count" if key in _WER_COUNT_KEYS else "percent",
+                    component,
+                    "primary" if key == primary_key else "component",
+                ),
+            )
+        await conn.execute(
+            "UPDATE benchmarks_v2.metric_evaluations SET status = %s WHERE id = %s",
+            (evaluation_status, evaluation_id),
+        )
+
+
+async def _insert_value(
+    postgresql: Any,
+    run_id: int,
+    value: float,
+    *,
+    dataset_id: str = "stt-v1",
+    metric_type: str = "WER",
     **kwargs: Any,
-) -> int:
-    """Helper: insert a result row and return its id.
-
-    Pass ``created_at`` as a :class:`datetime` to override the DB default
-    (``now()``).  This is useful for seeding rows at specific points in time
-    for window-filter tests.  All other columns can be overridden via kwargs.
-    """
-    dsn = _make_db_url(postgresql)
-    aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
-    try:
-        defaults: dict[str, Any] = {
-            "run_id": run_id,
-            "provider": "deepgram",
-            "model": "nova-3",
-            "voice": None,
-            "benchmark": "STT",
-            "metric_type": "WER",
-            "metric_value": 3.5,
-            "metric_units": "%",
-            "audio_filename": "test.wav",
-            "status": "success",
-        }
-        defaults.update(kwargs)
-        if created_at is not None:
-            defaults["created_at"] = created_at
-
-        # S608 false-positive: column names are dict keys set here, never caller values.
-        columns = ", ".join(defaults)
-        placeholders = ", ".join(f"%({c})s" for c in defaults)
-        row = await aconn.execute(
-            f"INSERT INTO benchmarks_v2.results ({columns})"  # noqa: S608
-            f" VALUES ({placeholders}) RETURNING id",
-            defaults,
-        )
-        result = await row.fetchone()
-        assert result is not None
-        return int(result[0])
-    finally:
-        await aconn.close()
-
-
-async def _refresh_mv(postgresql: Any) -> None:
-    """Refresh legacy views and the saved dashboard snapshot used by cutover tests."""
-    dsn = _make_db_url(postgresql)
-    aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
-    try:
-        for name in _MV_WINDOWS:
-            await aconn.execute(f"REFRESH MATERIALIZED VIEW benchmarks_v2.{name}")
-        # The normalized API path reads only the atomically published snapshot.
-        from coval_bench.db.dashboard_windows import refresh_window_views
-
-        pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]] = (
-            AsyncConnectionPool(
-                conninfo=dsn,
-                min_size=1,
-                max_size=1,
-                open=False,
-                kwargs={"autocommit": True, "row_factory": psycopg.rows.dict_row},
-            )
-        )
-        await pool.open()
-        try:
-            await refresh_window_views(pool)
-        finally:
-            await pool.close()
-    finally:
-        await aconn.close()
-
-
-# Scheduler period for the legacy created_at bucket fallback (matches
-# migration 20260611_0006).
-_BUCKET_PERIOD_SECONDS = 1800
-
-
-async def _fill_buckets(postgresql: Any) -> None:
-    """Truncate and recompute results_by_bucket from all results (mirrors the backfill)."""
-    dsn = _make_db_url(postgresql)
-    aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
-    bucket_sql = (
-        "COALESCE(rn.scheduled_at, to_timestamp("
-        f"floor(extract(epoch FROM r.created_at) / {_BUCKET_PERIOD_SECONDS})"
-        f" * {_BUCKET_PERIOD_SECONDS}))"
+) -> None:
+    """Seed one evaluation carrying only a primary value."""
+    await _insert_metric(
+        postgresql,
+        run_id,
+        dataset_id=dataset_id,
+        metric_type=metric_type,
+        values={"primary": value},
+        **kwargs,
     )
-    try:
-        await aconn.execute("TRUNCATE benchmarks_v2.results_by_bucket")
-        await aconn.execute(f"""
-            INSERT INTO benchmarks_v2.results_by_bucket
-                (provider, model, benchmark, dataset_id, metric_type, bucket_at,
-                 min_value, p25, p50, p75, max_value, value_sum, sample_count)
-            SELECT r.provider, r.model, r.benchmark,
-                   COALESCE({_DATASET_CASE_SQL}, '__all__'),
-                   r.metric_type, {bucket_sql},
-                   MIN(r.metric_value)::float8,
-                   PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY r.metric_value)::float8,
-                   PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY r.metric_value)::float8,
-                   PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY r.metric_value)::float8,
-                   MAX(r.metric_value)::float8,
-                   SUM(r.metric_value)::float8,
-                   COUNT(*)::int
-            FROM benchmarks_v2.results r
-            JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
-            WHERE r.status = 'success'
-              AND rn.status IN ('succeeded', 'partial')
-              AND r.metric_value IS NOT NULL
-            GROUP BY GROUPING SETS (
-                (r.provider, r.model, r.benchmark, r.metric_type, {_DATASET_CASE_SQL},
-                 {bucket_sql}),
-                (r.provider, r.model, r.benchmark, r.metric_type, {bucket_sql})
-            )
-        """)  # noqa: S608
-    finally:
-        await aconn.close()

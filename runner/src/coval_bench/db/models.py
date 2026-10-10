@@ -22,6 +22,7 @@ from coval_bench.registries.metrics import MetricValueRole
 from coval_bench.registries.models import Gender
 
 __all__ = [
+    "CAPTURE_PENDING_ERROR",
     "Battle",
     "Benchmark",
     "Gender",
@@ -43,12 +44,10 @@ __all__ = [
     "ObservationStatus",
     "PreprocessingArtifact",
     "ProcessingStatus",
-    "MetricArtifact",
     "MetricEvaluation",
     "MetricExecutor",
     "MetricValue",
     "MetricValueRole",
-    "MetricValueBucket",
     "TimestampArtifactSchema",
     "TimestampArtifactName",
     "MetricEvaluationInput",
@@ -56,7 +55,7 @@ __all__ = [
 
 
 class ProcessingStatus(StrEnum):
-    """Shared lifecycle status for normalized work rows."""
+    """Shared lifecycle status for work rows."""
 
     QUEUED = "queued"
     RUNNING = "running"
@@ -163,7 +162,7 @@ class ObservationArtifact(BaseModel):
 
 
 class Observation(BaseModel):
-    """Normalized raw benchmark capture, independently of a metric result."""
+    """Raw benchmark capture, independently of a metric result."""
 
     id: UUID | None = None
     run_id: int
@@ -270,47 +269,6 @@ class MetricValue(BaseModel):
         return value
 
 
-class MetricArtifact(BaseModel):
-    id: UUID | None = None
-    metric_evaluation_id: UUID
-    artifact_type: str = Field(min_length=1)
-    uri: str
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    size_bytes: int = Field(gt=0)
-    created_at: datetime | None = None
-
-    _validate_uri = field_validator("uri")(_private_gs_uri)
-
-
-class MetricValueBucket(BaseModel):
-    provider: str = Field(min_length=1)
-    model: str = Field(min_length=1)
-    benchmark: Benchmark
-    dataset_id: str = Field(min_length=1)
-    metric_type: str = Field(min_length=1)
-    metric_version: str = Field(min_length=1)
-    evaluation_variant: str = Field(min_length=1)
-    value_key: str = Field(min_length=1)
-    unit: str = Field(min_length=1)
-    bucket_at: datetime
-    min_value: float
-    p25: float
-    p50: float
-    p75: float
-    max_value: float
-    value_sum: float
-    sample_count: int = Field(gt=0)
-
-    @model_validator(mode="after")
-    def _valid_percentiles(self) -> MetricValueBucket:
-        values = (self.min_value, self.p25, self.p50, self.p75, self.max_value, self.value_sum)
-        if not all(math.isfinite(value) for value in values):
-            raise ValueError("bucket values must be finite")
-        if not self.min_value <= self.p25 <= self.p50 <= self.p75 <= self.max_value:
-            raise ValueError("bucket percentiles must be ordered")
-        return self
-
-
 class RunStatus(StrEnum):
     """Lifecycle status of a benchmark run."""
 
@@ -318,6 +276,10 @@ class RunStatus(StrEnum):
     SUCCEEDED = "succeeded"
     PARTIAL = "partial"
     FAILED = "failed"
+
+
+# Stored as runs.error; recovery matches rows on this exact string.
+CAPTURE_PENDING_ERROR = "normalized capture pending"
 
 
 class ResultStatus(StrEnum):
@@ -342,9 +304,8 @@ class Run(BaseModel):
 
 
 class Result(BaseModel):
-    """Domain model for a row in ``benchmarks_v2.results``."""
+    """One provider measurement for one item, before it is frozen into a capture."""
 
-    id: int | None = None  # set by DB (bigserial)
     run_id: int
     provider: str
     model: str
@@ -357,9 +318,7 @@ class Result(BaseModel):
     transcript: str | None = None
     status: ResultStatus
     error: str | None = None
-    http_version: str | None = None
-    submit_to_headers_ms: float | None = None
-    # WER only: metric_value split in percentage points; null before migration 0014.
+    # WER only: metric_value split in percentage points.
     wer_insertions_pct: float | None = None
     wer_deletions_pct: float | None = None
     wer_substitutions_pct: float | None = None
@@ -367,16 +326,6 @@ class Result(BaseModel):
     wer_deletions: int | None = None
     wer_insertions: int | None = None
     wer_reference_words: int | None = None
-    # The configuration arm that produced this row. `pinned` marks components Coval
-    # chose for comparability; a vendor-submitted or otherwise-configured arm carries
-    # its own id. Orchestration platforms are variants of S2S, not their own benchmark.
-    variant_id: str = "pinned"
-    # Call-shape dimensions, null outside the orchestration runs that set them:
-    # `transport` the carrier path, `test_case_id` the scenario. Neither survives
-    # the run it was measured in, so both are stored rather than derived. The repeat
-    # index within a run is not: it falls out of (created_at, id) when it is wanted.
-    transport: str | None = None
-    test_case_id: str | None = None
 
 
 class VoteOutcome(StrEnum):
