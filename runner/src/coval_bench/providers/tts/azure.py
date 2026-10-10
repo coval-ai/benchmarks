@@ -24,14 +24,11 @@ import uuid
 from datetime import UTC, datetime
 from xml.sax.saxutils import escape, quoteattr
 
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 _WS_PATH = "/cognitiveservices/websocket/v1"
 _SAMPLE_RATE = 24000
@@ -88,9 +85,7 @@ class AzureTTSProvider(TTSProvider):
         )
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("azure", self._model, self._voice, _SAMPLE_RATE)
         request_id = uuid.uuid4().hex
 
         try:
@@ -113,7 +108,7 @@ class AzureTTSProvider(TTSProvider):
                         json.dumps(_SYNTHESIS_CONTEXT),
                     )
                 )
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 await ws.send(
                     _text_message("ssml", request_id, "application/ssml+xml", self._ssml(text))
                 )
@@ -121,36 +116,16 @@ class AzureTTSProvider(TTSProvider):
                 async for raw in ws:
                     if isinstance(raw, bytes):
                         path, payload = _parse_binary_message(raw)
-                        if path == "audio" and payload:
-                            if first_chunk_at is None:
-                                first_chunk_at = time.monotonic()
-                            audio_chunks.append(payload)
+                        if path == "audio":
+                            synthesis.add_chunk(payload)
                         continue
                     if _parse_text_path(raw) == "turn.end":
                         break
 
         except Exception as exc:
-            logger.warning("azure_tts_error", provider="azure", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="azure",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=_SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="azure",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=_SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()
 
 
 # ---------------------------------------------------------------------------

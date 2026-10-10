@@ -23,7 +23,7 @@ import structlog
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
+from coval_bench.providers.tts._common import Synthesis
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -97,9 +97,7 @@ class GoogleTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via StreamingSynthesize and return a TTSResult."""
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("google", self._model, self._voice, SAMPLE_RATE)
 
         streaming_config = texttospeech.StreamingSynthesizeConfig(
             voice=self._voice_params(),
@@ -117,37 +115,15 @@ class GoogleTTSProvider(TTSProvider):
             # Generator exhaustion half-closes the stream (Gemini's synthesis trigger).
 
         def _run_sync() -> None:
-            nonlocal start, first_chunk_at
             client = _get_shared_client()
             # t0 — synthesis trigger; the channel is warm, so no connect cost leaks in.
-            start = time.monotonic()
+            synthesis.start = time.monotonic()
             for response in client.streaming_synthesize(requests=_requests()):
-                if response.audio_content:
-                    if first_chunk_at is None:
-                        first_chunk_at = time.monotonic()
-                    audio_chunks.append(bytes(response.audio_content))
+                synthesis.add_chunk(bytes(response.audio_content))
 
         try:
             await asyncio.to_thread(_run_sync)
         except Exception as exc:
-            logger.warning("google_tts_error", provider="google", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="google",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="google",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()

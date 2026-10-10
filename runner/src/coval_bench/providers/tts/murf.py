@@ -11,14 +11,11 @@ import time
 from typing import Any
 from urllib.parse import urlencode
 
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 _VALID_MODELS = ("falcon-2",)
 _WIRE_MODELS = {"falcon-2": "FALCON"}
@@ -51,9 +48,7 @@ class MurfTTSProvider(TTSProvider):
         return self._model
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("murf", self._model, self._voice, _SAMPLE_RATE)
 
         query = urlencode(
             {
@@ -71,7 +66,7 @@ class MurfTTSProvider(TTSProvider):
                     json.dumps({"voice_config": {"voiceId": self._voice, "locale": "en-US"}})
                 )
 
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 await ws.send(json.dumps({"text": text, "end": True}))
 
                 async for raw in ws:
@@ -83,36 +78,12 @@ class MurfTTSProvider(TTSProvider):
                     if error:
                         raise RuntimeError(str(error))
 
-                    audio_b64 = event.get("audio", "")
-                    if audio_b64:
-                        chunk = base64.b64decode(audio_b64)
-                        if chunk:
-                            if first_chunk_at is None:
-                                first_chunk_at = time.monotonic()
-                            audio_chunks.append(chunk)
+                    synthesis.add_chunk(base64.b64decode(event.get("audio", "")))
 
                     if event.get("final"):
                         break
 
         except Exception as exc:
-            logger.warning("murf_tts_error", provider="murf", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="murf",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=_SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="murf",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=_SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()

@@ -14,14 +14,11 @@ import json
 import time
 from urllib.parse import quote
 
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 SAMPLE_RATE = 24000
 _WS_URL = "wss://api.inworld.ai/tts/v1/voice:streamBidirectional"
@@ -64,9 +61,7 @@ class InworldTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via Inworld's WebSocket and return a TTSResult."""
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("inworld", self._model, self._voice, SAMPLE_RATE)
 
         auth_param = quote(f"Basic {self._api_key}", safe="")
         url = f"{_WS_URL}?authorization={auth_param}"
@@ -89,37 +84,25 @@ class InworldTTSProvider(TTSProvider):
 
         try:
             async with ws_client.connect(url) as ws:
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 await ws.send(create_msg)
                 await ws.send(text_msg)
 
                 async for raw in ws:
                     if isinstance(raw, bytes):
                         # Graceful fallback: accept raw binary if server ever sends it.
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(_pcm_from_chunk(raw))
+                        synthesis.add_chunk(_pcm_from_chunk(raw))
                         continue
 
                     msg = json.loads(raw)
                     if msg.get("error"):
-                        return finalize_tts_result(
-                            provider="inworld",
-                            model=self._model,
-                            voice=self._voice,
-                            pcm=b"".join(audio_chunks),
-                            sample_rate=SAMPLE_RATE,
-                            audio_synthesis_start=start,
-                            first_audio_chunk_at=first_chunk_at,
-                            error=str(msg["error"])[:500],
-                        )
+                        synthesis.error = str(msg["error"])[:500]
+                        return synthesis.result()
 
                     result = msg.get("result", {})
                     audio_b64: str = result.get("audioChunk", {}).get("audioContent", "")
                     if audio_b64:
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(_pcm_from_chunk(base64.b64decode(audio_b64)))
+                        synthesis.add_chunk(_pcm_from_chunk(base64.b64decode(audio_b64)))
                     elif "flushCompleted" in result:
                         break
 
@@ -128,24 +111,7 @@ class InworldTTSProvider(TTSProvider):
             # reaches logs or the stored result. No exc_info — the rendered
             # traceback would echo the unredacted URI.
             scrubbed = str(exc).replace(auth_param, "***")
-            logger.warning("inworld_error", provider="inworld", model=self._model, error=scrubbed)
-            return finalize_tts_result(
-                provider="inworld",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=scrubbed,
-            )
+            synthesis.fail(exc, exc_info=False, error=scrubbed)
+            synthesis.error = scrubbed
 
-        return finalize_tts_result(
-            provider="inworld",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()

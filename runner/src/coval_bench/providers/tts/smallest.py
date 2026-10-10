@@ -18,14 +18,11 @@ import base64
 import json
 import time
 
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 SAMPLE_RATE = 24000
 _WS_URL = "wss://api.smallest.ai/waves/v1/tts/live"
@@ -53,9 +50,7 @@ class SmallestTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via Smallest AI WebSocket and return a TTSResult."""
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("smallest", self._model, self._voice, SAMPLE_RATE)
 
         headers = {"Authorization": f"Bearer {self._api_key}"}
         payload = json.dumps(
@@ -71,49 +66,24 @@ class SmallestTTSProvider(TTSProvider):
 
         try:
             async with ws_client.connect(_WS_URL, additional_headers=headers) as ws:
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 await ws.send(payload)
 
                 async for raw in ws:
                     if isinstance(raw, bytes):
                         # Graceful fallback: accept raw binary if server ever sends it.
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(raw)
+                        synthesis.add_chunk(raw)
                         continue
 
                     msg = json.loads(raw)
                     status = msg.get("status", "")
 
                     if status == "chunk":
-                        audio_b64: str = msg.get("data", {}).get("audio", "")
-                        if audio_b64:
-                            pcm = base64.b64decode(audio_b64)
-                            if first_chunk_at is None:
-                                first_chunk_at = time.monotonic()
-                            audio_chunks.append(pcm)
+                        synthesis.add_chunk(base64.b64decode(msg.get("data", {}).get("audio", "")))
                     elif status == "complete" or msg.get("done"):
                         break
 
         except Exception as exc:
-            logger.warning("smallest_error", provider="smallest", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="smallest",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="smallest",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()
