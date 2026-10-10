@@ -27,7 +27,13 @@ from google.cloud import storage
 from coval_bench import scenarios
 from coval_bench.config import Settings, get_settings, require_capture_bucket
 from coval_bench.db.conn import lifespan_pool
-from coval_bench.db.models import MetricExecutor, Result, ResultStatus, RunStatus
+from coval_bench.db.models import (
+    CAPTURE_PENDING_ERROR,
+    MetricExecutor,
+    Result,
+    ResultStatus,
+    RunStatus,
+)
 from coval_bench.db.registry_store import fetch_models
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import METRIC_SPECS, Metric
@@ -36,6 +42,7 @@ from coval_bench.registries.models import RegisteredModel
 from coval_bench.runner.capture import (
     ImportRunClaim,
     ImportRunIdentity,
+    RunSeal,
     read_import_run_claim,
     read_run_state,
     upload_import_run_claim,
@@ -785,11 +792,11 @@ async def _ingest_run(
     dataset_id: str = DATASET_ID,
     dataset_sha256: str = "",
     period_seconds: int,
-    artifact_client: storage.Client | None = None,
-    artifact_bucket: str = "",
+    artifact_client: storage.Client,
+    artifact_bucket: str,
     workspace_id: str | None = None,
-    import_identity: ImportRunIdentity | None = None,
-    import_generation: int | None = None,
+    import_identity: ImportRunIdentity,
+    import_generation: int,
     import_claim: ImportRunClaim | None = None,
 ) -> RunStatus | None:
     """Ingest one Coval run into its own run row; None = skipped, nothing written.
@@ -804,16 +811,9 @@ async def _ingest_run(
     """
     if pending is None:
         pending = condition.fetched | (condition.local & frozenset(_LOCAL_SOURCES))
-    if artifact_client is None or not artifact_bucket:
-        raise RuntimeError("required capture is not initialized")
-    if import_identity is None or import_generation is None:
-        raise RuntimeError("required capture import identity is not initialized")
     if import_claim is not None:
         pending = frozenset(Metric(metric) for metric in import_claim.metric_types)
     run_pk: int | None = None
-    claimed_run_finished_at: datetime | None = None
-    claimed_run_status: RunStatus | None = None
-    claimed_run_error: str | None = None
     headers = {"X-Coval-Workspace-Id": workspace_id} if workspace_id else None
     try:
         resp = await client.get(f"/runs/{coval_run.run_id}", headers=headers)
@@ -972,9 +972,6 @@ async def _ingest_run(
             scheduled_at=scheduled_at,
             persona_id=coval_run.persona_id or None,
         )
-        claimed_run_finished_at = claimed_run.finished_at
-        claimed_run_status = claimed_run.status
-        claimed_run_error = claimed_run.error
 
         # Grouped as built: metric_type is a plain str on Result, so filtering the
         # flat list by enum identity would silently match nothing.
@@ -1010,15 +1007,8 @@ async def _ingest_run(
         if all_rows:
             grouped: dict[str, list[Result]] = {}
             for row in all_rows:
-                if row.audio_filename is None:  # pragma: no cover -- S2S rows set it
-                    logger.warning(
-                        "normalized_s2s_sample_id_missing",
-                        provider=spec.provider,
-                        coval_run_id=coval_run.run_id,
-                    )
-                    continue
-                grouped.setdefault(row.audio_filename, []).append(row)
-            dataset_fingerprint = _dataset_fingerprint(dataset_sha256 or _dataset_sha256())
+                grouped.setdefault(cast("str", row.audio_filename), []).append(row)
+            dataset_fingerprint = _dataset_fingerprint(run_dataset_sha256)
             from coval_bench.runner.capture import (
                 RunManifest,
                 build_capture_identity,
@@ -1109,111 +1099,31 @@ async def _ingest_run(
         else:
             # This condition has no latency, or it landed on an earlier scan.
             status = RunStatus.SUCCEEDED
-        intended_status = status
-        capture_pending = len(capture_outcomes) != len(expected_capture_ids) or any(
-            str(outcome) != "completed" for outcome in capture_outcomes
-        )
-        if capture_pending and status is not RunStatus.FAILED:
-            status = RunStatus.PARTIAL
-        finish_error = (
-            "normalized capture pending"
-            if capture_pending and intended_status is not RunStatus.FAILED
-            else None
-        )
-        finished_at = datetime.now(UTC)
-        from coval_bench.runner.capture import (
-            FinalizedReceipt,
-            RunSeal,
-            upload_run_state,
-        )
+        from coval_bench.runner.persistence import capture_pending, seal_and_finish_run
 
-        if claimed_run_finished_at is not None and claimed_run_status is not None:
-            finished_at = claimed_run_finished_at
-            status = claimed_run_status
-            finish_error = claimed_run_error
-        seal = RunSeal(
-            run_id=run_pk,
-            intended_status=str(intended_status),
-            stored_status=str(status),
-            finished_at=finished_at,
-            error=finish_error,
-            expected_capture_ids=expected_capture_ids,
+        incomplete = capture_pending(capture_outcomes, expected_capture_ids)
+        held = incomplete and status is not RunStatus.FAILED
+        if claimed_run.finished_at is not None:
+            stored_status, finish_error = claimed_run.status, claimed_run.error
+            finished_at = claimed_run.finished_at
+        else:
+            stored_status = RunStatus.PARTIAL if held else status
+            finish_error = CAPTURE_PENDING_ERROR if held else None
+            finished_at = datetime.now(UTC)
+        status = await seal_and_finish_run(
+            writer=writer,
+            storage_client=artifact_client,
+            bucket=artifact_bucket,
+            seal=RunSeal(
+                run_id=run_pk,
+                intended_status=str(status),
+                stored_status=str(stored_status),
+                finished_at=finished_at,
+                error=finish_error,
+                expected_capture_ids=expected_capture_ids,
+            ),
+            capture_pending=incomplete,
         )
-        seal_sha256: str | None = None
-        try:
-            _, seal_sha256 = await asyncio.to_thread(
-                upload_run_state,
-                artifact_client,
-                artifact_bucket,
-                run_pk,
-                "seal",
-                seal,
-            )
-        except ValueError:
-            existing_value = await asyncio.to_thread(
-                read_run_state, artifact_client, artifact_bucket, run_pk, "seal"
-            )
-            if existing_value is None:
-                raise
-            existing_seal = RunSeal.model_validate(existing_value)
-            if (
-                existing_seal.run_id != run_pk
-                or existing_seal.intended_status != str(intended_status)
-                or existing_seal.expected_capture_ids != expected_capture_ids
-            ):
-                raise ValueError("durable import seal conflicts with this replay") from None
-            seal = existing_seal
-            _, seal_sha256 = await asyncio.to_thread(
-                upload_run_state,
-                artifact_client,
-                artifact_bucket,
-                run_pk,
-                "seal",
-                seal,
-            )
-        except Exception:
-            logger.warning("normalized_capture_seal_failed", exc_info=True)
-            if intended_status is not RunStatus.FAILED:
-                status = RunStatus.PARTIAL
-                finish_error = "normalized capture pending"
-            await writer.finish_run_exact(
-                run_pk,
-                status=status,
-                error=finish_error,
-                finished_at=finished_at,
-            )
-        if seal_sha256 is not None:
-            stored_status = RunStatus(seal.stored_status)
-            recovered_complete = (
-                not capture_pending
-                and stored_status is RunStatus.PARTIAL
-                and seal.error == "normalized capture pending"
-            )
-            status = RunStatus(seal.intended_status) if recovered_complete else stored_status
-            finish_error = None if recovered_complete else seal.error
-            finished_at = seal.finished_at
-            await writer.finish_run_exact(
-                run_pk,
-                status=status,
-                error=finish_error,
-                finished_at=finished_at,
-                allow_capture_recovery=recovered_complete,
-            )
-            try:
-                await asyncio.to_thread(
-                    upload_run_state,
-                    artifact_client,
-                    artifact_bucket,
-                    run_pk,
-                    "finalized",
-                    FinalizedReceipt(run_id=run_pk, seal_sha256=seal_sha256),
-                )
-            except Exception:
-                logger.warning("normalized_capture_finalize_receipt_failed", exc_info=True)
-                if intended_status is not RunStatus.FAILED:
-                    await writer.mark_run_capture_pending(run_pk, finished_at=finished_at)
-                    status = RunStatus.PARTIAL
-                    finish_error = "normalized capture pending"
         if status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
             try:
                 await writer.rebuild_run_rollup(run_pk)
@@ -1391,9 +1301,6 @@ async def _fetch_one_provider(
                 )
                 continue
             ingestable = _ingestable(condition, metric_ids)
-            import_identity_value: ImportRunIdentity | None = None
-            import_claim: ImportRunClaim | None = None
-            import_generation: int | None = None
             if artifact_client is None:
                 raise RuntimeError("required capture storage is unavailable")
             import_identity_value = _import_identity(

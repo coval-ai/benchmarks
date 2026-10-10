@@ -21,7 +21,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.llm_turns import fetch_conversation_ttft
 from coval_bench.db.models import (
-    MetricArtifact,
+    CAPTURE_PENDING_ERROR,
     MetricEvaluation,
     MetricEvaluationInput,
     MetricValue,
@@ -32,15 +32,22 @@ from coval_bench.db.models import (
     Run,
     RunStatus,
 )
-from coval_bench.registries import (
-    Metric,
-    validate_metric_contract,
-    validate_metric_values,
-    validate_preprocessing_artifact_contract,
-)
+from coval_bench.registries import Metric, validate_preprocessing_artifact_contract
 from coval_bench.registries.metrics import METRIC_SPECS
 
 logger = structlog.get_logger(__name__)
+
+_CAPTURE_TABLES = (
+    "runs",
+    "metrics",
+    "benchmark_observations",
+    "observation_artifacts",
+    "metric_evaluations",
+    "metric_evaluation_inputs",
+    "metric_values",
+    "dashboard_rollups",
+    "dashboard_rollup_queue",
+)
 
 
 class RunWriter:
@@ -116,12 +123,14 @@ class RunWriter:
     async def reserve_run_id(self) -> int:
         """Reserve a run primary key without creating a visible run row."""
         async with self._pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute("SELECT nextval(pg_get_serial_sequence('benchmarks_v2.runs', 'id'))")
+            await cur.execute(
+                "SELECT nextval(pg_get_serial_sequence('benchmarks_v2.runs', 'id')) AS id"
+            )
             row = await cur.fetchone()
             await conn.commit()
         if row is None:
             raise RuntimeError("run ID sequence returned no value")
-        return int(row[0] if not isinstance(row, dict) else next(iter(row.values())))
+        return int(row["id"])
 
     async def ensure_capture_run(
         self,
@@ -187,81 +196,37 @@ class RunWriter:
 
     async def preflight_required_capture_schema(self) -> None:
         """Fail before provider work when capture/publication is unavailable."""
-        required = (
-            "runs",
-            "metrics",
-            "benchmark_observations",
-            "observation_artifacts",
-            "metric_evaluations",
-            "metric_evaluation_inputs",
-            "metric_values",
-            "dashboard_rollups",
-            "dashboard_rollup_queue",
-        )
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
-                """SELECT name
-                   FROM unnest(%s::text[]) AS name
+                """SELECT name FROM unnest(%s::text[]) AS name
                    WHERE to_regclass('benchmarks_v2.' || name) IS NULL""",
-                (list(required),),
+                (list(_CAPTURE_TABLES),),
             )
-            missing = [
-                str(row[0] if not isinstance(row, dict) else row["name"])
-                for row in await cur.fetchall()
-            ]
-        if missing:
-            raise RuntimeError("required capture schema is unavailable: " + ", ".join(missing))
-        await self._assert_required_capture_privileges()
-
-    async def _assert_required_capture_privileges(self) -> None:
-        """Check write/publication privileges without attempting a mutating probe."""
-        tables = (
-            "metrics",
-            "benchmark_observations",
-            "observation_artifacts",
-            "metric_evaluations",
-            "metric_evaluation_inputs",
-            "metric_values",
-            "runs",
-            "dashboard_rollups",
-            "dashboard_rollup_queue",
-        )
-        async with self._pool.connection() as conn, conn.cursor() as cur:
+            missing = [row["name"] for row in await cur.fetchall()]
+            if missing:
+                raise RuntimeError("required capture schema is unavailable: " + ", ".join(missing))
             await cur.execute(
-                """SELECT table_name
-                   FROM unnest(%s::text[]) AS table_name
+                """SELECT name FROM unnest(%s::text[]) AS name
                    WHERE NOT has_table_privilege(
-                       current_user,
-                       'benchmarks_v2.' || table_name,
-                       'SELECT,INSERT,UPDATE'
-                   )""",
-                (list(tables),),
+                       current_user, 'benchmarks_v2.' || name, 'SELECT,INSERT,UPDATE')""",
+                (list(_CAPTURE_TABLES),),
             )
-            denied = [
-                str(row[0] if not isinstance(row, dict) else row["table_name"])
-                for row in await cur.fetchall()
-            ]
-        if denied:
-            raise RuntimeError("required capture privileges unavailable: " + ", ".join(denied))
-        async with self._pool.connection() as conn, conn.cursor() as cur:
+            denied = [row["name"] for row in await cur.fetchall()]
+            if denied:
+                raise RuntimeError("required capture privileges unavailable: " + ", ".join(denied))
             await cur.execute(
-                """SELECT table_name
-                   FROM unnest(%s::text[]) AS table_name
+                """SELECT name FROM unnest(%s::text[]) AS name
                    WHERE NOT has_sequence_privilege(
                        current_user,
-                       pg_get_serial_sequence('benchmarks_v2.' || table_name, 'id'),
-                       'USAGE'
-                   )""",
+                       pg_get_serial_sequence('benchmarks_v2.' || name, 'id'),
+                       'USAGE')""",
                 (["runs", "metrics"],),
             )
-            denied_sequences = [
-                str(row[0] if not isinstance(row, dict) else row["table_name"])
-                for row in await cur.fetchall()
-            ]
-        if denied_sequences:
-            raise RuntimeError(
-                "required capture sequence privileges unavailable: " + ", ".join(denied_sequences)
-            )
+            denied = [row["name"] for row in await cur.fetchall()]
+            if denied:
+                raise RuntimeError(
+                    "required capture sequence privileges unavailable: " + ", ".join(denied)
+                )
 
     async def insert_observation(self, observation: Observation) -> Observation:
         """Create or retrieve an observation, rejecting conflicting retries."""
@@ -420,7 +385,6 @@ class RunWriter:
         evaluation: MetricEvaluation,
         *,
         inputs: Sequence[MetricEvaluationInput] = (),
-        validate_contract: bool = True,
     ) -> MetricEvaluation:
         """Create a queued evaluation or retrieve the same evaluation on retry."""
         if (
@@ -430,8 +394,6 @@ class RunWriter:
             or evaluation.error is not None
         ):
             raise ValueError("metric evaluations must be created queued")
-        if validate_contract:
-            validate_metric_contract(evaluation.metric_type, evaluation.metric_version)
         input_keys = [(item.input_role, item.input_order) for item in inputs]
         if len(input_keys) != len(set(input_keys)):
             raise ValueError("metric evaluation inputs must have unique role/order pairs")
@@ -772,25 +734,19 @@ class RunWriter:
         evaluation_id: UUID,
         *,
         values: Sequence[MetricValue],
-        artifacts: Sequence[MetricArtifact] = (),
         finished_at: datetime,
-        validate_contract: bool = True,
     ) -> None:
         """Atomically succeed a running evaluation; exact replays are harmless."""
         if not values:
             raise ValueError("succeeded metric evaluations require metric values")
         if any(value.metric_evaluation_id != evaluation_id for value in values):
             raise ValueError("all metric values must belong to the completed evaluation")
-        if any(artifact.metric_evaluation_id != evaluation_id for artifact in artifacts):
-            raise ValueError("all metric artifacts must belong to the completed evaluation")
 
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
                 await cur.execute(
-                    """SELECT m.code AS metric_type, e.metric_version, e.status, e.finished_at
-                       FROM benchmarks_v2.metric_evaluations e
-                       JOIN benchmarks_v2.metrics m ON m.id = e.metric_id
-                       WHERE e.id = %s FOR UPDATE OF e""",
+                    """SELECT status, finished_at FROM benchmarks_v2.metric_evaluations
+                       WHERE id = %s FOR UPDATE""",
                     (evaluation_id,),
                 )
                 evaluation = await cur.fetchone()
@@ -806,12 +762,6 @@ class RunWriter:
                         (evaluation_id,),
                     )
                     stored_values = await cur.fetchall()
-                    await cur.execute(
-                        """SELECT artifact_type, uri, sha256, size_bytes
-                           FROM benchmarks_v2.metric_artifacts WHERE metric_evaluation_id = %s""",
-                        (evaluation_id,),
-                    )
-                    stored_artifacts = await cur.fetchall()
                     value_fields = ("value_key", "unit", "value", "value_role")
                     expected_values = sorted(
                         (
@@ -824,35 +774,11 @@ class RunWriter:
                         (tuple(value[field] for field in value_fields) for value in stored_values),
                         key=repr,
                     )
-                    artifact_fields = ("artifact_type", "uri", "sha256", "size_bytes")
-                    expected_artifacts = sorted(
-                        (
-                            tuple(getattr(item, field) for field in artifact_fields)
-                            for item in artifacts
-                        ),
-                        key=repr,
-                    )
-                    actual_artifacts = sorted(
-                        (
-                            tuple(item[field] for field in artifact_fields)
-                            for item in stored_artifacts
-                        ),
-                        key=repr,
-                    )
-                    if actual_values != expected_values or actual_artifacts != expected_artifacts:
+                    if actual_values != expected_values:
                         raise ValueError("metric completion replay conflicts with stored result")
                     return
                 if evaluation["status"] != ProcessingStatus.RUNNING:
                     raise ValueError("only running metric evaluations may be completed")
-                if validate_contract:
-                    validate_metric_values(
-                        evaluation["metric_type"],
-                        evaluation["metric_version"],
-                        tuple(
-                            (value.value_key, value.unit, value.value, value.value_role)
-                            for value in values
-                        ),
-                    )
                 await cur.executemany(
                     """INSERT INTO benchmarks_v2.metric_values
                        (metric_evaluation_id, value_key, unit, value, value_role)
@@ -868,22 +794,6 @@ class RunWriter:
                         for value in values
                     ],
                 )
-                if artifacts:
-                    await cur.executemany(
-                        """INSERT INTO benchmarks_v2.metric_artifacts
-                           (metric_evaluation_id, artifact_type, uri, sha256, size_bytes)
-                           VALUES (%s, %s, %s, %s, %s)""",
-                        [
-                            (
-                                artifact.metric_evaluation_id,
-                                artifact.artifact_type,
-                                artifact.uri,
-                                artifact.sha256,
-                                artifact.size_bytes,
-                            )
-                            for artifact in artifacts
-                        ],
-                    )
                 await cur.execute(
                     """UPDATE benchmarks_v2.metric_evaluations
                        SET status = %s, finished_at = %s, error = NULL, updated_at = now()
@@ -971,7 +881,7 @@ class RunWriter:
                     allow_capture_recovery
                     and row["status"] == RunStatus.PARTIAL
                     and row["finished_at"] == finished_at
-                    and row["error"] == "normalized capture pending"
+                    and row["error"] == CAPTURE_PENDING_ERROR
                 )
                 if recoverable_partial:
                     await cur.execute(
@@ -1010,10 +920,8 @@ class RunWriter:
             if row["status"] == RunStatus.FAILED:
                 raise ValueError("failed provider runs cannot be relabeled as capture pending")
             await cur.execute(
-                """UPDATE benchmarks_v2.runs
-                   SET status = %s, error = 'normalized capture pending'
-                   WHERE id = %s""",
-                (RunStatus.PARTIAL, run_id),
+                "UPDATE benchmarks_v2.runs SET status = %s, error = %s WHERE id = %s",
+                (RunStatus.PARTIAL, CAPTURE_PENDING_ERROR, run_id),
             )
             await cur.execute(ENQUEUE_SLOT_SQL, {"run_id": run_id})
 

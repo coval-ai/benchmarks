@@ -14,11 +14,8 @@ import pytest
 from pytest_postgresql.factories import postgresql
 
 from coval_bench.db import dashboard_windows
-from coval_bench.db.dashboard_windows import (
-    WINDOW_VIEWS,
-    RefreshResult,
-    validate_window_rules,
-)
+from coval_bench.db.dashboard_windows import WINDOW_VIEWS, RefreshResult
+from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS, Metric
 
 from .conftest import apply_migrations, open_pool
 
@@ -33,8 +30,18 @@ def test_summary_views_cover_every_saved_window() -> None:
     }
 
 
-def test_registered_contracts_are_supported() -> None:
-    validate_window_rules()
+def test_wer_contract_carries_the_keys_the_window_views_pool() -> None:
+    contract = METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")]
+    assert {definition.key: definition.unit for definition in contract.values} == {
+        "primary": "percent",
+        "insertions": "percent",
+        "deletions": "percent",
+        "substitutions": "percent",
+        "substitution_count": "count",
+        "deletion_count": "count",
+        "insertion_count": "count",
+        "reference_words": "count",
+    }
 
 
 def test_naive_as_of_is_rejected() -> None:

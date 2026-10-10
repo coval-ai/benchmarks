@@ -20,7 +20,6 @@ from pytest_postgresql.factories import postgresql
 
 from coval_bench.db.models import (
     Benchmark,
-    MetricArtifact,
     MetricEvaluation,
     MetricEvaluationInput,
     MetricExecutor,
@@ -571,17 +570,6 @@ async def test_create_get_is_retry_safe_and_strict(pg_conn: psycopg.Connection[A
                 status=ProcessingStatus.QUEUED,
             )
         )
-        with pytest.raises(ValueError, match="unknown metric/version"):
-            await writer.insert_metric_evaluation(
-                MetricEvaluation(
-                    observation_id=observation_id,
-                    metric_type=str(Metric.WER),
-                    metric_version="v2",
-                    evaluation_variant="future",
-                    executor=MetricExecutor.INLINE,
-                    status=ProcessingStatus.QUEUED,
-                )
-            )
         with pytest.raises(ValueError, match="executor"):
             await writer.insert_metric_evaluation(
                 MetricEvaluation(
@@ -904,17 +892,8 @@ async def test_metric_completion_replay_and_rollback(pg_conn: psycopg.Connection
         evaluation = await _evaluation(writer, observation)
         evaluation_id = _required(evaluation.id)
         values = _wer_values(evaluation_id)
-        artifact = MetricArtifact(
-            metric_evaluation_id=evaluation_id,
-            artifact_type="details",
-            uri="gs://private/details",
-            sha256=_SHA,
-            size_bytes=1,
-        )
         finished = _NOW + timedelta(seconds=1)
-        await writer.complete_metric_evaluation(
-            evaluation_id, values=values, artifacts=[artifact], finished_at=finished
-        )
+        await writer.complete_metric_evaluation(evaluation_id, values=values, finished_at=finished)
         async with pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 """SELECT has_primary_role, value, wer_insertions_pct,
@@ -930,15 +909,13 @@ async def test_metric_completion_replay_and_rollback(pg_conn: psycopg.Connection
                 "wer_deletions_pct": 2.0,
                 "wer_substitutions_pct": 7.0,
             }
-        await writer.complete_metric_evaluation(
-            evaluation_id, values=values, artifacts=[artifact], finished_at=finished
-        )
+        await writer.complete_metric_evaluation(evaluation_id, values=values, finished_at=finished)
         changed = [*values]
         changed[0] = changed[0].model_copy(update={"value": 11})
         changed[3] = changed[3].model_copy(update={"value": 8})
         with pytest.raises(ValueError, match="replay conflicts"):
             await writer.complete_metric_evaluation(
-                evaluation_id, values=changed, artifacts=[artifact], finished_at=finished
+                evaluation_id, values=changed, finished_at=finished
             )
         async with pool.connection() as conn, conn.cursor() as cur:
             with pytest.raises(psycopg.errors.RaiseException, match="payloads are immutable"):
@@ -1322,15 +1299,6 @@ async def test_evaluation_delete_lifecycle_and_observation_cascade(
         await writer.complete_metric_evaluation(
             evaluation_id,
             values=_wer_values(evaluation_id),
-            artifacts=[
-                MetricArtifact(
-                    metric_evaluation_id=evaluation_id,
-                    artifact_type="details",
-                    uri="gs://private/details",
-                    sha256=_SHA,
-                    size_bytes=1,
-                )
-            ],
             finished_at=_NOW + timedelta(seconds=1),
         )
         async with pool.connection() as conn, conn.cursor() as cur:
@@ -1371,8 +1339,6 @@ async def test_evaluation_delete_lifecycle_and_observation_cascade(
             await cur.execute("SELECT count(*) AS count FROM benchmarks_v2.observation_artifacts")
             assert _required(await cur.fetchone())["count"] == 0
             await cur.execute("SELECT count(*) AS count FROM benchmarks_v2.metric_values")
-            assert _required(await cur.fetchone())["count"] == 0
-            await cur.execute("SELECT count(*) AS count FROM benchmarks_v2.metric_artifacts")
             assert _required(await cur.fetchone())["count"] == 0
             await conn.commit()
     finally:

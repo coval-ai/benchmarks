@@ -17,14 +17,14 @@ from httpx import AsyncClient
 
 from coval_bench.api.common import (
     MIN_SCORED_SAMPLES,
-    WINDOW_INTERVALS,
+    WINDOW_DURATIONS,
     WindowLiteral,
 )
 from coval_bench.api.routers.aggregates import (
+    _COMPACT_SERIES_SQL,
     _DATASETS_SQL,
-    _SERIES_SQL,
-    _TIMELINE_SQL,
-    _timeline_bucket_seconds,
+    _RUN_SLOT_SQL,
+    _timeline_grain,
 )
 from coval_bench.db.dashboard_rollups import GRAINS
 from coval_bench.db.dashboard_windows import WINDOW_VIEWS
@@ -115,9 +115,9 @@ async def _insert_bucket(
 
 
 def test_intervals_cover_every_window() -> None:
-    """Every WindowLiteral value must have an interval and a view — a window
+    """Every WindowLiteral value must have a duration and a view — a window
     added to the literal but not the dicts 500s after validation."""
-    assert set(WINDOW_INTERVALS) == set(get_args(WindowLiteral))
+    assert set(WINDOW_DURATIONS) == set(get_args(WindowLiteral))
     assert set(WINDOW_VIEWS) == set(get_args(WindowLiteral))
 
 
@@ -125,8 +125,8 @@ def test_query_constants_start_with_sql() -> None:
     """Comments beside triple-quote openers must not become literal SQL."""
     for query in (
         _DATASETS_SQL,
-        _SERIES_SQL,
-        _TIMELINE_SQL,
+        _RUN_SLOT_SQL,
+        _COMPACT_SERIES_SQL,
     ):
         assert query.lstrip().startswith(("SELECT", "WITH"))
 
@@ -983,7 +983,7 @@ async def test_include_series_false_keeps_stats_and_skips_series_sql(
     await _publish_windows(postgresql)
 
     monkeypatch.setattr(
-        "coval_bench.api.routers.aggregates._SERIES_SQL", "SELECT invalid_series_sql"
+        "coval_bench.api.routers.aggregates._RUN_SLOT_SQL", "SELECT invalid_series_sql"
     )
     monkeypatch.setattr(
         "coval_bench.api.routers.aggregates._COMPACT_SERIES_SQL",
@@ -1002,10 +1002,10 @@ async def test_include_series_false_keeps_stats_and_skips_series_sql(
 
 def test_timeline_bucket_chooser_is_smallest_supported_interval() -> None:
     """Hourly buckets until 200 points would be exceeded, then the four-hour rollup."""
-    assert _timeline_bucket_seconds(1) == 3600
-    assert _timeline_bucket_seconds(200 * 3600) == 3600
-    assert _timeline_bucket_seconds(201 * 3600) == 14400
-    assert _timeline_bucket_seconds(30 * 86400) == 14400
+    assert _timeline_grain(timedelta(seconds=1)) == "1h"
+    assert _timeline_grain(timedelta(hours=200)) == "1h"
+    assert _timeline_grain(timedelta(hours=201)) == "4h"
+    assert _timeline_grain(timedelta(days=30)) == "4h"
 
 
 async def test_timeline_rejects_invalid_custom_bounds(client: AsyncClient) -> None:
@@ -1046,9 +1046,7 @@ async def test_timeline_explicit_24h_preserves_run_aggregation_metadata(
     assert body["window"] == "24h"
     assert body["aggregation"] == "run"
     assert body["bucket_seconds"] is None
-    assert all(
-        p["aggregation_method"] is None and p["sample_count"] is None for p in body["points"]
-    )
+    assert all(p["aggregation_method"] is None and p["sample_count"] > 0 for p in body["points"])
     assert body["latest_source_at"] is not None
 
 

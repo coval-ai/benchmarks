@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared API-layer literals and SQL fragments.
+"""Shared API-layer literals.
 
 Single home for definitions that multiple routers (and schemas) must agree
 on — adding a window or benchmark here updates every endpoint at once.
@@ -9,18 +9,17 @@ on — adding a window or benchmark here updates every endpoint at once.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Literal
 
 BenchmarkLiteral = Literal["STT", "TTS", "S2S", "LLM"]
 WindowLiteral = Literal["24h", "7d", "30d"]
 StatisticLiteral = Literal["default", "p50", "p90", "p95", "p100"]
 
-# Fixed interval strings — looked up by Python, never user-interpolated into
-# SQL. Used by live queries (the aggregates series block).
-WINDOW_INTERVALS: dict[str, str] = {
-    "24h": "24 hours",
-    "7d": "7 days",
-    "30d": "30 days",
+WINDOW_DURATIONS: dict[str, timedelta] = {
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
 }
 
 # Fewest scored samples a headline stat may rest on, per modality. Below this a

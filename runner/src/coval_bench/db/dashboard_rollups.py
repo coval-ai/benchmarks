@@ -18,7 +18,6 @@ type DashboardPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.Di
 
 RUN_SLOT = "run"
 GRAINS: dict[str, int] = {"1h": 3600, "4h": 14400}
-_GRAIN_BY_SECONDS = {seconds: grain for grain, seconds in GRAINS.items()}
 RETENTION = timedelta(days=30)
 _REBUILD_STATEMENT_TIMEOUT = "300s"
 
@@ -29,15 +28,8 @@ class DrainResult:
     remaining: int
 
 
-def grain_for_seconds(seconds: int | None) -> str:
-    """The grain the timeline reads for a bucket size; None means run slots."""
-    return _GRAIN_BY_SECONDS[seconds] if seconds else RUN_SLOT
-
-
 def floor_rollup(value: datetime, grain: str) -> datetime:
     """Align *value* to the start of its UTC bucket; run slots are already aligned."""
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
     if grain == RUN_SLOT:
         return value.astimezone(UTC)
     epoch = int(value.timestamp())
@@ -111,13 +103,8 @@ WHERE slot_at IN (
   SELECT slot_at FROM benchmarks_v2.dashboard_rollup_queue ORDER BY slot_at LIMIT 50)
 RETURNING slot_at
 """
-PRUNE_SQL = {
-    table: f"DELETE FROM benchmarks_v2.{table} WHERE {column} < %(before)s"  # noqa: S608
-    for table, column in (
-        ("dashboard_rollups", "bucket_at"),
-        ("dashboard_rollup_queue", "slot_at"),
-    )
-}
+PRUNE_ROLLUPS_SQL = "DELETE FROM benchmarks_v2.dashboard_rollups WHERE bucket_at < %(before)s"
+PRUNE_QUEUE_SQL = "DELETE FROM benchmarks_v2.dashboard_rollup_queue WHERE slot_at < %(before)s"
 
 
 async def fill_rollup(
@@ -166,10 +153,10 @@ async def drain_rollup_queue(
         rebuilt += len(claimed)
     async with pool.connection() as conn, conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
         async with conn.transaction():
-            for sql in PRUNE_SQL.values():
-                await cur.execute(
-                    sql, {"before": as_of - RETENTION - max(GRAINS.values()) * timedelta(seconds=1)}
-                )
+            # Keep the 4h bucket that straddles the retention edge.
+            prune = {"before": as_of - RETENTION - timedelta(hours=4)}
+            await cur.execute(PRUNE_ROLLUPS_SQL, prune)
+            await cur.execute(PRUNE_QUEUE_SQL, prune)
         await cur.execute("SELECT count(*) AS n FROM benchmarks_v2.dashboard_rollup_queue")
         row = await cur.fetchone()
     return DrainResult(rebuilt, int(row["n"]) if row else 0)

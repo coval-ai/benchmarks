@@ -17,6 +17,7 @@ aggregates' headline value.
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any, Literal
 
 import structlog
@@ -27,7 +28,7 @@ from starlette.requests import Request
 
 from coval_bench import scenarios
 from coval_bench.api.common import (
-    WINDOW_INTERVALS,
+    MIN_SCORED_SAMPLES,
     BenchmarkLiteral,
     WindowLiteral,
     has_enough_samples,
@@ -77,7 +78,7 @@ _LEADERBOARD_SQL = """
     WHERE m.code = %(metric)s
       AND benchmark = %(benchmark)s
       AND dataset_id = %(dataset)s
-    ORDER BY avg_value ASC
+    ORDER BY sample_count < %(min_samples)s, avg_value ASC
 """
 
 
@@ -94,9 +95,12 @@ async def get_leaderboard(
 ) -> LeaderboardResponse:
     """Return leaderboard entries sorted ascending by average metric value.
 
+    Entries under the modality's sample floor are flagged and sink below every
+    ranked entry, so a model that scored once with a fast time cannot lead.
+
     Args:
-        metric: One of WER, TTFA, TTFT, TTFS.
-        benchmark: One of STT, TTS.
+        metric: One of WER, TTFA, TTFT, TTFS, V2V.
+        benchmark: One of STT, TTS, S2S, LLM.
         window: Time window — each is served by its published snapshot.
 
     Returns:
@@ -116,7 +120,7 @@ async def get_leaderboard(
         "metric": metric,
         "benchmark": benchmark,
         "dataset": _PRIMARY_DATASET_BY_BENCHMARK.get(benchmark, DATASET_ALL),
-        "interval": WINDOW_INTERVALS[window],
+        "min_samples": MIN_SCORED_SAMPLES.get(benchmark, 0),
     }
     sql = _LEADERBOARD_SQL.format(view=WINDOW_VIEWS[window])
     async with dashboard_read(pool) as conn:
@@ -125,21 +129,13 @@ async def get_leaderboard(
         entry_rows = await rows.fetchall()
 
     entries = [
-        LeaderboardEntry.model_validate(r)
+        LeaderboardEntry.model_validate(
+            {**r, "insufficient_samples": not has_enough_samples(benchmark, r["n"])}
+        )
         for r in entry_rows
         if (r["provider"], r["model"]) not in hidden
         and not is_metric_excluded(r["provider"], r["model"], metric)
     ]
-    entries = [
-        e
-        if has_enough_samples(benchmark, e.n)
-        else e.model_copy(update={"insufficient_samples": True})
-        for e in entries
-    ]
-    # The view ranks by value alone, so a model that scored once with a fast time
-    # would lead the board. Thin entries sink below every ranked one; ORDER BY
-    # already sorted within each group, and a stable sort preserves it.
-    entries.sort(key=lambda e: e.insufficient_samples)
     capture_api_event(
         posthog_client,
         "leaderboard_queried",
@@ -155,5 +151,5 @@ async def get_leaderboard(
         metric=metric,
         window=window,
         entries=entries,
-        snapshot=snapshot.as_dict(),
+        snapshot=asdict(snapshot),
     )

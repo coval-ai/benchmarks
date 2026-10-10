@@ -43,7 +43,7 @@ import random
 import signal
 import wave
 from collections import Counter, defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable
 from datetime import UTC, datetime  # noqa: UP017 — UTC alias requires 3.11+, target is 3.12
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -435,7 +435,7 @@ def _get_family_rng() -> Any:  # noqa: ANN401
 
 
 def _get_db_symbols() -> tuple[Any, Any, Any, Any]:
-    """Return (lifespan_pool, RunWriter, RunStatus, ResultStatus, Result) at call time."""
+    """Return (lifespan_pool, RunWriter, RunStatus, db.models) at call time."""
     conn_mod = importlib.import_module("coval_bench.db.conn")
     writer_mod = importlib.import_module("coval_bench.db.writer")
     models_mod = importlib.import_module("coval_bench.db.models")
@@ -1158,26 +1158,18 @@ _BUCKET_REFRESH_ATTEMPTS = 3
 _BUCKET_REFRESH_RETRY_DELAY_S = 0.5
 
 
-async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -> None:  # noqa: ANN401 — RunWriter, lazy-imported by the caller
+async def _refresh_series_bucket(writer: Any, run_id: int) -> None:  # noqa: ANN401 — RunWriter, lazy-imported by the caller
     """Best-effort refresh of the rollup bucket."""
-    refreshes: tuple[tuple[str, Callable[[], Awaitable[None]]], ...] = (
-        (
-            "normalized_series_bucket",
-            lambda: writer.rebuild_run_rollup(run_id),
-        ),
-    )
-    for event_prefix, refresh in refreshes:
-        for attempt in range(1, _BUCKET_REFRESH_ATTEMPTS + 1):
-            try:
-                await refresh()
-            except Exception:
-                if attempt == _BUCKET_REFRESH_ATTEMPTS:
-                    logger.warning(f"{event_prefix}_refresh_failed", exc_info=True)
-                    break
-                logger.info(f"{event_prefix}_refresh_retry", attempt=attempt)
-                await asyncio.sleep(_BUCKET_REFRESH_RETRY_DELAY_S)
-            else:
-                break
+    for attempt in range(1, _BUCKET_REFRESH_ATTEMPTS + 1):
+        try:
+            await writer.rebuild_run_rollup(run_id)
+            return
+        except Exception:
+            if attempt == _BUCKET_REFRESH_ATTEMPTS:
+                logger.warning("normalized_series_bucket_refresh_failed", exc_info=True)
+                return
+            logger.info("normalized_series_bucket_refresh_retry", attempt=attempt)
+            await asyncio.sleep(_BUCKET_REFRESH_RETRY_DELAY_S)
 
 
 def _current_tick(settings: Settings) -> datetime:
@@ -1645,76 +1637,26 @@ async def run_benchmarks(
             else:
                 intended_status = RunStatus.PARTIAL
 
-            capture_pending = len(capture_outcomes) != len(expected_capture_ids) or any(
-                str(outcome) != "completed" for outcome in capture_outcomes
-            )
-            final_status = (
-                RunStatus.PARTIAL
-                if capture_pending and intended_status is not RunStatus.FAILED
-                else intended_status
-            )
-            finish_error = (
-                "normalized capture pending"
-                if capture_pending and intended_status is not RunStatus.FAILED
-                else None
-            )
-            finished_at = datetime.now(tz=UTC)
-            from coval_bench.runner.capture import (
-                FinalizedReceipt,
-                RunSeal,
-                upload_run_state,
-            )
+            from coval_bench.runner.capture import RunSeal
+            from coval_bench.runner.persistence import capture_pending, seal_and_finish_run
 
-            seal = RunSeal(
-                run_id=run_id,
-                intended_status=str(intended_status),
-                stored_status=str(final_status),
-                finished_at=finished_at,
-                error=finish_error,
-                expected_capture_ids=sorted(expected_capture_ids),
+            incomplete = capture_pending(capture_outcomes, expected_capture_ids)
+            held = incomplete and intended_status is not RunStatus.FAILED
+            finished_at = datetime.now(tz=UTC)
+            final_status = await seal_and_finish_run(
+                writer=writer,
+                storage_client=artifact_client,
+                bucket=settings.benchmark_artifact_bucket,
+                seal=RunSeal(
+                    run_id=run_id,
+                    intended_status=str(intended_status),
+                    stored_status=str(RunStatus.PARTIAL if held else intended_status),
+                    finished_at=finished_at,
+                    error=models_mod.CAPTURE_PENDING_ERROR if held else None,
+                    expected_capture_ids=sorted(expected_capture_ids),
+                ),
+                capture_pending=incomplete,
             )
-            try:
-                _, seal_sha256 = await asyncio.to_thread(
-                    upload_run_state,
-                    artifact_client,
-                    settings.benchmark_artifact_bucket,
-                    run_id,
-                    "seal",
-                    seal,
-                )
-            except Exception:
-                logger.warning("normalized_capture_seal_failed", exc_info=True)
-                if intended_status is not RunStatus.FAILED:
-                    final_status = RunStatus.PARTIAL
-                    finish_error = "normalized capture pending"
-                await writer.finish_run_exact(
-                    run_id,
-                    status=final_status,
-                    error=finish_error,
-                    finished_at=finished_at,
-                )
-            else:
-                await writer.finish_run_exact(
-                    run_id,
-                    status=final_status,
-                    error=finish_error,
-                    finished_at=finished_at,
-                )
-                try:
-                    await asyncio.to_thread(
-                        upload_run_state,
-                        artifact_client,
-                        settings.benchmark_artifact_bucket,
-                        run_id,
-                        "finalized",
-                        FinalizedReceipt(run_id=run_id, seal_sha256=seal_sha256),
-                    )
-                except Exception:
-                    logger.warning("normalized_capture_finalize_receipt_failed", exc_info=True)
-                    if intended_status is not RunStatus.FAILED:
-                        await writer.mark_run_capture_pending(run_id, finished_at=finished_at)
-                        final_status = RunStatus.PARTIAL
-                        finish_error = "normalized capture pending"
 
             # After the row is stored, never before: if finish_run raises, the outer
             # handler is the only thing that should report, otherwise a partial run
@@ -1729,7 +1671,7 @@ async def run_benchmarks(
             )
 
             if final_status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
-                await _refresh_series_bucket(writer, run_id, settings)
+                await _refresh_series_bucket(writer, run_id)
 
                 # Failed runs retain their queued repairs for hourly maintenance.
                 try:
@@ -1818,7 +1760,7 @@ async def run_benchmarks(
                     run_status=RunStatus,
                 )
                 # Run row is PARTIAL, so its bucket qualifies.
-                await asyncio.shield(_refresh_series_bucket(writer, run_id, settings))
+                await asyncio.shield(_refresh_series_bucket(writer, run_id))
             finished_at = datetime.now(tz=UTC)
             sigterm_duration_s = (finished_at - started_at).total_seconds()
             logger.warning(

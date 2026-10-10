@@ -167,9 +167,8 @@ class _Writer:
         evaluation: MetricEvaluation,
         *,
         inputs: Sequence[MetricEvaluationInput] = (),
-        validate_contract: bool = True,
     ) -> MetricEvaluation:
-        del inputs, validate_contract
+        del inputs
         current = self.evaluations.get(evaluation.metric_type)
         if current is None:
             current = evaluation.model_copy(update={"id": uuid4()})
@@ -197,9 +196,7 @@ class _Writer:
         *,
         finished_at: datetime,
         values: Sequence[MetricValue],
-        validate_contract: bool = True,
     ) -> None:
-        del validate_contract
         metric, current = next(
             (metric, evaluation)
             for metric, evaluation in self.evaluations.items()
@@ -648,42 +645,27 @@ def test_concurrent_import_claim_adopts_the_first_run_allocation() -> None:
 async def test_required_database_preflight_checks_privileges(
     denied_table: str | None,
 ) -> None:
-    pool = MagicMock()
-    schema_cursor = MagicMock()
-    schema_cursor.execute = AsyncMock()
-    schema_cursor.fetchall = AsyncMock(return_value=[])
-    privilege_cursor = MagicMock()
-    privilege_cursor.execute = AsyncMock()
-    privilege_cursor.fetchall = AsyncMock(
-        return_value=[] if denied_table is None else [(denied_table,)]
+    cursor = MagicMock()
+    cursor.execute = AsyncMock()
+    cursor.fetchall = AsyncMock(
+        side_effect=[[], [] if denied_table is None else [{"name": denied_table}], []]
     )
-    sequence_cursor = MagicMock()
-    sequence_cursor.execute = AsyncMock()
-    sequence_cursor.fetchall = AsyncMock(return_value=[])
-
-    def connection(cursor: MagicMock) -> MagicMock:
-        cursor_context = MagicMock()
-        cursor_context.__aenter__ = AsyncMock(return_value=cursor)
-        cursor_context.__aexit__ = AsyncMock(return_value=None)
-        conn = MagicMock()
-        conn.cursor.return_value = cursor_context
-        conn_context = MagicMock()
-        conn_context.__aenter__ = AsyncMock(return_value=conn)
-        conn_context.__aexit__ = AsyncMock(return_value=None)
-        return conn_context
-
-    pool.connection.side_effect = [
-        connection(schema_cursor),
-        connection(privilege_cursor),
-        connection(sequence_cursor),
-    ]
+    cursor_context = MagicMock()
+    cursor_context.__aenter__ = AsyncMock(return_value=cursor)
+    cursor_context.__aexit__ = AsyncMock(return_value=None)
+    conn = MagicMock()
+    conn.cursor.return_value = cursor_context
+    conn_context = MagicMock()
+    conn_context.__aenter__ = AsyncMock(return_value=conn)
+    conn_context.__aexit__ = AsyncMock(return_value=None)
+    pool = MagicMock()
+    pool.connection.return_value = conn_context
     writer = RunWriter(pool)
 
     if denied_table is None:
         await writer.preflight_required_capture_schema()
-        assert "results" not in sequence_cursor.execute.call_args.args[1][0]
+        assert cursor.execute.await_count == 3
     else:
         with pytest.raises(RuntimeError, match="privileges unavailable: metric_values"):
             await writer.preflight_required_capture_schema()
-    assert "results" not in schema_cursor.execute.call_args.args[1][0]
-    assert "results" not in privilege_cursor.execute.call_args.args[1][0]
+    assert all("results" not in call.args[1][0] for call in cursor.execute.await_args_list)

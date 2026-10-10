@@ -22,6 +22,7 @@ from coval_bench.registries.metrics import MetricValueRole
 from coval_bench.registries.models import Gender
 
 __all__ = [
+    "CAPTURE_PENDING_ERROR",
     "Battle",
     "Benchmark",
     "Gender",
@@ -43,7 +44,6 @@ __all__ = [
     "ObservationStatus",
     "PreprocessingArtifact",
     "ProcessingStatus",
-    "MetricArtifact",
     "MetricEvaluation",
     "MetricExecutor",
     "MetricValue",
@@ -269,18 +269,6 @@ class MetricValue(BaseModel):
         return value
 
 
-class MetricArtifact(BaseModel):
-    id: UUID | None = None
-    metric_evaluation_id: UUID
-    artifact_type: str = Field(min_length=1)
-    uri: str
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    size_bytes: int = Field(gt=0)
-    created_at: datetime | None = None
-
-    _validate_uri = field_validator("uri")(_private_gs_uri)
-
-
 class RunStatus(StrEnum):
     """Lifecycle status of a benchmark run."""
 
@@ -288,6 +276,10 @@ class RunStatus(StrEnum):
     SUCCEEDED = "succeeded"
     PARTIAL = "partial"
     FAILED = "failed"
+
+
+# Stored as runs.error; recovery matches rows on this exact string.
+CAPTURE_PENDING_ERROR = "normalized capture pending"
 
 
 class ResultStatus(StrEnum):

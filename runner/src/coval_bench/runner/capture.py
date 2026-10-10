@@ -151,16 +151,6 @@ def read_immutable_json(client: storage.Client, bucket_name: str, uri_or_key: st
     return json.loads(read_immutable_object(client, bucket_name, uri_or_key))
 
 
-def list_capture_objects(
-    client: storage.Client, bucket_name: str, *, prefix: str = CAPTURE_PREFIX
-) -> list[str]:
-    """Return sanitized capture object URIs in deterministic order."""
-    return sorted(
-        immutable_object_uri(bucket_name, blob.name)
-        for blob in client.list_blobs(bucket_name, prefix=prefix)
-    )
-
-
 def run_prefix(run_id: int) -> str:
     if run_id <= 0:
         raise ValueError("run_id must be positive")
@@ -179,21 +169,12 @@ def upload_run_state(
     run_id: int,
     kind: str,
     value: BaseModel | Mapping[str, Any],
-    *,
-    max_attempts: int = 3,
 ) -> tuple[str, str]:
     payload_value = value.model_dump(mode="json") if isinstance(value, BaseModel) else dict(value)
     payload = canonical_bytes(payload_value)
     key = _run_state_key(run_id, kind)
     return (
-        upload_immutable_object(
-            client,
-            bucket_name,
-            key,
-            payload,
-            content_type="application/json",
-            max_attempts=max_attempts,
-        ),
+        upload_immutable_object(client, bucket_name, key, payload, content_type="application/json"),
         hashlib.sha256(payload).hexdigest(),
     )
 
@@ -214,9 +195,7 @@ def preflight_capture_storage(client: storage.Client, bucket_name: str) -> None:
     """Verify the create/read/list capabilities required by recovery."""
     payload = canonical_bytes({"schema_version": CAPTURE_SCHEMA_VERSION, "kind": "preflight"})
     key = f"{CAPTURE_PREFIX}/preflight.json"
-    upload_immutable_object(
-        client, bucket_name, key, payload, content_type="application/json", max_attempts=3
-    )
+    upload_immutable_object(client, bucket_name, key, payload, content_type="application/json")
     if read_immutable_object(client, bucket_name, key) != payload:
         raise ValueError("capture preflight read did not match its write")
     names = {blob.name for blob in client.list_blobs(bucket_name, prefix=key, max_results=2)}
@@ -274,26 +253,20 @@ def load_envelope(client: storage.Client, bucket_name: str, uri_or_key: str) -> 
     return envelope
 
 
-def upload_receipt(
-    client: storage.Client,
-    bucket_name: str,
-    envelope: CaptureEnvelope,
-    *,
-    status: str = "persisted",
-    max_attempts: int = 3,
-) -> tuple[str, str]:
-    receipt = {
+def _receipt(envelope: CaptureEnvelope) -> dict[str, Any]:
+    return {
         "schema_version": CAPTURE_SCHEMA_VERSION,
-        "status": status,
+        "status": "persisted",
         "identity": envelope.identity.model_dump(mode="json"),
         "envelope_sha256": envelope.envelope_digest(),
     }
+
+
+def upload_receipt(
+    client: storage.Client, bucket_name: str, envelope: CaptureEnvelope
+) -> tuple[str, str]:
     return upload_immutable_json(
-        client,
-        bucket_name,
-        f"{capture_prefix(envelope.identity)}/receipt",
-        receipt,
-        max_attempts=max_attempts,
+        client, bucket_name, f"{capture_prefix(envelope.identity)}/receipt", _receipt(envelope)
     )
 
 
@@ -301,15 +274,7 @@ def read_receipt(
     client: storage.Client, bucket_name: str, envelope: CaptureEnvelope
 ) -> dict[str, Any] | None:
     key = immutable_object_key(
-        f"{capture_prefix(envelope.identity)}/receipt",
-        payload_digest(
-            {
-                "schema_version": CAPTURE_SCHEMA_VERSION,
-                "status": "persisted",
-                "identity": envelope.identity.model_dump(mode="json"),
-                "envelope_sha256": envelope.envelope_digest(),
-            }
-        ),
+        f"{capture_prefix(envelope.identity)}/receipt", payload_digest(_receipt(envelope))
     )
     try:
         value = read_immutable_json(client, bucket_name, key)
@@ -505,24 +470,13 @@ def read_import_run_claim(
 
 
 def upload_import_run_claim(
-    client: storage.Client,
-    bucket_name: str,
-    claim: ImportRunClaim,
-    *,
-    max_attempts: int = 3,
+    client: storage.Client, bucket_name: str, claim: ImportRunClaim
 ) -> ImportRunClaim:
     """Elect one run allocation for a stable external import generation."""
     payload = canonical_bytes(claim.model_dump(mode="json"))
     key = _import_claim_key(claim.identity, claim.generation)
     try:
-        upload_immutable_object(
-            client,
-            bucket_name,
-            key,
-            payload,
-            content_type="application/json",
-            max_attempts=max_attempts,
-        )
+        upload_immutable_object(client, bucket_name, key, payload, content_type="application/json")
         return claim
     except ValueError:
         stored = read_import_run_claim(client, bucket_name, claim.identity, claim.generation)
@@ -540,18 +494,8 @@ def upload_import_run_claim(
         return stored
 
 
-def capture_key(identity: CaptureIdentity, kind: str, digest: str) -> str:
-    if kind not in {"manifest", "envelope", "claim", "receipt", "seal", "finalized"}:
-        raise ValueError("unsupported capture object kind")
-    return immutable_object_key(f"{capture_prefix(identity)}/{kind}", digest)
-
-
 def upload_envelope(
-    client: storage.Client,
-    bucket_name: str,
-    envelope: CaptureEnvelope,
-    *,
-    max_attempts: int = 3,
+    client: storage.Client, bucket_name: str, envelope: CaptureEnvelope
 ) -> tuple[str, str]:
     """Write and verify the envelope, the first acknowledged durable payload."""
     return upload_immutable_json(
@@ -559,16 +503,11 @@ def upload_envelope(
         bucket_name,
         f"{capture_prefix(envelope.identity)}/envelope",
         envelope.model_dump(mode="json"),
-        max_attempts=max_attempts,
     )
 
 
 def upload_claim(
-    client: storage.Client,
-    bucket_name: str,
-    envelope: CaptureEnvelope,
-    *,
-    max_attempts: int = 3,
+    client: storage.Client, bucket_name: str, envelope: CaptureEnvelope
 ) -> tuple[str, str]:
     """Create the identity claim bound to the envelope payload digest."""
     payload = canonical_bytes(envelope.as_claim())
@@ -577,13 +516,6 @@ def upload_claim(
         f"{capture_prefix(envelope.identity)}/claim", identity_digest(envelope.identity)
     )
     return (
-        upload_immutable_object(
-            client,
-            bucket_name,
-            key,
-            payload,
-            content_type="application/json",
-            max_attempts=max_attempts,
-        ),
+        upload_immutable_object(client, bucket_name, key, payload, content_type="application/json"),
         digest,
     )

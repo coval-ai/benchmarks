@@ -8,7 +8,6 @@ from coval_bench.db.conn import get_pool, lifespan_pool
 from coval_bench.db.models import (
     Battle,
     Benchmark,
-    MetricArtifact,
     MetricEvaluation,
     MetricEvaluationInput,
     MetricExecutor,
@@ -40,7 +39,6 @@ __all__ = [
     "ArenaStore",
     "Battle",
     "Benchmark",
-    "MetricArtifact",
     "MetricEvaluation",
     "MetricEvaluationInput",
     "MetricExecutor",

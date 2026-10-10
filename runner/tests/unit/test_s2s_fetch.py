@@ -2570,23 +2570,17 @@ async def test_required_import_adopts_concurrent_seal_without_failing_run(
         finished_at=winner_finished_at,
         expected_capture_ids=[capture_id],
     )
-    seal_calls = 0
 
     def upload_state(
-        _client: object, _bucket: str, _run_id: int, kind: str, value: object
+        _client: object, _bucket: str, _run_id: int, kind: str, _value: object
     ) -> tuple[str, str]:
-        nonlocal seal_calls
         if kind == "seal":
-            seal_calls += 1
-            if seal_calls == 1:
-                raise ValueError("concurrent seal")
-            assert value == winner_seal
+            raise ValueError("concurrent seal")
         return f"gs://private/{kind}", "a" * 64
 
     monkeypatch.setattr("coval_bench.runner.capture.upload_run_state", upload_state)
     monkeypatch.setattr(
-        fetch_v2v,
-        "read_run_state",
+        "coval_bench.runner.capture.read_run_state",
         lambda _client, _bucket, _run_id, kind: (
             winner_seal.model_dump(mode="json") if kind == "seal" else None
         ),

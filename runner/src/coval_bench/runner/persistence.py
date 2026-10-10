@@ -11,7 +11,7 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import psycopg
 import structlog
@@ -20,6 +20,7 @@ from psycopg_pool import PoolTimeout
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from coval_bench.db.models import (
+    CAPTURE_PENDING_ERROR,
     MetricEvaluation,
     MetricEvaluationInput,
     MetricExecutor,
@@ -31,20 +32,30 @@ from coval_bench.db.models import (
     ObservationSourceKind,
     ObservationStatus,
     ProcessingStatus,
+    Result,
+    ResultStatus,
+    RunStatus,
 )
 from coval_bench.observation_artifacts import (
     prepare_provider_transcript,
     prepare_timing_events,
     upload_prepared_observation_artifact,
 )
-from coval_bench.registries import Metric
+from coval_bench.registries import Benchmark, Metric, RegisteredModel
+from coval_bench.runner import capture as capture_store
 from coval_bench.runner.capture import (
     CaptureEnvelope,
+    FinalizedReceipt,
+    RunSeal,
     build_capture_identity,
+    payload_digest,
     upload_claim,
     upload_envelope,
     upload_receipt,
 )
+
+if TYPE_CHECKING:
+    from coval_bench.s2s.fetch_v2v import AgentSpec
 
 logger = structlog.get_logger("coval_bench.runner")
 
@@ -149,7 +160,7 @@ class FrozenCapture(BaseModel):
         return self
 
 
-def _frozen_values(metric: str, rows: Sequence[Any], primary: Any) -> list[FrozenValue]:
+def _frozen_values(metric: str, rows: Sequence[Result], primary: Result) -> list[FrozenValue]:
     values = [
         FrozenValue(
             value_key="primary",
@@ -168,21 +179,17 @@ def _frozen_values(metric: str, rows: Sequence[Any], primary: Any) -> list[Froze
                 values.append(
                     FrozenValue(value_key=key, unit="percent", value=value, value_role="component")
                 )
-        counts = (
+        raw_counts = (
             ("substitution_count", primary.wer_substitutions),
             ("deletion_count", primary.wer_deletions),
             ("insertion_count", primary.wer_insertions),
             ("reference_words", primary.wer_reference_words),
         )
-        if all(value is not None for _, value in counts):
+        counts = [(key, count) for key, count in raw_counts if count is not None]
+        if len(counts) == len(raw_counts):
             values.extend(
-                FrozenValue(
-                    value_key=key,
-                    unit="count",
-                    value=float(value),
-                    value_role="component",
-                )
-                for key, value in counts
+                FrozenValue(value_key=key, unit="count", value=float(count), value_role="component")
+                for key, count in counts
             )
     if metric == str(Metric.TTFA):
         components = {str(row.metric_type): row for row in rows}
@@ -248,9 +255,9 @@ def prepare_capture_envelope(
     dataset_id: str,
     dataset_sha256: str,
     sample_id: str,
-    entry: Any,
-    benchmark: Any,
-    results: Sequence[Any],
+    entry: RegisteredModel | AgentSpec,
+    benchmark: Benchmark,
+    results: Sequence[Result],
     provider_error: str | None,
     captured_at: datetime,
     voice: str | None = None,
@@ -271,7 +278,7 @@ def prepare_capture_envelope(
     """
     if provider_error is not None and not provider_error.strip():
         provider_error = None
-    benchmark_value = str(getattr(benchmark, "value", benchmark)).upper()
+    benchmark_value = benchmark.value
     frozen_artifacts: list[FrozenArtifact] = []
     frozen_bytes: dict[str, bytes] = {}
     if transcript is not None:
@@ -301,7 +308,7 @@ def prepare_capture_envelope(
         )
         frozen_artifacts.append(artifact)
         frozen_bytes[artifact.name] = payload
-    grouped: dict[str, list[Any]] = {}
+    grouped: dict[str, list[Result]] = {}
     for row in results:
         metric = str(row.metric_type)
         if metric in (str(Metric.TTFA_ROUNDTRIP), str(Metric.TTFA_LEADING_SILENCE)):
@@ -311,15 +318,10 @@ def prepare_capture_envelope(
     evaluations: list[FrozenEvaluation] = []
     for metric, rows in grouped.items():
         primary = next(
-            (
-                r
-                for r in rows
-                if getattr(r, "metric_value", None) is not None
-                and str(getattr(r, "status", "")) == "success"
-            ),
+            (r for r in rows if r.metric_value is not None and r.status == ResultStatus.SUCCESS),
             None,
         )
-        if primary is None and any(str(row.status) == "success" for row in rows):
+        if primary is None and any(row.status == ResultStatus.SUCCESS for row in rows):
             continue
         evaluations.append(
             FrozenEvaluation(
@@ -346,8 +348,8 @@ def prepare_capture_envelope(
         dataset_sha256=dataset_sha256,
         sample_id=sample_id,
         benchmark=benchmark_value,
-        provider=str(entry.provider),
-        model=str(entry.model),
+        provider=entry.provider,
+        model=entry.model,
         voice=voice,
         captured_at=captured_at,
         observation_status="failed" if provider_error else "succeeded",
@@ -496,23 +498,20 @@ async def persist_capture(
                     observation_id=observation.id,
                     metric_type=frozen.metric_type,
                     metric_version=frozen.metric_version,
-                    evaluation_variant=frozen.evaluation_variant or "default",
+                    evaluation_variant=frozen.evaluation_variant,
                     executor=MetricExecutor(frozen.executor),
                     external_request_id=frozen.external_request_id,
                     status=ProcessingStatus.QUEUED,
                 ),
                 inputs=inputs,
-                validate_contract=False,
             )
-            if frozen.started_at is None or frozen.finished_at is None:
-                raise ValueError("frozen terminal evaluation requires timestamps")
             await writer.start_metric_evaluation_exact(evaluation.id, started_at=frozen.started_at)
             if frozen.status == str(ProcessingStatus.FAILED):
                 await writer.fail_metric_evaluation_exact(
                     evaluation.id,
                     started_at=frozen.started_at,
                     finished_at=frozen.finished_at,
-                    error=frozen.error or "frozen evaluation failed",
+                    error=frozen.error,
                 )
             else:
                 values = [
@@ -523,7 +522,6 @@ async def persist_capture(
                     evaluation.id,
                     values=values,
                     finished_at=frozen.finished_at,
-                    validate_contract=False,
                 )
         await asyncio.to_thread(upload_receipt, storage_client, bucket, envelope)
         return CaptureOutcome.COMPLETED
@@ -551,6 +549,88 @@ async def persist_capture(
         return outcome
 
 
-async def replay_capture(**kwargs: Any) -> CaptureOutcome:
-    """Alias used by recovery workers; replay is identical to persistence."""
-    return await persist_capture(**kwargs)
+def capture_pending(outcomes: Sequence[str], expected_capture_ids: Sequence[str]) -> bool:
+    return len(outcomes) != len(expected_capture_ids) or any(
+        outcome != CaptureOutcome.COMPLETED for outcome in outcomes
+    )
+
+
+async def seal_and_finish_run(
+    *, writer: Any, storage_client: Any, bucket: str, seal: RunSeal, capture_pending: bool
+) -> RunStatus:
+    """Store the run seal, then finish and finalize the run it describes.
+
+    A concurrent seal with the same intent is adopted. If the seal cannot be
+    stored the run is finished as capture pending for operator recovery.
+    """
+    try:
+        _, seal_sha256 = await asyncio.to_thread(
+            capture_store.upload_run_state, storage_client, bucket, seal.run_id, "seal", seal
+        )
+    except ValueError:
+        stored = await asyncio.to_thread(
+            capture_store.read_run_state, storage_client, bucket, seal.run_id, "seal"
+        )
+        if stored is None:
+            raise
+        existing = RunSeal.model_validate(stored)
+        if (existing.run_id, existing.intended_status, existing.expected_capture_ids) != (
+            seal.run_id,
+            seal.intended_status,
+            seal.expected_capture_ids,
+        ):
+            raise ValueError("durable run seal conflicts with this replay") from None
+        seal, seal_sha256 = existing, payload_digest(stored)
+    except Exception:
+        logger.warning("normalized_capture_seal_failed", exc_info=True)
+        status, error = RunStatus(seal.stored_status), seal.error
+        if seal.intended_status != RunStatus.FAILED:
+            status, error = RunStatus.PARTIAL, CAPTURE_PENDING_ERROR
+        await writer.finish_run_exact(
+            seal.run_id, status=status, error=error, finished_at=seal.finished_at
+        )
+        return status
+    return await finish_sealed_run(
+        writer=writer,
+        storage_client=storage_client,
+        bucket=bucket,
+        seal=seal,
+        seal_sha256=seal_sha256,
+        capture_pending=capture_pending,
+    )
+
+
+async def finish_sealed_run(
+    *,
+    writer: Any,
+    storage_client: Any,
+    bucket: str,
+    seal: RunSeal,
+    seal_sha256: str,
+    capture_pending: bool,
+) -> RunStatus:
+    """Finish the run row from its stored seal, then write the finalized receipt."""
+    recovered = not capture_pending and seal.error == CAPTURE_PENDING_ERROR
+    status = RunStatus(seal.intended_status if recovered else seal.stored_status)
+    await writer.finish_run_exact(
+        seal.run_id,
+        status=status,
+        error=None if recovered else seal.error,
+        finished_at=seal.finished_at,
+        allow_capture_recovery=not capture_pending,
+    )
+    try:
+        await asyncio.to_thread(
+            capture_store.upload_run_state,
+            storage_client,
+            bucket,
+            seal.run_id,
+            "finalized",
+            FinalizedReceipt(run_id=seal.run_id, seal_sha256=seal_sha256),
+        )
+    except Exception:
+        logger.warning("normalized_capture_finalize_receipt_failed", exc_info=True)
+        if seal.intended_status != RunStatus.FAILED:
+            await writer.mark_run_capture_pending(seal.run_id, finished_at=seal.finished_at)
+            return RunStatus.PARTIAL
+    return status

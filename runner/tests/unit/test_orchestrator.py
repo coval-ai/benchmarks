@@ -587,7 +587,7 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
 
 @pytest.mark.asyncio
 async def test_refresh_series_bucket_retries_transient_failure(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A transient refresh failure is retried independently."""
     from coval_bench.runner import orchestrator
@@ -596,15 +596,13 @@ async def test_refresh_series_bucket_retries_transient_failure(
     writer = MagicMock()
     writer.rebuild_run_rollup = AsyncMock(side_effect=[RuntimeError("blip"), None])
 
-    await orchestrator._refresh_series_bucket(writer, 1, settings)
+    await orchestrator._refresh_series_bucket(writer, 1)
 
     assert writer.rebuild_run_rollup.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_refresh_series_bucket_never_raises(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_refresh_series_bucket_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exhausting refresh attempts logs and returns instead of raising."""
     from coval_bench.runner import orchestrator
 
@@ -612,7 +610,7 @@ async def test_refresh_series_bucket_never_raises(
     writer = MagicMock()
     writer.rebuild_run_rollup = AsyncMock(side_effect=RuntimeError("db down"))
 
-    await orchestrator._refresh_series_bucket(writer, 1, settings)
+    await orchestrator._refresh_series_bucket(writer, 1)
 
     assert writer.rebuild_run_rollup.await_count == 3
 

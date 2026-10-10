@@ -27,7 +27,6 @@ def test_floor_follows_the_grain() -> None:
     assert floor_rollup(at, "1h") == datetime(2026, 9, 14, 13, tzinfo=UTC)
     assert floor_rollup(at, "4h") == datetime(2026, 9, 14, 12, tzinfo=UTC)
     assert floor_rollup(at, "run") == at
-    assert floor_rollup(at.replace(tzinfo=None), "1h") == datetime(2026, 9, 14, 13, tzinfo=UTC)
 
 
 async def _seed_two_runs(pool: Any) -> int:
