@@ -309,7 +309,11 @@ async def _orchestrator_env(  # noqa: ANN202
         async def _persist_capture(**kwargs: Any) -> str:
             rows = _CAPTURED_RESULTS.pop(id(kwargs["envelope"]))
             writer._persisted_rows.extend(rows)
-            await writer.capture_results(rows, created_at=kwargs["envelope"].payload["captured_at"])
+            await writer.capture_results(
+                rows,
+                created_at=kwargs["envelope"].payload["captured_at"],
+                envelope=kwargs["envelope"],
+            )
             return "completed"
 
         persist_capture.side_effect = _persist_capture
@@ -342,8 +346,18 @@ async def _capture_rows(**kwargs: Any) -> str:
     writer = kwargs["writer"]
     rows = _CAPTURED_RESULTS.pop(id(kwargs["envelope"]))
     writer._persisted_rows.extend(rows)
-    await writer.capture_results(rows, created_at=kwargs["envelope"].payload["captured_at"])
+    await writer.capture_results(
+        rows,
+        created_at=kwargs["envelope"].payload["captured_at"],
+        envelope=kwargs["envelope"],
+    )
     return "completed"
+
+
+def _captured_transport(writer: MagicMock) -> Any:
+    """Transport protocol frozen into the run's single TTS capture."""
+    (call,) = writer.capture_results.call_args_list
+    return call.kwargs["envelope"].payload["transport_protocol"]
 
 
 @pytest.fixture(autouse=True)
@@ -1215,7 +1229,7 @@ async def test_tts_http1_downgrade_nulls_ttfa_row(settings: Settings) -> None:
         assert ttfa_rows[0].status == ResultStatus.SUCCESS
         assert ttfa_rows[0].metric_value is None
         assert "HTTP/1.1" in ttfa_rows[0].error
-        assert ttfa_rows[0].http_version == "HTTP/1.1"
+        assert _captured_transport(writer) == "HTTP/1.1"
 
         # A nulled TTFA writes no component rows either.
         assert not [
@@ -1323,7 +1337,7 @@ async def test_tts_cold_connection_nulls_ttfa_row(settings: Settings) -> None:
         assert ttfa_rows[0].status == ResultStatus.SUCCESS
         assert ttfa_rows[0].metric_value is None
         assert "cold connection" in ttfa_rows[0].error
-        assert ttfa_rows[0].http_version == "HTTP/2"
+        assert _captured_transport(writer) == "HTTP/2"
 
         assert len(wer_rows) == 1
         assert wer_rows[0].status == ResultStatus.SUCCESS
@@ -2415,7 +2429,7 @@ async def test_tts_provider_error_wins_over_contamination(
     assert ttfa.status == ResultStatus.FAILED
     assert "synth stream closed early" in (ttfa.error or "")
     assert "HTTP/1.1" not in (ttfa.error or "")  # contamination message must not win
-    assert ttfa.http_version == "HTTP/1.1"  # diagnostic still recorded
+    assert _captured_transport(writer) == "HTTP/1.1"  # diagnostic still recorded
     assert "WER" not in by_metric  # errored synth → no WER scoring
     # A failed TTFA writes no component rows even though its split was known.
     assert "TTFARoundtrip" not in by_metric

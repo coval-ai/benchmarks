@@ -260,6 +260,8 @@ def prepare_capture_envelope(
     executor: MetricExecutor = MetricExecutor.INLINE,
     capture_id: str | None = None,
     provider_extras: Mapping[str, Any] | None = None,
+    transport_protocol: str | None = None,
+    submit_to_headers_ms: float | None = None,
 ) -> CaptureEnvelope:
     """Freeze producer output before any database write.
 
@@ -358,6 +360,8 @@ def prepare_capture_envelope(
                 "LLM": ObservationSourceKind.CONVERSATION_TEXT,
             }[benchmark_value]
         ),
+        transport_protocol=transport_protocol,
+        submit_to_headers_ms=submit_to_headers_ms,
         provider_extras=dict(provider_extras) if provider_extras is not None else None,
         evaluations=evaluations,
         artifacts=frozen_artifacts,

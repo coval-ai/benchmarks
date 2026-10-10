@@ -972,8 +972,6 @@ async def _run_tts_item(
                     transcript=transcript,
                     status=ttfa_status,
                     error=ttfa_error,
-                    http_version=tts_result.http_version if tts_result else None,
-                    submit_to_headers_ms=tts_result.submit_to_headers_ms if tts_result else None,
                 )
             )
 
@@ -1099,6 +1097,8 @@ async def _run_tts_item(
                     voice=voice,
                     timing_events={"ttfa_ms": ttfa_ms},
                     audio_snapshot=audio_snapshot,
+                    transport_protocol=tts_result.http_version if tts_result else None,
+                    submit_to_headers_ms=tts_result.submit_to_headers_ms if tts_result else None,
                 )
                 capture_outcome = await persist_capture(
                     writer=writer,
