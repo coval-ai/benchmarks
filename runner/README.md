@@ -55,17 +55,12 @@ The web FE lives in the private `coval-ai/benchmarks-web` repo — run it agains
 
 All env vars are documented in `src/coval_bench/config.py`. Provider keys are optional; tests don't need them.
 
-Normalized observation dual writes are additive, private, and disabled by default.
-Set both `BENCHMARK_ARTIFACT_BUCKET` and `NORMALIZED_DUAL_WRITE_ENABLED=true` to
-enable the normalized rollout; legacy result writes remain the source of truth.
+### Normalized capture and recovery
 
-### Required normalized capture and recovery
-
-`NORMALIZED_CAPTURE_REQUIRED=true` adds a fail-closed durability boundary while
-preserving legacy writes. It also requires `NORMALIZED_DUAL_WRITE_ENABLED=true`
-and `BENCHMARK_ARTIFACT_BUCKET`. Before provider warmup or Coval run fetches, the
-runner verifies the dataset hashes, normalized database schema, and private GCS
-create/read/list access.
+Benchmark writes always go through a fail-closed normalized capture, so the
+runner and the S2S/LLM fetch require `BENCHMARK_ARTIFACT_BUCKET`. Before provider
+warmup or Coval run fetches, the runner verifies the dataset hashes, normalized
+database schema, and private GCS create/read/list access.
 
 For each completed provider call, the first acknowledged durable write is an
 immutable GCS envelope containing the frozen legacy rows, normalized evaluation

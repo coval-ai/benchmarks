@@ -104,7 +104,7 @@ async def test_projection_cascades_and_evaluation_uuid_can_be_reused(
                 "benchmarks_v2.metric_id_for_code('WER'), 'v1', 'default', 'inline', 'queued')",
                 (evaluation_id, replacement.id),
             )
-        await writer.start_metric_evaluation(evaluation_id, started_at=storage._NOW)
+        await writer.start_metric_evaluation_exact(evaluation_id, started_at=storage._NOW)
         values = storage._wer_values(evaluation_id)
         values[0] = values[0].model_copy(update={"value": 11})
         values[3] = values[3].model_copy(update={"value": 8})

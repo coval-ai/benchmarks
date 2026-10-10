@@ -465,6 +465,72 @@ def test_all_benchmark_kinds_freeze_without_provider_replay(benchmark: Benchmark
     assert envelope.payload["captured_at"] == "2026-09-17T00:00:00Z"
 
 
+def test_capture_groups_components_and_freezes_input_lineage() -> None:
+    def row(metric: Metric, value: float | None, unit: str | None, **extra: float) -> Result:
+        return Result(
+            run_id=1,
+            provider="provider",
+            model="model",
+            benchmark=Benchmark.TTS,
+            metric_type=metric,
+            metric_value=value,
+            metric_units=unit,
+            status=ResultStatus.SUCCESS,
+            **extra,
+        )
+
+    envelope = prepare_capture_envelope(
+        run_id=1,
+        dataset_id="tts-v1",
+        dataset_sha256="a" * 64,
+        sample_id="tts-1",
+        entry=SimpleNamespace(provider="provider", model="model"),
+        benchmark=Benchmark.TTS,
+        results=[
+            row(Metric.TTFA, 120, "milliseconds"),
+            row(Metric.TTFA_ROUNDTRIP, 75, "milliseconds"),
+            row(Metric.TTFA_LEADING_SILENCE, 45, "milliseconds"),
+            row(
+                Metric.WER,
+                10,
+                "percent",
+                wer_insertions_pct=2,
+                wer_deletions_pct=3,
+                wer_substitutions_pct=5,
+                wer_substitutions=5,
+                wer_deletions=3,
+                wer_insertions=2,
+                wer_reference_words=100,
+            ),
+            row(Metric.TTFT, None, None),
+        ],
+        provider_error=None,
+        captured_at=datetime(2026, 9, 17, tzinfo=UTC),
+        timing_events={"ttfa_ms": 120},
+        audio_snapshot=(b"RIFFaudio", 10.0),
+    )
+
+    evaluations = {e["metric_type"]: e for e in envelope.payload["evaluations"]}
+    assert set(evaluations) == {str(Metric.TTFA), str(Metric.WER)}
+    ttfa, wer = evaluations[str(Metric.TTFA)], evaluations[str(Metric.WER)]
+    assert [v["value_key"] for v in ttfa["values"]] == ["primary", "roundtrip", "leading_silence"]
+    assert [v["value_key"] for v in wer["values"]] == [
+        "primary",
+        "insertions",
+        "deletions",
+        "substitutions",
+        "substitution_count",
+        "deletion_count",
+        "insertion_count",
+        "reference_words",
+    ]
+    assert [(i["artifact_name"], i["input_role"]) for i in ttfa["inputs"]] == [
+        ("timing", "timing"),
+        ("audio", "raw"),
+    ]
+    assert [(i["artifact_name"], i["input_role"]) for i in wer["inputs"]] == [("audio", "raw")]
+
+
 @pytest.mark.asyncio
 async def test_provider_failure_is_a_completed_failed_observation() -> None:
     storage_value = _Storage()

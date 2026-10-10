@@ -59,38 +59,6 @@ class RunWriter:
     ) -> None:
         self._pool = pool
 
-    def pool_diagnostics(self) -> dict[str, int]:
-        """Return a stable, read-only snapshot of pool health counters."""
-        keys = (
-            "pool_min",
-            "pool_max",
-            "pool_size",
-            "pool_available",
-            "requests_waiting",
-            "requests_num",
-            "requests_queued",
-            "requests_wait_ms",
-            "requests_errors",
-            "usage_ms",
-            "connections_num",
-            "connections_ms",
-            "connections_errors",
-            "connections_lost",
-            "returns_bad",
-            "pool_timeout_ms",
-        )
-        diagnostics = {key: 0 for key in keys}
-        stats = self._pool.get_stats()
-        for key in keys:
-            if key in stats:
-                diagnostics[key] = int(stats[key])
-        diagnostics["pool_min"] = int(self._pool.min_size)
-        diagnostics["pool_max"] = int(self._pool.max_size)
-        diagnostics["pool_size"] = int(stats.get("pool_size", 0))
-        diagnostics["pool_available"] = int(stats.get("pool_available", 0))
-        diagnostics["pool_timeout_ms"] = int(float(self._pool.timeout) * 1000)
-        return diagnostics
-
     async def start_run(
         self,
         *,
@@ -645,31 +613,6 @@ class RunWriter:
         return stored
 
     # Database transitions are guarded by validate_metric_transition() in the normalized migration.
-    async def start_metric_evaluation(
-        self, evaluation_id: UUID, *, started_at: datetime
-    ) -> MetricEvaluation:
-        """Transition one queued metric evaluation to running."""
-        async with self._pool.connection() as conn:
-            async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-                await cur.execute(
-                    """UPDATE benchmarks_v2.metric_evaluations
-                       SET status = %s, started_at = %s, updated_at = now()
-                       WHERE id = %s AND status = %s
-                       RETURNING id, observation_id, metric_id,
-                                 (SELECT m.code FROM benchmarks_v2.metrics m
-                                  WHERE m.id = metric_evaluations.metric_id) AS metric_type,
-                                 metric_version,
-                                 evaluation_variant, executor,
-                                 external_request_id, status, started_at, finished_at, error,
-                                 created_at, updated_at""",
-                    (ProcessingStatus.RUNNING, started_at, evaluation_id, ProcessingStatus.QUEUED),
-                )
-                row = await cur.fetchone()
-            await conn.commit()
-        if row is None:
-            raise ValueError(f"metric evaluation {evaluation_id} is not queued")
-        return MetricEvaluation.model_validate(dict(row))
-
     async def start_metric_evaluation_exact(
         self, evaluation_id: UUID, *, started_at: datetime
     ) -> MetricEvaluation:
@@ -701,42 +644,6 @@ class RunWriter:
                 elif row["started_at"] != started_at:
                     raise ValueError("metric evaluation replay conflicts with started_at")
             await conn.commit()
-        return MetricEvaluation.model_validate(dict(row))
-
-    async def fail_metric_evaluation(
-        self, evaluation_id: UUID, *, finished_at: datetime, error: str
-    ) -> MetricEvaluation:
-        """Atomically mark a queued or running metric evaluation failed."""
-        if not error:
-            raise ValueError("failed metric evaluations require an error")
-        async with self._pool.connection() as conn:
-            async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-                await cur.execute(
-                    """UPDATE benchmarks_v2.metric_evaluations
-                       SET status = %s, started_at = COALESCE(started_at, %s), finished_at = %s,
-                           error = %s, updated_at = now()
-                       WHERE id = %s AND status IN (%s, %s)
-                       RETURNING id, observation_id, metric_id,
-                                 (SELECT m.code FROM benchmarks_v2.metrics m
-                                  WHERE m.id = metric_evaluations.metric_id) AS metric_type,
-                                 metric_version,
-                                 evaluation_variant, executor,
-                                 external_request_id, status, started_at, finished_at, error,
-                                 created_at, updated_at""",
-                    (
-                        ProcessingStatus.FAILED,
-                        finished_at,
-                        finished_at,
-                        error,
-                        evaluation_id,
-                        ProcessingStatus.QUEUED,
-                        ProcessingStatus.RUNNING,
-                    ),
-                )
-                row = await cur.fetchone()
-            await conn.commit()
-        if row is None:
-            raise ValueError(f"metric evaluation {evaluation_id} is not queued or running")
         return MetricEvaluation.model_validate(dict(row))
 
     async def fail_metric_evaluation_exact(

@@ -469,7 +469,6 @@ async def _run_stt_item(
     dataset_id: str | None = None,
     dataset_sha256: str = "",
     artifact_client: Any | None = None,
-    required_capture: bool = False,
     capture_outcomes: list[Any] | None = None,
 ) -> list[Any]:
     """Run a single STT provider × dataset item, returning a list of Result rows.
@@ -485,7 +484,7 @@ async def _run_stt_item(
     ResultStatus = models_mod.ResultStatus
     compute_wer, compute_rtf = _get_metrics()
 
-    if required_capture and (writer is None or artifact_client is None):
+    if writer is not None and artifact_client is None:
         raise RuntimeError("required STT capture is not initialized")
 
     results: list[Any] = []
@@ -801,7 +800,7 @@ async def _run_stt_item(
     _record_item_metric(entry, results, ResultStatus)
 
     captured_at = datetime.now(UTC)
-    if required_capture and writer is not None and artifact_client is not None:
+    if writer is not None and artifact_client is not None:
         from coval_bench.runner.normalized import persist_capture, prepare_capture_envelope
 
         timing_events = {
@@ -832,42 +831,6 @@ async def _run_stt_item(
         )
         if capture_outcomes is not None:
             capture_outcomes.append(outcome)
-        return results
-    if writer is not None and artifact_client is not None:
-        async with gate.shared():
-            try:
-                from coval_bench.runner.normalized import dual_write
-
-                await dual_write(
-                    writer=writer,
-                    storage_client=artifact_client,
-                    bucket=settings.benchmark_artifact_bucket,
-                    run_id=run_id,
-                    dataset_id=dataset_id or settings.dataset_id or DEFAULT_STT_DATASET,
-                    dataset_sha256=dataset_sha256,
-                    sample_id=item.sample_id or audio_path.name,
-                    entry=entry,
-                    benchmark=Benchmark.STT,
-                    results=results,
-                    provider_error=item_error,
-                    captured_at=captured_at,
-                    transcript=complete_transcript,
-                    timing_events={
-                        "ttft_seconds": ttft_seconds,
-                        "audio_to_final_seconds": audio_to_final,
-                        "speech_end_offset_ms": speech_end_offset_ms,
-                        "effective_duration_sec": duration_sec,
-                        **_finalization_events(transcription_result),
-                    },
-                    db_retry_attempts=3,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "normalized_stt_dual_write_failed",
-                    provider=entry.provider,
-                    model=entry.model,
-                    exc_info=exc,
-                )
 
     return results
 
@@ -908,7 +871,6 @@ async def _run_tts_item(
     dataset_id: str = "tts-v1",
     dataset_sha256: str = "",
     artifact_client: Any | None = None,
-    required_capture: bool = False,
     capture_outcomes: list[Any] | None = None,
 ) -> list[Any]:
     """Run a single TTS provider × dataset item, returning a list of Result rows.
@@ -927,12 +889,12 @@ async def _run_tts_item(
     ResultStatus = models_mod.ResultStatus
     compute_wer, _ = _get_metrics()
 
-    if required_capture and (writer is None or artifact_client is None):
+    if writer is not None and artifact_client is None:
         raise RuntimeError("required TTS capture is not initialized")
 
     results: list[Any] = []
     audio_path: Path | None = None
-    required_capture_outcome: Any | None = None
+    capture_outcome: Any | None = None
     # Reasons already warned at their source; the per-item summary skips these.
     logged_reasons: set[str] = set()
 
@@ -1117,7 +1079,7 @@ async def _run_tts_item(
                             )
                         )
             captured_at = datetime.now(UTC)
-            if required_capture and writer is not None and artifact_client is not None:
+            if writer is not None and artifact_client is not None:
                 from coval_bench.observation_artifacts import snapshot_generated_audio
                 from coval_bench.runner.normalized import persist_capture, prepare_capture_envelope
 
@@ -1138,52 +1100,18 @@ async def _run_tts_item(
                     timing_events={"ttfa_ms": ttfa_ms},
                     audio_snapshot=audio_snapshot,
                 )
-                required_capture_outcome = await persist_capture(
+                capture_outcome = await persist_capture(
                     writer=writer,
                     storage_client=artifact_client,
                     bucket=settings.benchmark_artifact_bucket,
                     envelope=envelope,
                 )
                 if capture_outcomes is not None:
-                    capture_outcomes.append(required_capture_outcome)
-                return results
-            if writer is not None and artifact_client is not None:
-                try:
-                    from coval_bench.runner.normalized import dual_write
-
-                    await dual_write(
-                        writer=writer,
-                        storage_client=artifact_client,
-                        bucket=settings.benchmark_artifact_bucket,
-                        run_id=run_id,
-                        dataset_id=dataset_id,
-                        dataset_sha256=dataset_sha256,
-                        sample_id=item.testcase_id,
-                        entry=entry,
-                        benchmark=Benchmark.TTS,
-                        results=results,
-                        provider_error=item_error,
-                        captured_at=captured_at,
-                        timing_events={"ttfa_ms": ttfa_ms},
-                        audio_path=audio_path,
-                        voice=voice,
-                        db_retry_attempts=3,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "normalized_tts_dual_write_failed",
-                        provider=entry.provider,
-                        model=entry.model,
-                        exc_info=exc,
-                    )
+                    capture_outcomes.append(capture_outcome)
         finally:
             # Orchestrator owns audio cleanup — always delete in finally block
-            safe_required_cleanup = str(required_capture_outcome) in {"completed", "pending"}
-            if (
-                audio_path is not None
-                and audio_path.exists()
-                and (not required_capture or safe_required_cleanup)
-            ):
+            safe_cleanup = str(capture_outcome) in {"completed", "pending"}
+            if audio_path is not None and audio_path.exists() and (writer is None or safe_cleanup):
                 try:
                     audio_path.unlink()
                 except OSError as exc:
@@ -1333,9 +1261,9 @@ async def run_benchmarks(
     """
     structlog.contextvars.clear_contextvars()
 
-    from coval_bench.config import require_normalized_persisted_capture
+    from coval_bench.config import require_capture_bucket
 
-    require_normalized_persisted_capture(settings)
+    require_capture_bucket(settings)
 
     lifespan_pool, RunWriter, RunStatus, models_mod = _get_db_symbols()
     Result = models_mod.Result
@@ -1419,32 +1347,27 @@ async def run_benchmarks(
 
         if scheduled_at is None:
             scheduled_at = _current_tick(settings)
-        required_capture = settings.normalized_capture_required
-        artifact_client: Any | None = None
-        if settings.normalized_dual_write_enabled:
-            try:
-                from google.cloud import storage
+        try:
+            from google.cloud import storage
 
-                artifact_client = storage.Client()
-            except Exception as exc:
-                if required_capture:
-                    raise RuntimeError("normalized capture client initialization failed") from exc
-                logger.warning("normalized_artifact_client_failed", exc_info=exc)
-        if required_capture:
-            if artifact_client is None:
-                raise RuntimeError("required normalized capture is not initialized")
-            if benchmark_kind in ("stt", "both") and len(dataset_sha256) != 64:
-                raise RuntimeError("required STT capture needs a valid dataset hash")
-            if benchmark_kind in ("tts", "both") and len(tts_manifest_sha256) != 64:
-                raise RuntimeError("required TTS capture needs a valid dataset hash")
-            from coval_bench.runner.capture import preflight_capture_storage
+            artifact_client: Any = storage.Client()
+        except Exception as exc:
+            raise RuntimeError("normalized capture client initialization failed") from exc
+        if benchmark_kind in ("stt", "both") and (
+            len(dataset_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in dataset_sha256)
+        ):
+            raise RuntimeError("required STT capture needs a valid dataset hash")
+        if benchmark_kind in ("tts", "both") and len(tts_manifest_sha256) != 64:
+            raise RuntimeError("required TTS capture needs a valid dataset hash")
+        from coval_bench.runner.capture import preflight_capture_storage
 
-            await asyncio.to_thread(
-                preflight_capture_storage,
-                artifact_client,
-                settings.benchmark_artifact_bucket,
-            )
-            await writer.preflight_required_capture_schema()
+        await asyncio.to_thread(
+            preflight_capture_storage,
+            artifact_client,
+            settings.benchmark_artifact_bucket,
+        )
+        await writer.preflight_required_capture_schema()
         run = await writer.start_run(
             dataset_id=run_dataset_id,
             dataset_sha256=dataset_sha256,
@@ -1477,24 +1400,10 @@ async def run_benchmarks(
             completed_item_results.extend(results)
             return results
 
-        stt_artifact_client = artifact_client
-        if (
-            stt_artifact_client is not None
-            and benchmark_kind in ("stt", "both")
-            and (
-                len(dataset_sha256) != 64
-                or any(character not in "0123456789abcdef" for character in dataset_sha256)
-            )
-        ):
-            logger.warning(
-                "normalized_stt_manifest_sha_unavailable",
-                dataset_id=stt_dataset_id,
-            )
-            stt_artifact_client = None
         gate = ModelGate(_CONCURRENCY_CAP)
-        prepared_stt_dataset: Any | None = None
-        prepared_tts_dataset: Any | None = None
-        prepared_tts_voices: dict[tuple[str, str], list[str | None]] | None = None
+        stt_items: list[Any] = []
+        tts_items: list[Any] = []
+        tts_voices: dict[tuple[str, str], list[str | None]] = {}
         expected_capture_ids: list[str] = []
 
         # Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout.
@@ -1518,95 +1427,91 @@ async def run_benchmarks(
             loop.add_signal_handler(signal.SIGTERM, _on_sigterm)
 
         try:
-            if required_capture:
-                from coval_bench.runner.capture import (
-                    build_capture_identity,
-                    identity_digest,
-                )
+            from coval_bench.runner.capture import (
+                build_capture_identity,
+                identity_digest,
+            )
 
-                if benchmark_kind in ("stt", "both") and enabled_stt:
-                    prepared_stt_dataset = load_dataset(
-                        stt_dataset_id,
-                        settings=settings,
-                        sample_size=None if smoke else stt_size,
-                        rng=_get_family_rng()(stt_dataset_id, scheduled_at),
-                    )
-                    stt_items = (
-                        prepared_stt_dataset.items[:1] if smoke else prepared_stt_dataset.items
-                    )
-                    expected_capture_ids.extend(
-                        identity_digest(
-                            build_capture_identity(
-                                run_id=run_id,
-                                benchmark="STT",
-                                dataset_id=stt_dataset_id,
-                                sample_id=item.sample_id or item.path.name,
-                                provider=entry.provider,
-                                model=entry.model,
-                            )
+            if benchmark_kind in ("stt", "both") and enabled_stt:
+                stt_dataset = load_dataset(
+                    stt_dataset_id,
+                    settings=settings,
+                    sample_size=None if smoke else stt_size,
+                    rng=_get_family_rng()(stt_dataset_id, scheduled_at),
+                )
+                stt_items = stt_dataset.items[:1] if smoke else stt_dataset.items
+                expected_capture_ids.extend(
+                    identity_digest(
+                        build_capture_identity(
+                            run_id=run_id,
+                            benchmark="STT",
+                            dataset_id=stt_dataset_id,
+                            sample_id=item.sample_id or item.path.name,
+                            provider=entry.provider,
+                            model=entry.model,
                         )
-                        for item in stt_items
-                        for entry in enabled_stt
                     )
-                if benchmark_kind in ("tts", "both") and enabled_tts:
-                    prepared_tts_dataset = load_dataset(
-                        tts_dataset_id,
-                        settings=settings,
-                        sample_size=None if smoke else tts_size,
-                    )
-                    tts_items = (
-                        prepared_tts_dataset.items[:1] if smoke else prepared_tts_dataset.items
-                    )
-                    prepared_tts_voices = {
-                        (entry.provider, entry.model): _assign_tts_voices(
-                            entry, len(tts_items), run_id
+                    for item in stt_items
+                    for entry in enabled_stt
+                )
+            if benchmark_kind in ("tts", "both") and enabled_tts:
+                tts_dataset = load_dataset(
+                    tts_dataset_id,
+                    settings=settings,
+                    sample_size=None if smoke else tts_size,
+                )
+                tts_items = tts_dataset.items[:1] if smoke else tts_dataset.items
+                # Item-major order so the gate interleaves providers; a
+                # model-major order would queue one model's items back to back
+                # while the others sit idle.
+                tts_voices = {
+                    (entry.provider, entry.model): _assign_tts_voices(entry, len(tts_items), run_id)
+                    for entry in enabled_tts
+                }
+                expected_capture_ids.extend(
+                    identity_digest(
+                        build_capture_identity(
+                            run_id=run_id,
+                            benchmark="TTS",
+                            dataset_id=tts_dataset_id,
+                            sample_id=item.testcase_id,
+                            provider=entry.provider,
+                            model=entry.model,
+                            voice=tts_voices[(entry.provider, entry.model)][index],
                         )
-                        for entry in enabled_tts
-                    }
-                    expected_capture_ids.extend(
-                        identity_digest(
-                            build_capture_identity(
-                                run_id=run_id,
-                                benchmark="TTS",
-                                dataset_id=tts_dataset_id,
-                                sample_id=item.testcase_id,
-                                provider=entry.provider,
-                                model=entry.model,
-                                voice=prepared_tts_voices[(entry.provider, entry.model)][index],
-                            )
-                        )
-                        for index, item in enumerate(tts_items)
-                        for entry in enabled_tts
                     )
-                from coval_bench.runner.capture import RunManifest, upload_run_state
+                    for index, item in enumerate(tts_items)
+                    for entry in enabled_tts
+                )
+            from coval_bench.runner.capture import RunManifest, upload_run_state
 
-                manifest = RunManifest(
-                    run_id=run_id,
-                    scheduled_at=scheduled_at,
-                    benchmark_kind=benchmark_kind,
-                    source=source,
-                    datasets={
-                        **(
-                            {stt_dataset_id: dataset_sha256}
-                            if benchmark_kind in ("stt", "both")
-                            else {}
-                        ),
-                        **(
-                            {tts_dataset_id: tts_manifest_sha256}
-                            if benchmark_kind in ("tts", "both")
-                            else {}
-                        ),
-                    },
-                    expected_capture_ids=sorted(expected_capture_ids),
-                )
-                await asyncio.to_thread(
-                    upload_run_state,
-                    artifact_client,
-                    settings.benchmark_artifact_bucket,
-                    run_id,
-                    "manifest",
-                    manifest,
-                )
+            manifest = RunManifest(
+                run_id=run_id,
+                scheduled_at=scheduled_at,
+                benchmark_kind=benchmark_kind,
+                source=source,
+                datasets={
+                    **(
+                        {stt_dataset_id: dataset_sha256}
+                        if benchmark_kind in ("stt", "both")
+                        else {}
+                    ),
+                    **(
+                        {tts_dataset_id: tts_manifest_sha256}
+                        if benchmark_kind in ("tts", "both")
+                        else {}
+                    ),
+                },
+                expected_capture_ids=sorted(expected_capture_ids),
+            )
+            await asyncio.to_thread(
+                upload_run_state,
+                artifact_client,
+                settings.benchmark_artifact_bucket,
+                run_id,
+                "manifest",
+                manifest,
+            )
             # ------------------------------------------------------------------
             # 2b. Provider warmup
             # Each provider class may override Provider.warmup() to absorb
@@ -1645,16 +1550,9 @@ async def run_benchmarks(
             # 3. STT path
             # ------------------------------------------------------------------
             if benchmark_kind in ("stt", "both") and enabled_stt:
-                stt_dataset = prepared_stt_dataset or load_dataset(
-                    stt_dataset_id,
-                    settings=settings,
-                    sample_size=None if smoke else stt_size,
-                    rng=_get_family_rng()(stt_dataset_id, scheduled_at),
-                )
-                items = stt_dataset.items[:1] if smoke else stt_dataset.items
-                logger.info("stt_dataset_sampled", item_count=len(items))
+                logger.info("stt_dataset_sampled", item_count=len(stt_items))
 
-                stt_pairs = [(entry, item) for item in items for entry in enabled_stt]
+                stt_pairs = [(entry, item) for item in stt_items for entry in enabled_stt]
                 stt_tasks = [
                     _run_stt_item(
                         entry=entry,
@@ -1665,8 +1563,7 @@ async def run_benchmarks(
                         writer=writer,
                         dataset_id=stt_dataset_id,
                         dataset_sha256=dataset_sha256,
-                        artifact_client=stt_artifact_client,
-                        required_capture=required_capture,
+                        artifact_client=artifact_client,
                         capture_outcomes=capture_outcomes,
                     )
                     for entry, item in stt_pairs
@@ -1690,33 +1587,12 @@ async def run_benchmarks(
             # 4. TTS path
             # ------------------------------------------------------------------
             if benchmark_kind in ("tts", "both") and enabled_tts:
-                tts_dataset = prepared_tts_dataset or load_dataset(
-                    tts_dataset_id,
-                    settings=settings,
-                    sample_size=None if smoke else tts_size,
-                )
-                tts_items = tts_dataset.items[:1] if smoke else tts_dataset.items
                 logger.info("tts_dataset_sampled", item_count=len(tts_items))
-
-                # Item-major order so the gate interleaves providers; a
-                # model-major order would queue one model's items back to back
-                # while the others sit idle.
-                tts_voices = prepared_tts_voices or {
-                    (entry.provider, entry.model): _assign_tts_voices(entry, len(tts_items), run_id)
-                    for entry in enabled_tts
-                }
                 tts_pairs = [
                     (entry, item, tts_voices[(entry.provider, entry.model)][i])
                     for i, item in enumerate(tts_items)
                     for entry in enabled_tts
                 ]
-                tts_artifact_client = artifact_client
-                if tts_artifact_client is not None and not tts_manifest_sha256:
-                    logger.warning(
-                        "normalized_tts_manifest_sha_unavailable",
-                        dataset_id=tts_dataset_id,
-                    )
-                    tts_artifact_client = None
                 tts_tasks = [
                     _run_tts_item(
                         entry=entry,
@@ -1728,8 +1604,7 @@ async def run_benchmarks(
                         writer=writer,
                         dataset_id=tts_dataset_id,
                         dataset_sha256=tts_manifest_sha256,
-                        artifact_client=tts_artifact_client,
-                        required_capture=required_capture,
+                        artifact_client=artifact_client,
                         capture_outcomes=capture_outcomes,
                     )
                     for entry, item, voice in tts_pairs
@@ -1770,9 +1645,8 @@ async def run_benchmarks(
             else:
                 intended_status = RunStatus.PARTIAL
 
-            capture_pending = required_capture and (
-                len(capture_outcomes) != len(expected_capture_ids)
-                or any(str(outcome) != "completed" for outcome in capture_outcomes)
+            capture_pending = len(capture_outcomes) != len(expected_capture_ids) or any(
+                str(outcome) != "completed" for outcome in capture_outcomes
             )
             final_status = (
                 RunStatus.PARTIAL
@@ -1785,65 +1659,62 @@ async def run_benchmarks(
                 else None
             )
             finished_at = datetime.now(tz=UTC)
-            if required_capture:
-                from coval_bench.runner.capture import (
-                    FinalizedReceipt,
-                    RunSeal,
-                    upload_run_state,
-                )
+            from coval_bench.runner.capture import (
+                FinalizedReceipt,
+                RunSeal,
+                upload_run_state,
+            )
 
-                seal = RunSeal(
-                    run_id=run_id,
-                    intended_status=str(intended_status),
-                    stored_status=str(final_status),
-                    finished_at=finished_at,
+            seal = RunSeal(
+                run_id=run_id,
+                intended_status=str(intended_status),
+                stored_status=str(final_status),
+                finished_at=finished_at,
+                error=finish_error,
+                expected_capture_ids=sorted(expected_capture_ids),
+            )
+            try:
+                _, seal_sha256 = await asyncio.to_thread(
+                    upload_run_state,
+                    artifact_client,
+                    settings.benchmark_artifact_bucket,
+                    run_id,
+                    "seal",
+                    seal,
+                )
+            except Exception:
+                logger.warning("normalized_capture_seal_failed", exc_info=True)
+                if intended_status is not RunStatus.FAILED:
+                    final_status = RunStatus.PARTIAL
+                    finish_error = "normalized capture pending"
+                await writer.finish_run_exact(
+                    run_id,
+                    status=final_status,
                     error=finish_error,
-                    expected_capture_ids=sorted(expected_capture_ids),
+                    finished_at=finished_at,
+                )
+            else:
+                await writer.finish_run_exact(
+                    run_id,
+                    status=final_status,
+                    error=finish_error,
+                    finished_at=finished_at,
                 )
                 try:
-                    _, seal_sha256 = await asyncio.to_thread(
+                    await asyncio.to_thread(
                         upload_run_state,
                         artifact_client,
                         settings.benchmark_artifact_bucket,
                         run_id,
-                        "seal",
-                        seal,
+                        "finalized",
+                        FinalizedReceipt(run_id=run_id, seal_sha256=seal_sha256),
                     )
                 except Exception:
-                    logger.warning("normalized_capture_seal_failed", exc_info=True)
+                    logger.warning("normalized_capture_finalize_receipt_failed", exc_info=True)
                     if intended_status is not RunStatus.FAILED:
+                        await writer.mark_run_capture_pending(run_id, finished_at=finished_at)
                         final_status = RunStatus.PARTIAL
                         finish_error = "normalized capture pending"
-                    await writer.finish_run_exact(
-                        run_id,
-                        status=final_status,
-                        error=finish_error,
-                        finished_at=finished_at,
-                    )
-                else:
-                    await writer.finish_run_exact(
-                        run_id,
-                        status=final_status,
-                        error=finish_error,
-                        finished_at=finished_at,
-                    )
-                    try:
-                        await asyncio.to_thread(
-                            upload_run_state,
-                            artifact_client,
-                            settings.benchmark_artifact_bucket,
-                            run_id,
-                            "finalized",
-                            FinalizedReceipt(run_id=run_id, seal_sha256=seal_sha256),
-                        )
-                    except Exception:
-                        logger.warning("normalized_capture_finalize_receipt_failed", exc_info=True)
-                        if intended_status is not RunStatus.FAILED:
-                            await writer.mark_run_capture_pending(run_id, finished_at=finished_at)
-                            final_status = RunStatus.PARTIAL
-                            finish_error = "normalized capture pending"
-            else:
-                await writer.finish_run(run_id, status=final_status, error=None)
 
             # After the row is stored, never before: if finish_run raises, the outer
             # handler is the only thing that should report, otherwise a partial run

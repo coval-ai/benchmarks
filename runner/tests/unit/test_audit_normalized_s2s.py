@@ -194,8 +194,9 @@ def test_audit_presence_ignores_multiplicity_and_reports_metadata(
                 )
             )
             assert evaluation.id is not None
-            await writer.fail_metric_evaluation(
-                evaluation.id, finished_at=datetime.now(UTC), error="no value"
+            failed_at = datetime.now(UTC)
+            await writer.fail_metric_evaluation_exact(
+                evaluation.id, started_at=failed_at, finished_at=failed_at, error="no value"
             )
             await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
         finally:

@@ -53,6 +53,7 @@ from coval_bench.config import Settings
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
 from coval_bench.registries import RegisteredModel, Source
+from coval_bench.runner import normalized
 from coval_bench.runner.gate import ModelGate
 from coval_bench.runner.orchestrator import (
     ProviderReliability,
@@ -80,8 +81,6 @@ _TEST_SETTINGS = Settings(
     openai_api_key=SecretStr("sk-test"),
     deepgram_api_key=SecretStr("dg-test"),
     posthog_disabled=True,
-    normalized_dual_write_enabled=True,
-    normalized_capture_required=True,
     benchmark_artifact_bucket="test-artifacts",
 )
 
@@ -199,7 +198,6 @@ def _make_stub_writer(run: Run) -> MagicMock:
     writer.preflight_required_capture_schema = AsyncMock()
     writer.refresh_window_views = AsyncMock(return_value="published")
     writer.rebuild_run_rollup = AsyncMock()
-    writer.pool_diagnostics = MagicMock(return_value={"pool_size": 0})
     return writer
 
 
@@ -869,12 +867,7 @@ async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
         await original_record(results, **kwargs)
 
     writer.capture_results = AsyncMock(side_effect=tracked_record)
-    enabled = settings.model_copy(
-        update={
-            "benchmark_artifact_bucket": "private-artifacts",
-            "normalized_dual_write_enabled": True,
-        }
-    )
+    enabled = settings.model_copy(update={"benchmark_artifact_bucket": "private-artifacts"})
 
     async with _orchestrator_env(
         audio_path=audio_file,
@@ -883,13 +876,7 @@ async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
         run=run,
         writer=writer,
     ) as _:
-        with (
-            patch("google.cloud.storage.Client", return_value=object()),
-            patch(
-                "coval_bench.runner.normalized.dual_write",
-                new_callable=AsyncMock,
-            ) as dual_write,
-        ):
+        with patch("google.cloud.storage.Client", return_value=object()):
             summary = await run_benchmarks(
                 settings=enabled,
                 benchmark_kind="stt",
@@ -899,7 +886,6 @@ async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
 
     assert max_concurrent <= 8, f"max concurrent was {max_concurrent}"
     assert persistence_max <= 8
-    dual_write.assert_not_awaited()
     assert writer.capture_results.await_count == provider_cls.call_count
     assert writer.capture_results.await_count > 8
     assert summary.total_results >= 50 * 3
@@ -2213,12 +2199,7 @@ async def test_stt_missing_final_carries_finalization_reason(
 async def test_stt_normalized_timing_includes_finalization_diagnostics(
     audio_file: Path, settings: Settings
 ) -> None:
-    configured = settings.model_copy(
-        update={
-            "benchmark_artifact_bucket": "private-artifacts",
-            "normalized_dual_write_enabled": True,
-        }
-    )
+    configured = settings.model_copy(update={"benchmark_artifact_bucket": "private-artifacts"})
     transcription = _good_transcription()
     transcription.finalization_latency_seconds = 0.12
     transcription.finalization_trigger = "manual"
@@ -2235,8 +2216,9 @@ async def test_stt_normalized_timing_includes_finalization_diagnostics(
         writer=writer,
     ):
         with patch(
-            "coval_bench.runner.normalized.dual_write", new_callable=AsyncMock
-        ) as dual_write:
+            "coval_bench.runner.normalized.prepare_capture_envelope",
+            side_effect=normalized.prepare_capture_envelope,
+        ) as prepare:
             await _run_stt_item(
                 entry=_stt_entry("deepgram", "flux-general-en"),
                 item=_make_dataset_item(audio_file),
@@ -2249,8 +2231,8 @@ async def test_stt_normalized_timing_includes_finalization_diagnostics(
                 artifact_client=object(),
             )
 
-    assert dual_write.await_args is not None
-    timing = dual_write.await_args.kwargs["timing_events"]
+    assert prepare.call_args is not None
+    timing = prepare.call_args.kwargs["timing_events"]
     assert timing["finalization_latency_seconds"] == 0.12
     assert timing["finalization_trigger"] == "manual"
     assert timing["final_audio_window_end_seconds"] == 1.8
@@ -3705,7 +3687,7 @@ async def test_sigterm_reports_dead_provider_from_a_completed_phase(
 
 
 # ---------------------------------------------------------------------------
-# Normalized dual-write lifecycle
+# Normalized capture lifecycle
 # ---------------------------------------------------------------------------
 
 
@@ -3714,13 +3696,7 @@ async def test_sigterm_reports_dead_provider_from_a_completed_phase(
 async def test_disabled_capture_fails_before_provider_or_client(
     benchmark_kind: Literal["stt", "tts"], audio_file: Path, settings: Settings
 ) -> None:
-    configured = settings.model_copy(
-        update={
-            "normalized_dual_write_enabled": False,
-            "normalized_capture_required": False,
-            "benchmark_artifact_bucket": "",
-        }
-    )
+    configured = settings.model_copy(update={"benchmark_artifact_bucket": ""})
     writer = _make_stub_writer(_make_run())
     provider = MagicMock()
     async with _orchestrator_env(
@@ -3731,7 +3707,7 @@ async def test_disabled_capture_fails_before_provider_or_client(
     ):
         with (
             patch("google.cloud.storage.Client") as storage_client,
-            pytest.raises(RuntimeError, match="normalized"),
+            pytest.raises(RuntimeError, match="benchmark_artifact_bucket"),
         ):
             await run_benchmarks(settings=configured, benchmark_kind=benchmark_kind, smoke=True)
     storage_client.assert_not_called()
@@ -3765,140 +3741,12 @@ async def test_missing_manifest_fails_before_provider_or_run(
 
 
 @pytest.mark.asyncio
-async def test_tts_normalized_failure_preserves_audio_without_legacy_fallback(
-    audio_file: Path, settings: Settings
-) -> None:
-    """An ordinary normalized failure is isolated after it snapshots live audio."""
-    enabled = settings.model_copy(
-        update={
-            "benchmark_artifact_bucket": "private-artifacts",
-            "normalized_dual_write_enabled": True,
-        }
-    )
-    provider = MagicMock()
-    provider.synthesize = AsyncMock(
-        return_value=TTSResult(
-            provider="elevenlabs",
-            model="eleven_flash_v2_5",
-            voice="voice",
-            ttfa_ms=120.0,
-            audio_path=audio_file,
-            error=None,
-        )
-    )
-    writer = _make_stub_writer(_make_run())
-
-    audio_existed_during_write: list[bool] = []
-
-    async def _fail_after_checking_audio(**kwargs: Any) -> None:
-        audio_existed_during_write.append(kwargs["audio_path"].exists())
-        raise RuntimeError("normalized unavailable")
-
-    async with _orchestrator_env(
-        audio_path=audio_file,
-        tts_providers={"elevenlabs": MagicMock(return_value=provider)},
-        writer=writer,
-    ):
-        with (
-            patch(
-                "coval_bench.runner.orchestrator._transcribe_with_whisper",
-                side_effect=RuntimeError("whisper unavailable"),
-            ),
-            patch(
-                "coval_bench.runner.normalized.dual_write",
-                new_callable=AsyncMock,
-                side_effect=_fail_after_checking_audio,
-            ) as dual_write,
-        ):
-            results = await _run_tts_item(
-                entry=_tts_entry("elevenlabs", "eleven_flash_v2_5", "voice"),
-                item=_make_tts_item(),
-                run_id=1,
-                gate=ModelGate(1),
-                settings=enabled,
-                writer=writer,
-                dataset_sha256="a" * 64,
-                artifact_client=object(),
-            )
-
-    dual_write.assert_awaited_once()
-    assert audio_existed_during_write == [True]
-    assert not audio_file.exists()
-    writer.capture_results.assert_not_awaited()
-    assert results
-    assert dual_write.await_args is not None
-    assert dual_write.await_args.kwargs["db_retry_attempts"] == 3
-
-
-@pytest.mark.asyncio
-async def test_tts_cancellation_propagates_after_audio_cleanup(
-    audio_file: Path, settings: Settings
-) -> None:
-    """Cancellation is never swallowed, but orchestrator-owned audio is removed."""
-    enabled = settings.model_copy(
-        update={
-            "benchmark_artifact_bucket": "private-artifacts",
-            "normalized_dual_write_enabled": True,
-        }
-    )
-    provider = MagicMock()
-    provider.synthesize = AsyncMock(
-        return_value=TTSResult(
-            provider="elevenlabs",
-            model="eleven_flash_v2_5",
-            voice="voice",
-            ttfa_ms=120.0,
-            audio_path=audio_file,
-            error=None,
-        )
-    )
-    writer = _make_stub_writer(_make_run())
-
-    async def _cancel_after_checking_audio(**kwargs: Any) -> None:
-        assert kwargs["audio_path"].exists()
-        raise asyncio.CancelledError
-
-    async with _orchestrator_env(
-        audio_path=audio_file,
-        tts_providers={"elevenlabs": MagicMock(return_value=provider)},
-        writer=writer,
-    ):
-        with (
-            patch(
-                "coval_bench.runner.orchestrator._transcribe_with_whisper",
-                side_effect=RuntimeError("whisper unavailable"),
-            ),
-            patch(
-                "coval_bench.runner.normalized.dual_write",
-                new_callable=AsyncMock,
-                side_effect=_cancel_after_checking_audio,
-            ),
-            pytest.raises(asyncio.CancelledError),
-        ):
-            await _run_tts_item(
-                entry=_tts_entry("elevenlabs", "eleven_flash_v2_5", "voice"),
-                item=_make_tts_item(),
-                run_id=1,
-                gate=ModelGate(1),
-                settings=enabled,
-                writer=writer,
-                dataset_sha256="a" * 64,
-                artifact_client=object(),
-            )
-
-    assert not audio_file.exists()
-    writer.capture_results.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_required_capture_preflight_fails_before_provider_or_run(
     audio_file: Path, settings: Settings
 ) -> None:
     configured = settings.model_copy(
         update={
             "benchmark_artifact_bucket": "private-artifacts",
-            "normalized_dual_write_enabled": True,
-            "normalized_capture_required": True,
         }
     )
     provider = MagicMock()
@@ -3939,8 +3787,6 @@ async def test_required_capture_final_receipt_failure_leaves_run_partial(
     configured = settings.model_copy(
         update={
             "benchmark_artifact_bucket": "private-artifacts",
-            "normalized_dual_write_enabled": True,
-            "normalized_capture_required": True,
         }
     )
     provider = MagicMock()
@@ -4001,8 +3847,6 @@ async def test_required_tts_cleanup_waits_for_durable_capture_ack(
     configured = settings.model_copy(
         update={
             "benchmark_artifact_bucket": "private-artifacts",
-            "normalized_dual_write_enabled": True,
-            "normalized_capture_required": True,
         }
     )
     provider = MagicMock()
@@ -4043,7 +3887,6 @@ async def test_required_tts_cleanup_waits_for_durable_capture_ack(
                 writer=writer,
                 dataset_sha256="a" * 64,
                 artifact_client=object(),
-                required_capture=True,
                 capture_outcomes=[],
             )
 

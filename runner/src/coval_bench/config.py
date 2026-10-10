@@ -97,15 +97,9 @@ class Settings(BaseSettings):
     tts_dataset_id: str = "tts-v1"
     # Unset: falls back to dataset_sample_size.
     tts_dataset_sample_size: int | None = None
-    # Private bucket for additive normalized observation artifacts. The rollout
-    # is deliberately fail-closed: enabling writes without a destination is an
-    # invalid deployment rather than a silent partial capture.
+    # Private bucket for normalized observation artifacts and capture envelopes.
+    # Benchmark entrypoints fail closed without it; the API does not need it.
     benchmark_artifact_bucket: str = ""
-    normalized_dual_write_enabled: bool = False
-    # Required mode makes the immutable capture envelope the acknowledgement
-    # boundary.  It is intentionally opt-in and never enables dual writes by
-    # itself.
-    normalized_capture_required: bool = False
     # Fernet key shared by API instances for authenticated results cursors.
     # Missing or malformed configuration fails closed when /v2/results is called.
     results_cursor_key: SecretStr | None = None
@@ -163,22 +157,6 @@ class Settings(BaseSettings):
         if value == DATASET_ALL:
             raise ValueError(f"dataset_id {DATASET_ALL!r} is reserved for pooled aggregates")
         return value
-
-    @model_validator(mode="after")
-    def _normalized_dual_write_requires_bucket(self) -> Settings:
-        if self.normalized_dual_write_enabled and not self.benchmark_artifact_bucket:
-            raise ValueError(
-                "benchmark_artifact_bucket is required when normalized dual write is enabled"
-            )
-        if self.normalized_capture_required and not self.normalized_dual_write_enabled:
-            raise ValueError(
-                "normalized_dual_write_enabled is required when normalized capture is required"
-            )
-        if self.normalized_capture_required and not self.benchmark_artifact_bucket:
-            raise ValueError(
-                "benchmark_artifact_bucket is required when normalized capture is required"
-            )
-        return self
 
     # Unset: datasets/suite.py decides. >= manifest size runs everything.
     dataset_sample_size: int | None = None
@@ -489,16 +467,7 @@ def get_settings() -> Settings:
     return Settings()
 
 
-def require_normalized_persisted_capture(settings: Settings) -> None:
-    """Require normalized capture before an entrypoint can persist benchmark data."""
-    missing: list[str] = []
-    if not settings.normalized_dual_write_enabled:
-        missing.append("normalized_dual_write_enabled")
-    if not settings.normalized_capture_required:
-        missing.append("normalized_capture_required")
+def require_capture_bucket(settings: Settings) -> None:
+    """Require the capture bucket before an entrypoint can persist benchmark data."""
     if not settings.benchmark_artifact_bucket:
-        missing.append("benchmark_artifact_bucket")
-    if missing:
-        raise RuntimeError(
-            "normalized persisted capture is required for benchmark writes: " + ", ".join(missing)
-        )
+        raise RuntimeError("benchmark_artifact_bucket is required for benchmark writes")
