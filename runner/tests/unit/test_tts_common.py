@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
-from structlog.testing import capture_logs
 
 from coval_bench.providers.tts._common import Synthesis, finalize_tts_result
 
@@ -304,10 +303,11 @@ def test_synthesis_ignores_empty_chunks_and_names_blank_errors() -> None:
     synthesis.add_chunk(b"\x01\x00")
     assert synthesis.first_chunk_at is not None
 
-    with capture_logs() as logs:
+    with patch("coval_bench.providers.tts._common.logger") as logger:
         synthesis.fail(ValueError())
     assert synthesis.error == "ValueError"
     assert synthesis.chunks == []
-    assert [(log["event"], log["provider"], log["model"]) for log in logs] == [
-        ("tts_synthesis_failed", "test", "m")
-    ]
+    logger.warning.assert_called_once()
+    assert logger.warning.call_args.args == ("tts_synthesis_failed",)
+    assert logger.warning.call_args.kwargs["provider"] == "test"
+    assert logger.warning.call_args.kwargs["model"] == "m"
