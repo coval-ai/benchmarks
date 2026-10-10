@@ -31,7 +31,6 @@ from coval_bench.db.models import (
     ObservationSourceKind,
     ObservationStatus,
     ProcessingStatus,
-    Result,
 )
 from coval_bench.observation_artifacts import (
     prepare_provider_transcript,
@@ -134,7 +133,6 @@ class FrozenCapture(BaseModel):
     transport_protocol: str | None = None
     submit_to_headers_ms: float | None = None
     provider_extras: dict[str, Any] | None = None
-    legacy_rows: list[dict[str, Any]] = Field(default_factory=list)
     evaluations: list[FrozenEvaluation] = Field(default_factory=list)
     artifacts: list[FrozenArtifact] = Field(default_factory=list)
 
@@ -272,9 +270,6 @@ def prepare_capture_envelope(
     if provider_error is not None and not provider_error.strip():
         provider_error = None
     benchmark_value = str(getattr(benchmark, "value", benchmark)).upper()
-    legacy_rows = [
-        Result.model_validate(row).model_dump(mode="json", exclude={"id"}) for row in results
-    ]
     frozen_artifacts: list[FrozenArtifact] = []
     frozen_bytes: dict[str, bytes] = {}
     if transcript is not None:
@@ -364,7 +359,6 @@ def prepare_capture_envelope(
             }[benchmark_value]
         ),
         provider_extras=dict(provider_extras) if provider_extras is not None else None,
-        legacy_rows=legacy_rows,
         evaluations=evaluations,
         artifacts=frozen_artifacts,
     )
@@ -430,7 +424,10 @@ async def persist_capture(
         await asyncio.to_thread(upload_envelope, storage_client, bucket, envelope)
         durable = True
         await asyncio.to_thread(upload_claim, storage_client, bucket, envelope)
-        payload = FrozenCapture.model_validate(envelope.payload)
+        # Envelopes stored before the legacy results table was dropped carry legacy_rows.
+        payload = FrozenCapture.model_validate(
+            {key: value for key, value in envelope.payload.items() if key != "legacy_rows"}
+        )
         uploaded: dict[str, ObservationArtifact] = {}
         for artifact in payload.artifacts:
             encoded = envelope.artifact_bytes.get(artifact.name)

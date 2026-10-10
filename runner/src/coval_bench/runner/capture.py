@@ -134,23 +134,6 @@ class ImportRunClaim(BaseModel):
         return value
 
 
-class LegacyResultAllocation(BaseModel):
-    """Immutable allocation of legacy result primary keys to one envelope."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    schema_version: str = CAPTURE_SCHEMA_VERSION
-    envelope_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    result_ids: list[int]
-
-    @field_validator("result_ids")
-    @classmethod
-    def _unique_result_ids(cls, value: list[int]) -> list[int]:
-        if any(result_id <= 0 for result_id in value) or len(value) != len(set(value)):
-            raise ValueError("result_ids must be positive and unique")
-        return value
-
-
 def read_immutable_object(client: storage.Client, bucket_name: str, uri_or_key: str) -> bytes:
     """Read one immutable object and verify its stored content hash."""
     key = uri_or_key.removeprefix(f"gs://{bucket_name}/")
@@ -604,53 +587,3 @@ def upload_claim(
         ),
         digest,
     )
-
-
-def _legacy_allocation_key(envelope: CaptureEnvelope) -> str:
-    return f"{capture_prefix(envelope.identity)}/legacy-allocation.json"
-
-
-def read_legacy_result_allocation(
-    client: storage.Client, bucket_name: str, envelope: CaptureEnvelope
-) -> LegacyResultAllocation | None:
-    try:
-        value = read_immutable_json(client, bucket_name, _legacy_allocation_key(envelope))
-    except NotFound:
-        return None
-    allocation = LegacyResultAllocation.model_validate(value)
-    if allocation.envelope_sha256 != envelope.envelope_digest():
-        raise ValueError("legacy result allocation belongs to a different envelope")
-    return allocation
-
-
-def upload_legacy_result_allocation(
-    client: storage.Client,
-    bucket_name: str,
-    envelope: CaptureEnvelope,
-    result_ids: list[int],
-    *,
-    max_attempts: int = 3,
-) -> LegacyResultAllocation:
-    """Elect one ordered result-ID allocation for concurrent replay workers."""
-    allocation = LegacyResultAllocation(
-        envelope_sha256=envelope.envelope_digest(), result_ids=result_ids
-    )
-    payload = canonical_bytes(allocation.model_dump(mode="json"))
-    key = _legacy_allocation_key(envelope)
-    try:
-        upload_immutable_object(
-            client,
-            bucket_name,
-            key,
-            payload,
-            content_type="application/json",
-            max_attempts=max_attempts,
-        )
-        return allocation
-    except ValueError:
-        stored = read_legacy_result_allocation(client, bucket_name, envelope)
-        if stored is None:
-            raise
-        if len(stored.result_ids) != len(result_ids):
-            raise ValueError("legacy result allocation has a different row count") from None
-        return stored

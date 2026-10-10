@@ -42,7 +42,6 @@ from coval_bench.runner.capture import (
     read_receipt,
     upload_envelope,
     upload_import_run_claim,
-    upload_legacy_result_allocation,
     upload_run_state,
 )
 from coval_bench.runner.normalized import (
@@ -326,7 +325,7 @@ async def test_ambiguous_normalized_commit_is_discoverable_and_replays_once() ->
 
 
 @pytest.mark.asyncio
-async def test_distinct_same_timestamp_captures_replay_without_legacy_ids() -> None:
+async def test_distinct_same_timestamp_captures_replay() -> None:
     storage_value = _Storage()
     writer = _Writer()
 
@@ -351,16 +350,17 @@ async def test_distinct_same_timestamp_captures_replay_without_legacy_ids() -> N
         is CaptureOutcome.COMPLETED
     )
 
-    assert not any(name.endswith("legacy-allocation.json") for name in storage_value.objects)
-
 
 @pytest.mark.asyncio
-async def test_old_envelope_and_legacy_allocation_replay_without_legacy_writer() -> None:
+async def test_envelope_with_legacy_rows_replays() -> None:
     storage_value = _Storage()
     client = _client(storage_value)
-    envelope = _envelope()
+    current = _envelope()
+    payload = {**current.payload, "legacy_rows": [{"metric_type": "WER"}]}
+    envelope = current.model_copy(
+        update={"payload": payload, "payload_sha256": payload_digest(payload)}
+    )
     upload_envelope(client, "private", envelope)
-    upload_legacy_result_allocation(client, "private", envelope, [918273])
     preserved = {name: record.payload for name, record in storage_value.objects.items()}
     writer = _Writer()  # Deliberately exposes only normalized persistence methods.
 

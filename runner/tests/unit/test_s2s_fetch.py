@@ -23,6 +23,7 @@ from coval_bench.db.models import Result, ResultStatus, Run, RunStatus
 from coval_bench.logging import log_run_failed, log_run_partial, log_run_unmapped_persona
 from coval_bench.registries import Benchmark, Metric
 from coval_bench.registries.models import RegisteredModel
+from coval_bench.runner import normalized
 from coval_bench.runner.capture import (
     ImportRunClaim,
     RunSeal,
@@ -57,9 +58,24 @@ def _settings(**kwargs: Any) -> Settings:
     return Settings(**defaults)
 
 
+# Results handed to each envelope, keyed by envelope identity, so capture fakes
+# can report what was captured without decoding the frozen payload.
+_CAPTURED_RESULTS: dict[int, list[Any]] = {}
+_prepare_capture_envelope = normalized.prepare_capture_envelope
+
+
+def _prepare_and_keep_results(**kwargs: Any) -> Any:
+    envelope = _prepare_capture_envelope(**kwargs)
+    _CAPTURED_RESULTS[id(envelope)] = list(kwargs["results"])
+    return envelope
+
+
 @pytest.fixture(autouse=True)
 def _local_capture(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mock external storage while keeping required importer dispatch under test."""
+    monkeypatch.setattr(
+        "coval_bench.runner.normalized.prepare_capture_envelope", _prepare_and_keep_results
+    )
     monkeypatch.setattr("google.cloud.storage.Client", MagicMock(return_value=object()))
     monkeypatch.setattr("coval_bench.runner.capture.preflight_capture_storage", MagicMock())
     monkeypatch.setattr(
@@ -70,7 +86,7 @@ def _local_capture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fetch_v2v, "upload_import_run_claim", lambda _client, _bucket, claim: claim)
 
     async def persist(**kwargs: Any) -> str:
-        rows = [Result.model_validate(row) for row in kwargs["envelope"].payload["legacy_rows"]]
+        rows = _CAPTURED_RESULTS.pop(id(kwargs["envelope"]))
         await kwargs["writer"].capture_results(
             rows, created_at=kwargs["envelope"].payload["captured_at"]
         )

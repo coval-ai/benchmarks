@@ -307,7 +307,7 @@ async def _orchestrator_env(  # noqa: ANN202
     ):
 
         async def _persist_capture(**kwargs: Any) -> str:
-            rows = [Result.model_validate(row) for row in kwargs["envelope"].payload["legacy_rows"]]
+            rows = _CAPTURED_RESULTS.pop(id(kwargs["envelope"]))
             writer._normalized_rows.extend(rows)
             await writer.capture_results(rows, created_at=kwargs["envelope"].payload["captured_at"])
             return "completed"
@@ -326,9 +326,21 @@ async def _orchestrator_env(  # noqa: ANN202
 # ---------------------------------------------------------------------------
 
 
+# Results handed to each envelope, keyed by envelope identity, so capture fakes
+# can report what was captured without decoding the frozen payload.
+_CAPTURED_RESULTS: dict[int, list[Any]] = {}
+_prepare_capture_envelope = normalized.prepare_capture_envelope
+
+
+def _prepare_and_keep_results(**kwargs: Any) -> Any:
+    envelope = _prepare_capture_envelope(**kwargs)
+    _CAPTURED_RESULTS[id(envelope)] = list(kwargs["results"])
+    return envelope
+
+
 async def _capture_rows(**kwargs: Any) -> str:
     writer = kwargs["writer"]
-    rows = [Result.model_validate(row) for row in kwargs["envelope"].payload["legacy_rows"]]
+    rows = _CAPTURED_RESULTS.pop(id(kwargs["envelope"]))
     writer._normalized_rows.extend(rows)
     await writer.capture_results(rows, created_at=kwargs["envelope"].payload["captured_at"])
     return "completed"
@@ -337,6 +349,9 @@ async def _capture_rows(**kwargs: Any) -> str:
 @pytest.fixture(autouse=True)
 def _local_capture(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep orchestration tests local while exercising required capture routing."""
+    monkeypatch.setattr(
+        "coval_bench.runner.normalized.prepare_capture_envelope", _prepare_and_keep_results
+    )
     monkeypatch.setattr("google.cloud.storage.Client", MagicMock(return_value=object()))
     monkeypatch.setattr("coval_bench.runner.capture.preflight_capture_storage", MagicMock())
     monkeypatch.setattr(
