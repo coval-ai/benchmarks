@@ -914,7 +914,7 @@ class RunWriter:
                 await fill_rollup(conn, grain=RUN_SLOT, bucket_at=row["scheduled_at"])
 
     async def refresh_window_views(self, run_id: int | None = None) -> str:
-        """Publish normalized summaries independently of legacy maintenance."""
+        """Publish the dashboard window summaries."""
         from coval_bench.db.dashboard_windows import refresh_window_views
 
         result = await refresh_window_views(self._pool, run_id=run_id)

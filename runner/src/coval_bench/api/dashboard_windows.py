@@ -37,21 +37,18 @@ class Snapshot:
 
 async def require_window_state(conn: AsyncConnection[Any]) -> Snapshot:
     """Validate state and definition identity inside the caller's transaction."""
-    try:
-        result = await conn.execute(
-            """SELECT generation,as_of,published_at,definition_revision,definition_fingerprint
-               FROM benchmarks_v2.dashboard_window_state WHERE id=true"""
-        )
-    except UndefinedTable as exc:
-        raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready") from exc
+    result = await conn.execute(
+        """SELECT generation,as_of,published_at,definition_revision,definition_fingerprint
+           FROM benchmarks_v2.dashboard_window_state WHERE id=true"""
+    )
     row = await result.fetchone()
     if row is None:
         raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready")
-    generation = row["generation"] if isinstance(row, dict) else row[0]
-    as_of = row["as_of"] if isinstance(row, dict) else row[1]
-    published_at = row["published_at"] if isinstance(row, dict) else row[2]
-    revision = row["definition_revision"] if isinstance(row, dict) else row[3]
-    fingerprint = row["definition_fingerprint"] if isinstance(row, dict) else row[4]
+    generation = row["generation"]
+    as_of = row["as_of"]
+    published_at = row["published_at"]
+    revision = row["definition_revision"]
+    fingerprint = row["definition_fingerprint"]
     if generation == 0 or as_of is None or published_at is None:
         raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready")
     if revision != DEFINITION_REVISION or fingerprint != aggregation_fingerprint():
