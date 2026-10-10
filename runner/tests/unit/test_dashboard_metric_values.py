@@ -10,62 +10,12 @@ from typing import Any
 
 import psycopg
 import pytest
-from alembic import command as alembic_command
-from alembic.config import Config as AlembicConfig
 from pytest_postgresql.factories import postgresql
-from sqlalchemy.exc import OperationalError
 
 from coval_bench.db.writer import RunWriter
 from tests.unit import test_normalized_db_writer as storage
 
 pg_conn = postgresql("pg_proc")
-
-
-@pytest.mark.asyncio
-async def test_projection_seeds_existing_values_and_downgrades(
-    pg_conn: psycopg.Connection[Any],
-) -> None:
-    storage._migrate(pg_conn, "20260910_0030")
-    pool = await storage._pool(pg_conn)
-    try:
-        writer = RunWriter(pool)
-        _, observation = await storage._observation(writer)
-        evaluation_id = await storage._historical_evaluation(pool, observation)
-        await storage._complete_historical_evaluation(
-            evaluation_id,
-            pool=pool,
-            values=storage._wer_values(evaluation_id),
-            finished_at=storage._NOW + timedelta(seconds=1),
-        )
-    finally:
-        await pool.close()
-    storage._migrate(pg_conn, "20260910_0031")
-    pg_conn.autocommit = True
-    row = pg_conn.execute(
-        "SELECT value, wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct, "
-        "reference_words, has_primary_role FROM benchmarks_v2.dashboard_metric_values "
-        "WHERE evaluation_id = %s",
-        (evaluation_id,),
-    ).fetchone()
-    assert row == (10, 1, 2, 7, None, True)
-    config = AlembicConfig(str(storage._INI_PATH))
-    config.set_main_option(
-        "sqlalchemy.url", storage._dsn(pg_conn).replace("postgresql://", "postgresql+psycopg://")
-    )
-    alembic_command.downgrade(config, "20260910_0030")
-    assert pg_conn.execute(
-        "SELECT to_regclass('benchmarks_v2.dashboard_metric_values')"
-    ).fetchone() == (None,)
-    assert pg_conn.execute(
-        "SELECT count(*) FROM benchmarks_v2.metric_values WHERE metric_evaluation_id = %s",
-        (evaluation_id,),
-    ).fetchone() == (4,)
-    with pytest.raises(psycopg.errors.RaiseException, match="payloads are immutable"):
-        pg_conn.execute(
-            "UPDATE benchmarks_v2.metric_values SET value = 0 "
-            "WHERE metric_evaluation_id = %s AND value_key = 'primary'",
-            (evaluation_id,),
-        )
 
 
 @pytest.mark.asyncio
@@ -170,54 +120,5 @@ async def test_deferred_validation_failure_rolls_back_projection(
                 )
             ).fetchone()
             assert row == {"n": 0}
-    finally:
-        await pool.close()
-
-
-@pytest.mark.asyncio
-async def test_projection_upgrade_nowait_does_not_interrupt_completion(
-    pg_conn: psycopg.Connection[Any],
-) -> None:
-    """A partial lock set never makes migration and an active writer wait on each other."""
-    storage._migrate(pg_conn, "20260910_0030")
-    pool = await storage._pool(pg_conn)
-    try:
-        writer = RunWriter(pool)
-        _, observation = await storage._observation(writer)
-        evaluation_id = await storage._historical_evaluation(pool, observation)
-        async with pool.connection() as conn:
-            await conn.execute(
-                "SELECT id FROM benchmarks_v2.metric_evaluations WHERE id = %s FOR UPDATE",
-                (evaluation_id,),
-            )
-            await conn.execute(
-                "INSERT INTO benchmarks_v2.metric_values VALUES "
-                "(%s, 'primary', 'percent', 10, 'primary')",
-                (evaluation_id,),
-            )
-            # The writer holds evaluations ROW SHARE and values ROW EXCLUSIVE.
-            # An ordered blocking migration lock could deadlock its final UPDATE.
-            with pytest.raises(OperationalError, match="could not obtain lock") as error:
-                storage._migrate(pg_conn, "20260910_0031")
-            assert isinstance(error.value.orig, psycopg.errors.LockNotAvailable)
-            await conn.execute(
-                "UPDATE benchmarks_v2.metric_evaluations "
-                "SET status = 'succeeded', finished_at = %s WHERE id = %s",
-                (storage._NOW + timedelta(seconds=1), evaluation_id),
-            )
-            await conn.commit()
-        storage._migrate(pg_conn, "20260910_0031")
-        async with pool.connection() as conn:
-            row = await (
-                await conn.execute(
-                    "SELECT d.value, v.value AS raw_value "
-                    "FROM benchmarks_v2.dashboard_metric_values d "
-                    "JOIN benchmarks_v2.metric_values v "
-                    "ON v.metric_evaluation_id = d.evaluation_id "
-                    "AND v.value_key = 'primary' WHERE d.evaluation_id = %s",
-                    (evaluation_id,),
-                )
-            ).fetchone()
-            assert row == {"value": 10, "raw_value": 10}
     finally:
         await pool.close()

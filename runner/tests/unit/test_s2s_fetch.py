@@ -1736,26 +1736,15 @@ async def test_fetch_and_write_rejects_noisy_persona_without_a_test_set() -> Non
 
 
 @pytest.mark.asyncio
-async def test_fetch_and_write_rejects_a_blank_happypath_test_set() -> None:
+@pytest.mark.parametrize(
+    "setting", ["coval_s2s_happypath_test_set_id", "coval_s2s_dental_test_set_id"]
+)
+async def test_fetch_and_write_rejects_a_blank_test_set(setting: str) -> None:
     # Blank would skip its agents with only a warning, indistinguishable from unset.
     settings = _settings(
-        coval_s2s_latency_metric_id="MID",
-        coval_s2s_openai_agent_id="a1",
-        coval_s2s_happypath_test_set_id="   ",
+        coval_s2s_latency_metric_id="MID", coval_s2s_openai_agent_id="a1", **{setting: "   "}
     )
-    with pytest.raises(RuntimeError, match="coval_s2s_happypath_test_set_id must not be blank"):
-        await fetch_v2v.fetch_and_write_v2v(settings)
-
-
-@pytest.mark.asyncio
-async def test_fetch_and_write_rejects_a_blank_dental_test_set() -> None:
-    # gray/red read this one, so blank would strand both with only a warning.
-    settings = _settings(
-        coval_s2s_latency_metric_id="MID",
-        coval_s2s_openai_agent_id="a1",
-        coval_s2s_dental_test_set_id="   ",
-    )
-    with pytest.raises(RuntimeError, match="coval_s2s_dental_test_set_id must not be blank"):
+    with pytest.raises(RuntimeError, match=f"{setting} must not be blank"):
         await fetch_v2v.fetch_and_write_v2v(settings)
 
 

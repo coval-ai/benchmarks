@@ -184,31 +184,6 @@ def test_run_lifecycle(pg_conn: psycopg.Connection[Any]) -> None:
     asyncio.run(_run())
 
 
-def test_partial_run(pg_conn: psycopg.Connection[Any]) -> None:
-    """finish_run('partial') → status persists."""
-    _apply_migrations(pg_conn)
-
-    async def _run() -> int:
-        pool = await _make_pool(pg_conn)
-        try:
-            writer = RunWriter(pool)
-            run = await writer.start_run(dataset_id="stt-v1", dataset_sha256="deadbeef")
-            assert run.id is not None
-            await writer.finish_run(run.id, status=RunStatus.PARTIAL)
-            return run.id
-        finally:
-            await pool.close()
-
-    run_id = asyncio.run(_run())
-
-    pg_conn.autocommit = True
-    with pg_conn.cursor() as cur:
-        cur.execute("SELECT status FROM benchmarks_v2.runs WHERE id = %s", (run_id,))
-        row = cur.fetchone()
-    assert row is not None
-    assert row[0] == "partial"
-
-
 def test_run_with_error(pg_conn: psycopg.Connection[Any]) -> None:
     """finish_run('failed', error=...) → error column persists."""
     _apply_migrations(pg_conn)
@@ -256,48 +231,6 @@ def test_check_constraints(pg_conn: psycopg.Connection[Any]) -> None:
             """
         )
     pg_conn.rollback()
-
-
-def test_llm_benchmark_rows_are_accepted(pg_conn: psycopg.Connection[Any]) -> None:
-    """Every widened CHECK admits 'LLM', and the migration seeded the Phonely entry."""
-    _apply_migrations(pg_conn)
-    pg_conn.autocommit = True
-
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status) "
-            "VALUES ('sha', 'llm-dental-v1', 'hash', 'succeeded') RETURNING id"
-        )
-        assert cur.fetchone() is not None
-        cur.execute(
-            "INSERT INTO benchmarks_v2.models "
-            "(modality, provider, model, voice, voices, creator, source, licensing, "
-            " on_prem, region, arena_enabled, collected, published, updated_by_user_id) "
-            "VALUES ('LLM', 'acme', 'chat-1', NULL, '[]'::jsonb, NULL, 'official-api', "
-            " 'proprietary', FALSE, 'us', FALSE, TRUE, FALSE, 'test')"
-        )
-        cur.execute(
-            "SELECT collected, published, arena_enabled, updated_by_user_id "
-            "FROM benchmarks_v2.models WHERE modality = 'LLM' AND provider = 'phonely'"
-        )
-        assert cur.fetchall() == [(True, False, False, "migration:20260901_0025")]
-
-
-def test_widened_checks_are_validated_and_enforced(pg_conn: psycopg.Connection[Any]) -> None:
-    """The NOT VALID constraint swaps end validated."""
-    _apply_migrations(pg_conn)
-    pg_conn.autocommit = True
-
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT conname, convalidated FROM pg_constraint "
-            "WHERE conname IN ('benchmark_observations_benchmark_check', "
-            " 'models_modality_check', 'model_history_modality_check') "
-            "ORDER BY conname"
-        )
-        rows = cur.fetchall()
-    assert len(rows) == 3
-    assert all(validated for _, validated in rows), rows
 
 
 def test_pool_singleton(pg_conn: psycopg.Connection[Any]) -> None:

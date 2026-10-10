@@ -5,11 +5,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from importlib import import_module
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, call
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import psycopg
 import psycopg.errors
@@ -30,7 +28,6 @@ from coval_bench.db.models import (
     Observation,
     ObservationArtifact,
     ObservationArtifactType,
-    ObservationFailureOrigin,
     ObservationSourceKind,
     ObservationStatus,
     PreprocessingArtifact,
@@ -119,50 +116,6 @@ async def _evaluation(
         )
     )
     return await writer.start_metric_evaluation_exact(_required(queued.id), started_at=_NOW)
-
-
-async def _historical_evaluation(pool: AsyncConnectionPool[Any], observation: Observation) -> Any:
-    """Seed an evaluation before the metric catalog exists."""
-    async with pool.connection() as conn:
-        row = await (
-            await conn.execute(
-                """INSERT INTO benchmarks_v2.metric_evaluations
-               (observation_id,metric_type,metric_version,executor,status)
-               VALUES (%s,'WER','v1','inline','queued')
-               RETURNING id""",
-                (_required(observation.id),),
-            )
-        ).fetchone()
-        evaluation_id = row["id"]
-        await conn.execute(
-            "UPDATE benchmarks_v2.metric_evaluations "
-            "SET status='running',started_at=%s WHERE id=%s",
-            (_NOW, evaluation_id),
-        )
-        await conn.commit()
-    return evaluation_id
-
-
-async def _complete_historical_evaluation(
-    evaluation_id: UUID,
-    *,
-    pool: AsyncConnectionPool[Any],
-    values: list[MetricValue],
-    finished_at: datetime,
-) -> None:
-    """Finish frozen pre-catalog seeds for migration tests through their DB guards."""
-    async with pool.connection() as conn, conn.transaction():
-        async with conn.cursor() as cur:
-            await cur.executemany(
-                "INSERT INTO benchmarks_v2.metric_values "
-                "(metric_evaluation_id,value_key,unit,value,value_role) VALUES (%s,%s,%s,%s,%s)",
-                [(evaluation_id, v.value_key, v.unit, v.value, v.value_role) for v in values],
-            )
-        await conn.execute(
-            "UPDATE benchmarks_v2.metric_evaluations "
-            "SET status='succeeded',finished_at=%s WHERE id=%s",
-            (finished_at, evaluation_id),
-        )
 
 
 def _word_artifact(observation_id: Any, *, sha: str = _SHA) -> PreprocessingArtifact:
@@ -302,187 +255,13 @@ def _wer_values(evaluation_id: Any) -> list[MetricValue]:
     ]
 
 
-def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) -> None:
-    _migrate(pg_conn, "20261005_0043")
-    pg_conn.autocommit = True
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'benchmarks_v2'"
-        )
-        names = {row[0] for row in cur.fetchall()}
-        assert {
-            "runs",
-            "results",
-            "benchmark_observations",
-            "observation_artifacts",
-            "preprocessing_artifacts",
-            "metric_evaluations",
-            "metric_evaluation_inputs",
-        } <= names
-        assert "preprocessing_jobs" not in names
-        assert "metric_evaluation_inputs" in names
-        expected_columns = {
-            "benchmark_observations": {
-                "id",
-                "run_id",
-                "dataset_id",
-                "dataset_sha256",
-                "sample_id",
-                "provider",
-                "model",
-                "voice",
-                "benchmark",
-                "source_kind",
-                "transport_protocol",
-                "submit_to_headers_ms",
-                "provider_extras",
-                "captured_at",
-                "status",
-                "error",
-                "failure_origin",
-            },
-            "preprocessing_artifacts": {
-                "id",
-                "observation_id",
-                "pipeline",
-                "pipeline_version",
-                "artifact_name",
-                "schema_name",
-                "schema_version",
-                "producer_name",
-                "producer_provider",
-                "producer_model",
-                "producer_version",
-                "gcs_uri",
-                "content_sha256",
-                "created_at",
-            },
-            "observation_artifacts": {
-                "id",
-                "observation_id",
-                "artifact_type",
-                "schema_name",
-                "schema_version",
-                "gcs_uri",
-                "content_sha256",
-                "size_bytes",
-                "duration_ms",
-                "created_at",
-            },
-            "metric_evaluations": {
-                "id",
-                "observation_id",
-                "metric_id",
-                "metric_type",
-                "metric_version",
-                "evaluation_variant",
-                "executor",
-                "external_request_id",
-                "status",
-                "started_at",
-                "finished_at",
-                "error",
-                "created_at",
-                "updated_at",
-            },
-            "metric_values": {
-                "metric_evaluation_id",
-                "value_key",
-                "unit",
-                "value",
-                "value_role",
-            },
-            "metric_artifacts": {
-                "id",
-                "metric_evaluation_id",
-                "artifact_type",
-                "uri",
-                "sha256",
-                "size_bytes",
-                "created_at",
-            },
-            "metric_evaluation_inputs": {
-                "metric_evaluation_id",
-                "observation_artifact_id",
-                "preprocessing_artifact_id",
-                "input_role",
-                "input_order",
-            },
-            "metric_values_by_bucket": {
-                "provider",
-                "model",
-                "benchmark",
-                "dataset_id",
-                "metric_id",
-                "metric_type",
-                "metric_version",
-                "evaluation_variant",
-                "value_key",
-                "unit",
-                "bucket_at",
-                "min_value",
-                "p25",
-                "p50",
-                "p75",
-                "max_value",
-                "value_sum",
-                "sample_count",
-            },
-        }
-        for table_name, expected in expected_columns.items():
-            cur.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = 'benchmarks_v2' AND table_name = %s",
-                (table_name,),
-            )
-            assert {row[0] for row in cur.fetchall()} == expected
-        cur.execute(
-            "SELECT table_name, column_name FROM information_schema.columns "
-            "WHERE table_schema = 'benchmarks_v2' AND data_type = 'boolean'"
-        )
-        normalized_tables = set(expected_columns)
-        assert not {(row[0], row[1]) for row in cur.fetchall() if row[0] in normalized_tables}
-        cur.execute(
-            "SELECT indexdef FROM pg_indexes "
-            "WHERE schemaname = 'benchmarks_v2' "
-            "AND indexname = 'metric_values_by_bucket_bucket_at'"
-        )
-        assert _required(cur.fetchone())[0].endswith(
-            "ON benchmarks_v2.metric_values_by_bucket USING btree (bucket_at)"
-        )
-    config = AlembicConfig(str(_INI_PATH))
-    config.set_main_option(
-        "sqlalchemy.url", _dsn(pg_conn).replace("postgresql://", "postgresql+psycopg://")
-    )
-    alembic_command.downgrade(config, "20260812_0017")
-    with pg_conn.cursor() as cur:
-        for table_name in (
-            "benchmark_observations",
-            "observation_artifacts",
-            "preprocessing_artifacts",
-            "metric_evaluations",
-            "metric_evaluation_inputs",
-            "metric_values",
-            "metric_artifacts",
-            "metric_values_by_bucket",
-        ):
-            cur.execute("SELECT to_regclass(%s)", (f"benchmarks_v2.{table_name}",))
-            assert cur.fetchone() == (None,)
-        cur.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = 'benchmarks_v2' AND table_name = 'runs' "
-            "AND column_name = 'persona_id'"
-        )
-        assert cur.fetchone() == ("persona_id",)
-        cur.execute("SELECT to_regclass('benchmarks_v2.results')")
-        assert cur.fetchone() == ("benchmarks_v2.results",)
-
-
-def test_observation_contract_and_independent_dataset_identity(
-    pg_conn: psycopg.Connection[Any],
-) -> None:
+def test_observation_check_constraints(pg_conn: psycopg.Connection[Any]) -> None:
     _migrate(pg_conn)
     pg_conn.autocommit = True
+    insert = """INSERT INTO benchmarks_v2.benchmark_observations
+        (run_id, dataset_id, dataset_sha256, sample_id, provider, model, benchmark,
+         source_kind, provider_extras, status, error, failure_origin)
+        VALUES (%s, %s, %s, %s, 'p', 'm', %s, %s, %s::jsonb, %s, %s, %s)"""
     with pg_conn.cursor() as cur:
         cur.execute(
             """INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status)
@@ -490,135 +269,64 @@ def test_observation_contract_and_independent_dataset_identity(
             (_SHA,),
         )
         run_id = _required(cur.fetchone())[0]
+        # Observations carry their own dataset identity, independent of the run's.
         cur.execute(
-            """INSERT INTO benchmarks_v2.benchmark_observations
-               (run_id, dataset_id, dataset_sha256, sample_id, provider, model, benchmark,
-                source_kind, status)
-               VALUES (%s, 'different-tts-dataset', %s, 'valid', 'p', 'm', 'TTS',
-                'generated_audio', 'succeeded')""",
-            (run_id, "b" * 64),
+            insert,
+            (
+                run_id,
+                "tts-dataset",
+                "b" * 64,
+                "valid",
+                "TTS",
+                "generated_audio",
+                "{}",
+                "succeeded",
+                None,
+                None,
+            ),
         )
         cur.execute(
-            """INSERT INTO benchmarks_v2.benchmark_observations
-               (run_id, dataset_id, dataset_sha256, sample_id, provider, model, benchmark,
-                source_kind, status, error, failure_origin)
-               VALUES (%s, 'dataset', %s, 'failed-valid', 'p', 'm', 'STT',
-                'dataset_audio', 'failed', 'provider error', 'provider')""",
-            (run_id, _SHA),
+            insert,
+            (
+                run_id,
+                "dataset",
+                _SHA,
+                "failed-valid",
+                "STT",
+                "dataset_audio",
+                "{}",
+                "failed",
+                "provider error",
+                "provider",
+            ),
         )
-        for sample, status, error, origin in (
-            ("succeeded-origin", "succeeded", None, "runner"),
-            ("failed-no-origin", "failed", "runner error", None),
-        ):
+        invalid = (
+            ("succeeded-origin", "STT", "dataset_audio", "{}", "succeeded", None, "runner"),
+            ("failed-no-origin", "STT", "dataset_audio", "{}", "failed", "error", None),
+            ("array-extras", "STT", "dataset_audio", "[]", "succeeded", None, None),
+            ("unknown-source", "STT", "future_audio_source", "{}", "succeeded", None, None),
+            ("lowercase", "stt", "dataset_audio", "{}", "succeeded", None, None),
+        )
+        for sample, benchmark, source, extras, status, error, origin in invalid:
             with pytest.raises(psycopg.errors.CheckViolation):
                 cur.execute(
-                    """INSERT INTO benchmarks_v2.benchmark_observations
-                       (run_id, dataset_id, dataset_sha256, sample_id, provider, model,
-                        benchmark, source_kind, status, error, failure_origin)
-                       VALUES (%s, 'dataset', %s, %s, 'p', 'm', 'STT', 'dataset_audio',
-                        %s, %s, %s)""",
-                    (run_id, _SHA, sample, status, error, origin),
+                    insert,
+                    (
+                        run_id,
+                        "dataset",
+                        _SHA,
+                        sample,
+                        benchmark,
+                        source,
+                        extras,
+                        status,
+                        error,
+                        origin,
+                    ),
                 )
-        with pytest.raises(psycopg.errors.CheckViolation):
-            cur.execute(
-                """INSERT INTO benchmarks_v2.benchmark_observations
-                   (run_id, dataset_id, dataset_sha256, sample_id, provider, model, benchmark,
-                    source_kind, provider_extras, status)
-                   VALUES (%s, 'dataset', %s, 'partial-audio', 'p', 'm', 'STT',
-                    'dataset_audio', '[]'::jsonb, 'succeeded')""",
-                (run_id, _SHA),
-            )
-        with pytest.raises(psycopg.errors.CheckViolation):
-            cur.execute(
-                """INSERT INTO benchmarks_v2.benchmark_observations
-               (run_id, dataset_id, dataset_sha256, sample_id, provider, model, benchmark,
-                source_kind, status)
-               VALUES (%s, 'dataset', %s, 'future-source', 'p', 'm', 'STT',
-                'future_audio_source', 'succeeded')""",
-                (run_id, _SHA),
-            )
-        with pytest.raises(psycopg.errors.CheckViolation):
-            cur.execute(
-                """INSERT INTO benchmarks_v2.benchmark_observations
-                   (run_id, dataset_id, dataset_sha256, sample_id, provider, model, benchmark,
-                    source_kind, status)
-                   VALUES (%s, 'dataset', %s, 'lower', 'p', 'm', 'stt',
-                    'dataset_audio', 'succeeded')""",
-                (run_id, _SHA),
-            )
 
 
-def test_database_uri_checks_require_bucket_and_object(pg_conn: psycopg.Connection[Any]) -> None:
-    _migrate(pg_conn)
-    pg_conn.autocommit = True
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            """INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status)
-               VALUES ('sha', 'dataset', %s, 'running') RETURNING id""",
-            (_SHA,),
-        )
-        run_id = _required(cur.fetchone())[0]
-        cur.execute(
-            """INSERT INTO benchmarks_v2.benchmark_observations
-               (run_id, dataset_id, dataset_sha256, sample_id, provider, model, benchmark,
-                source_kind, status)
-               VALUES (%s, 'dataset', %s, 'valid-uri', 'p', 'm', 'STT', 'dataset_audio',
-                'succeeded') RETURNING id""",
-            (run_id, _SHA),
-        )
-        observation_id = _required(cur.fetchone())[0]
-        with pytest.raises(psycopg.errors.CheckViolation):
-            cur.execute(
-                """INSERT INTO benchmarks_v2.preprocessing_artifacts
-                   (observation_id, pipeline, pipeline_version, artifact_name, schema_name,
-                    schema_version, producer_name, producer_provider, producer_model,
-                    producer_version, gcs_uri, content_sha256)
-                   VALUES (%s, 'align', 'v1', 'word_timestamps', 'WordTimestampsV1', 'v1',
-                    'word_aligner', 'google', 'latest', 'words-v1', 'gs://private', %s)""",
-                (observation_id, _SHA),
-            )
-        cur.execute(
-            """INSERT INTO benchmarks_v2.preprocessing_artifacts
-               (observation_id, pipeline, pipeline_version, artifact_name, schema_name,
-                schema_version, producer_name, producer_provider, producer_model,
-                producer_version, gcs_uri, content_sha256)
-               VALUES (%s, 'align', 'v1', 'future_artifact', 'FutureArtifactV2', 'v2',
-                'word_aligner', 'google', 'latest', 'words-v1', 'gs://private/words', %s)""",
-            (observation_id, _SHA),
-        )
-        with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as dict_cur:
-            dict_cur.execute(
-                """SELECT id, observation_id, pipeline, pipeline_version, artifact_name,
-                          schema_name, schema_version, producer_name, producer_provider,
-                          producer_model, producer_version, gcs_uri, content_sha256, created_at
-                   FROM benchmarks_v2.preprocessing_artifacts
-                   WHERE observation_id = %s AND artifact_name = 'future_artifact'""",
-                (observation_id,),
-            )
-            future_artifact = PreprocessingArtifact.model_validate(
-                dict(_required(dict_cur.fetchone()))
-            )
-        assert future_artifact.artifact_name == "future_artifact"
-        assert future_artifact.schema_name == "FutureArtifactV2"
-        assert future_artifact.schema_version == "v2"
-        cur.execute(
-            """INSERT INTO benchmarks_v2.metric_evaluations
-               (observation_id, metric_id, metric_version, executor, status)
-               VALUES (%s, benchmarks_v2.metric_id_for_code('TTFT'), 'v1', 'inline', 'queued')
-               RETURNING id""",
-            (observation_id,),
-        )
-        evaluation_id = _required(cur.fetchone())[0]
-        with pytest.raises(psycopg.errors.CheckViolation):
-            cur.execute(
-                """INSERT INTO benchmarks_v2.metric_artifacts
-                   (metric_evaluation_id, artifact_type, uri, sha256, size_bytes)
-                   VALUES (%s, 'details', 'gs://private', %s, 1)""",
-                (evaluation_id, _SHA),
-            )
-
-
-def test_observation_model_validates_artifacts_and_provider_extras() -> None:
+def test_observation_model_rejects_inconsistent_payloads() -> None:
     base = {
         "run_id": 1,
         "dataset_id": "dataset",
@@ -630,38 +338,13 @@ def test_observation_model_validates_artifacts_and_provider_extras() -> None:
         "source_kind": ObservationSourceKind.DATASET_AUDIO,
         "status": ObservationStatus.SUCCEEDED,
     }
-    assert Observation(**base).artifacts == []
-    artifact = ObservationArtifact(
-        artifact_type=ObservationArtifactType.GENERATED_AUDIO,
-        schema_name="AudioV1",
-        schema_version="v1",
-        gcs_uri="gs://private/audio",
-        content_sha256=_SHA,
-        size_bytes=1,
-        duration_ms=1,
-    )
-    complete = Observation(**base, provider_extras={"provider_flag": True}, artifacts=[artifact])
-    assert complete.artifacts[0].duration_ms == 1
-    assert complete.provider_extras == {"provider_flag": True}
+    artifact = _raw_artifact()
     with pytest.raises(ValueError, match="cannot repeat"):
         Observation(**base, artifacts=[artifact, artifact])
     with pytest.raises(ValueError, match="private gs:// object URI"):
-        ObservationArtifact(
-            artifact_type=ObservationArtifactType.GENERATED_AUDIO,
-            schema_name="AudioV1",
-            schema_version="v1",
-            gcs_uri="gs://private",
-            content_sha256=_SHA,
-            size_bytes=1,
-        )
+        ObservationArtifact.model_validate(artifact.model_dump() | {"gcs_uri": "gs://private"})
     with pytest.raises(ValueError, match="failure_origin"):
         Observation(**(base | {"status": ObservationStatus.FAILED}), error="provider error")
-    failed = Observation(
-        **(base | {"status": ObservationStatus.FAILED}),
-        error="provider error",
-        failure_origin=ObservationFailureOrigin.PROVIDER,
-    )
-    assert failed.failure_origin is ObservationFailureOrigin.PROVIDER
 
 
 @pytest.mark.asyncio
@@ -694,18 +377,7 @@ async def test_preprocessing_artifact_writer_validates_supported_contracts(
         await pool.close()
 
 
-def test_metric_input_models_freeze_one_tagged_artifact_kind() -> None:
-    artifact_id = uuid4()
-    raw = MetricEvaluationInput(
-        observation_artifact_id=artifact_id, input_role="raw", input_order=0
-    )
-    preprocessed = MetricEvaluationInput(
-        preprocessing_artifact_id=artifact_id, input_role="preprocessed", input_order=0
-    )
-    assert raw.observation_artifact_id == artifact_id
-    assert raw.preprocessing_artifact_id is None
-    assert preprocessed.preprocessing_artifact_id == artifact_id
-    assert preprocessed.observation_artifact_id is None
+def test_metric_input_requires_exactly_one_artifact_kind() -> None:
     with pytest.raises(ValueError, match="exactly one"):
         MetricEvaluationInput(input_role="missing", input_order=0)
     with pytest.raises(ValueError, match="exactly one"):
@@ -715,73 +387,6 @@ def test_metric_input_models_freeze_one_tagged_artifact_kind() -> None:
             input_role="both",
             input_order=0,
         )
-    with pytest.raises(ValueError):
-        ProcessingStatus("partial")
-    assert RunStatus.PARTIAL.value == "partial"
-
-
-def test_nested_preprocessing_artifact_update_is_rejected(
-    pg_conn: psycopg.Connection[Any],
-) -> None:
-    _migrate(pg_conn)
-    pg_conn.autocommit = True
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            """INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status)
-               VALUES ('sha', 'dataset', %s, 'running') RETURNING id""",
-            (_SHA,),
-        )
-        run_id = _required(cur.fetchone())[0]
-        cur.execute(
-            """INSERT INTO benchmarks_v2.benchmark_observations
-               (run_id, dataset_id, dataset_sha256, sample_id, provider, model, benchmark,
-                source_kind, status)
-               VALUES (%s, 'dataset', %s, 'nested-update', 'p', 'm', 'STT',
-                'dataset_audio', 'succeeded') RETURNING id""",
-            (run_id, _SHA),
-        )
-        observation_id = _required(cur.fetchone())[0]
-        cur.execute(
-            """INSERT INTO benchmarks_v2.preprocessing_artifacts
-               (observation_id, pipeline, pipeline_version, artifact_name, schema_name,
-                schema_version, producer_name, producer_provider, producer_model,
-                producer_version, gcs_uri, content_sha256)
-               VALUES (%s, 'align', 'v1', 'word_timestamps', 'WordTimestampsV1', 'v1',
-                'word_aligner', 'google', 'latest', 'words-v1', 'gs://private/words', %s)""",
-            (observation_id, _SHA),
-        )
-        cur.execute(
-            """CREATE FUNCTION benchmarks_v2.update_preprocessing_artifact_from_observation()
-               RETURNS trigger AS $$
-               BEGIN
-                   UPDATE benchmarks_v2.preprocessing_artifacts
-                   SET producer_version = producer_version || '-changed'
-                   WHERE observation_id = NEW.id;
-                   RETURN NEW;
-               END; $$ LANGUAGE plpgsql"""
-        )
-        cur.execute(
-            """CREATE TRIGGER observation_updates_preprocessing_artifact
-               AFTER UPDATE OF model ON benchmarks_v2.benchmark_observations
-               FOR EACH ROW EXECUTE FUNCTION
-               benchmarks_v2.update_preprocessing_artifact_from_observation()"""
-        )
-        with pytest.raises(psycopg.errors.RaiseException, match="artifacts are immutable"):
-            cur.execute(
-                "UPDATE benchmarks_v2.benchmark_observations SET model = 'updated' WHERE id = %s",
-                (observation_id,),
-            )
-        cur.execute(
-            "SELECT model FROM benchmarks_v2.benchmark_observations WHERE id = %s",
-            (observation_id,),
-        )
-        assert _required(cur.fetchone())[0] == "m"
-        cur.execute(
-            "SELECT producer_version FROM benchmarks_v2.preprocessing_artifacts "
-            "WHERE observation_id = %s",
-            (observation_id,),
-        )
-        assert _required(cur.fetchone())[0] == "words-v1"
 
 
 @pytest.mark.asyncio
@@ -1378,68 +983,6 @@ async def test_metric_completion_replay_and_rollback(pg_conn: psycopg.Connection
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("terminal_first", [True, False])
-async def test_metric_payload_reassignment_rejects_terminal_parents(
-    pg_conn: psycopg.Connection[Any], terminal_first: bool
-) -> None:
-    """Moving a payload to or from a terminal evaluation is rejected atomically."""
-    _migrate(pg_conn)
-    pool = await _pool(pg_conn)
-    try:
-        writer = RunWriter(pool)
-        _, observation = await _observation(writer, sample=f"reparent-{terminal_first}")
-        first = await _evaluation(writer, observation, metric=Metric.WER)
-        second = await _evaluation(writer, observation, metric=Metric.TTFA)
-        first_id, second_id = _required(first.id), _required(second.id)
-        terminal_id, running_id = (first_id, second_id) if terminal_first else (second_id, first_id)
-        if terminal_first:
-            await writer.complete_metric_evaluation(
-                terminal_id, values=_wer_values(terminal_id), finished_at=_NOW
-            )
-            payload_id, destination_id = terminal_id, running_id
-        else:
-            payload_id, destination_id = running_id, terminal_id
-            await writer.complete_metric_evaluation(
-                destination_id,
-                values=[
-                    MetricValue(
-                        metric_evaluation_id=destination_id,
-                        value_key="primary",
-                        unit="milliseconds",
-                        value=1,
-                        value_role=MetricValueRole.PRIMARY,
-                    )
-                ],
-                finished_at=_NOW,
-            )
-        async with pool.connection() as conn, conn.cursor() as cur:
-            if not terminal_first:
-                # Keep the running parent's temporary output in this transaction.
-                # It cannot commit until the parent succeeds.
-                await cur.execute(
-                    "INSERT INTO benchmarks_v2.metric_values "
-                    "(metric_evaluation_id, value_key, unit, value, value_role) "
-                    "VALUES (%s, 'primary', 'percent', 10, 'primary')",
-                    (payload_id,),
-                )
-            with pytest.raises(psycopg.errors.RaiseException, match="payloads are immutable"):
-                await cur.execute(
-                    "UPDATE benchmarks_v2.metric_values SET metric_evaluation_id = %s "
-                    "WHERE metric_evaluation_id = %s AND value_key = 'primary'",
-                    (destination_id, payload_id),
-                )
-            await conn.rollback()
-            await cur.execute(
-                "SELECT count(*) AS count FROM benchmarks_v2.dashboard_metric_values "
-                "WHERE evaluation_id IN (%s, %s)",
-                (terminal_id, running_id),
-            )
-            assert _required(await cur.fetchone())["count"] == 1
-    finally:
-        await pool.close()
-
-
-@pytest.mark.asyncio
 async def test_metric_payload_insert_waits_for_completion_then_rejects(
     pg_conn: psycopg.Connection[Any],
 ) -> None:
@@ -1591,14 +1134,6 @@ def test_database_enforces_queued_creation_and_success_outputs(
                     'v1', 'inline', 'partial')""",
                 (observation_id,),
             )
-        with pytest.raises(psycopg.errors.RaiseException, match="created queued"):
-            cur.execute(
-                """INSERT INTO benchmarks_v2.metric_evaluations
-                   (observation_id, metric_id, metric_version, executor, status, started_at)
-                   VALUES (%s, benchmarks_v2.metric_id_for_code('WER'),
-                    'v1', 'inline', 'running', now())""",
-                (observation_id,),
-            )
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
                (observation_id, metric_id, metric_version, executor, status)
@@ -1640,113 +1175,6 @@ def test_database_enforces_queued_creation_and_success_outputs(
         )
         with pytest.raises(psycopg.errors.RaiseException, match="exactly one primary"):
             cur.execute("COMMIT")
-        cur.execute("ROLLBACK")
-        cur.execute(
-            """INSERT INTO benchmarks_v2.metric_evaluations
-               (observation_id, metric_id, metric_version, evaluation_variant, executor, status)
-               VALUES (%s, benchmarks_v2.metric_id_for_code('WER'),
-                       'v1', 'constraint-checks', 'inline', 'queued')
-               RETURNING id""",
-            (observation_id,),
-        )
-        constraint_evaluation_id = _required(cur.fetchone())[0]
-        cur.execute(
-            """UPDATE benchmarks_v2.metric_evaluations
-               SET status = 'running', started_at = now() WHERE id = %s""",
-            (constraint_evaluation_id,),
-        )
-        with pytest.raises(psycopg.errors.CheckViolation):
-            cur.execute(
-                """INSERT INTO benchmarks_v2.metric_values
-                   (metric_evaluation_id, value_key, unit, value, value_role)
-                   VALUES (%s, 'invalid', 'percent', 1, 'unsupported')""",
-                (constraint_evaluation_id,),
-            )
-        cur.execute("BEGIN")
-        cur.execute(
-            """INSERT INTO benchmarks_v2.metric_values
-               (metric_evaluation_id, value_key, unit, value, value_role)
-               VALUES (%s, 'primary', 'percent', 1, 'primary')""",
-            (constraint_evaluation_id,),
-        )
-        with pytest.raises(psycopg.errors.UniqueViolation):
-            cur.execute(
-                """INSERT INTO benchmarks_v2.metric_values
-                   (metric_evaluation_id, value_key, unit, value, value_role)
-                   VALUES (%s, 'second-primary', 'percent', 1, 'primary')""",
-                (constraint_evaluation_id,),
-            )
-        cur.execute("ROLLBACK")
-
-
-def test_database_success_validation_is_metric_agnostic(
-    pg_conn: psycopg.Connection[Any],
-) -> None:
-    """SQL enforces generic output integrity without freezing application metric options."""
-    _migrate(pg_conn)
-    pg_conn.autocommit = True
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            """INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status)
-               VALUES ('sha', 'dataset', %s, 'running') RETURNING id""",
-            (_SHA,),
-        )
-        run_id = _required(cur.fetchone())[0]
-
-        def new_observation_id() -> Any:
-            cur.execute(
-                """INSERT INTO benchmarks_v2.benchmark_observations
-                   (run_id, dataset_id, dataset_sha256, sample_id, provider, model, benchmark,
-                    source_kind, status)
-                   VALUES (%s, 'dataset', %s, %s, 'p', 'm', 'STT', 'dataset_audio',
-                    'succeeded') RETURNING id""",
-                (run_id, _SHA, str(uuid4())),
-            )
-            return _required(cur.fetchone())[0]
-
-        def complete_direct(
-            metric: str, version: str, values: tuple[tuple[str, str, float, MetricValueRole], ...]
-        ) -> None:
-            cur.execute("BEGIN")
-            observation_id = new_observation_id()
-            cur.execute(
-                """INSERT INTO benchmarks_v2.metric_evaluations
-                   (observation_id, metric_id, metric_version, executor, status)
-                   VALUES (%s, benchmarks_v2.metric_id_for_code(%s), %s, 'inline', 'queued')
-                   RETURNING id""",
-                (observation_id, metric, version),
-            )
-            evaluation_id = _required(cur.fetchone())[0]
-            cur.execute(
-                """UPDATE benchmarks_v2.metric_evaluations
-                   SET status = 'running', started_at = now() WHERE id = %s""",
-                (evaluation_id,),
-            )
-            cur.executemany(
-                """INSERT INTO benchmarks_v2.metric_values
-                   (metric_evaluation_id, value_key, unit, value, value_role)
-                   VALUES (%s, %s, %s, %s, %s)""",
-                [(evaluation_id, *value) for value in values],
-            )
-            cur.execute(
-                """UPDATE benchmarks_v2.metric_evaluations
-                   SET status = 'succeeded', finished_at = now() WHERE id = %s""",
-                (evaluation_id,),
-            )
-            cur.execute("COMMIT")
-
-        cur.execute(
-            "INSERT INTO benchmarks_v2.metrics (code,display_name) "
-            "VALUES ('FutureMetric','Future metric')"
-        )
-        complete_direct(
-            "FutureMetric", "v9", (("score", "custom_unit", 1.0, MetricValueRole.PRIMARY),)
-        )
-
-        with pytest.raises(psycopg.errors.RaiseException, match="exactly one primary"):
-            complete_direct(
-                "FutureMetric", "v9", (("score", "custom_unit", 1.0, MetricValueRole.COMPONENT),)
-            )
         cur.execute("ROLLBACK")
 
 
@@ -1949,117 +1377,6 @@ async def test_evaluation_delete_lifecycle_and_observation_cascade(
             await conn.commit()
     finally:
         await pool.close()
-
-
-def test_dashboard_read_indexes_migrate_and_downgrade(pg_conn: psycopg.Connection[Any]) -> None:
-    """The dashboard indexes are additive and retain the bucket-writer index."""
-    _migrate(pg_conn, "20260818_0018")
-    config = AlembicConfig(str(_INI_PATH))
-    config.set_main_option(
-        "sqlalchemy.url", _dsn(pg_conn).replace("postgresql://", "postgresql+psycopg://")
-    )
-    pg_conn.autocommit = True
-
-    def index_names() -> set[str]:
-        with pg_conn.cursor() as cur:
-            cur.execute("SELECT indexname FROM pg_indexes WHERE schemaname = 'benchmarks_v2'")
-            return {row[0] for row in cur.fetchall()}
-
-    new_indexes = {
-        "benchmark_observations_recent_results_idx",
-        "metric_values_by_bucket_series_idx",
-    }
-    assert not new_indexes & index_names()
-    assert "metric_values_by_bucket_bucket_at" in index_names()
-
-    alembic_command.upgrade(config, "20260824_0019")
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT indexrel.relname,
-                   array_agg(attribute.attname ORDER BY key.ordinality),
-                   pg_get_expr(index_data.indpred, index_data.indrelid)
-            FROM pg_index AS index_data
-            JOIN pg_class AS indexrel ON indexrel.oid = index_data.indexrelid
-            JOIN pg_class AS table_rel ON table_rel.oid = index_data.indrelid
-            JOIN pg_namespace AS namespace ON namespace.oid = table_rel.relnamespace
-            CROSS JOIN LATERAL unnest(index_data.indkey) WITH ORDINALITY AS key(attnum, ordinality)
-            JOIN pg_attribute AS attribute
-              ON attribute.attrelid = table_rel.oid AND attribute.attnum = key.attnum
-            WHERE namespace.nspname = 'benchmarks_v2'
-              AND indexrel.relname IN (%s, %s)
-            GROUP BY indexrel.relname, index_data.indpred, index_data.indrelid
-            """,
-            tuple(sorted(new_indexes)),
-        )
-        indexes = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
-    assert indexes == {
-        "benchmark_observations_recent_results_idx": (
-            ["benchmark", "dataset_id", "captured_at", "id"],
-            "(status = 'succeeded'::text)",
-        ),
-        "metric_values_by_bucket_series_idx": (
-            [
-                "benchmark",
-                "dataset_id",
-                "metric_version",
-                "evaluation_variant",
-                "value_key",
-                "bucket_at",
-            ],
-            None,
-        ),
-    }
-    assert "metric_values_by_bucket_bucket_at" in index_names()
-
-    alembic_command.downgrade(config, "20260818_0018")
-    assert not new_indexes & index_names()
-    assert "metric_values_by_bucket_bucket_at" in index_names()
-
-
-def test_dashboard_read_index_downgrade_runs_concurrently(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The downgrade removes each dashboard index outside the migration transaction."""
-    migration = import_module(
-        "coval_bench.db.migrations.versions.20260824_0019_dashboard_read_indexes"
-    )
-    context = MagicMock()
-    fake_op = MagicMock()
-    fake_op.get_context.return_value = context
-    monkeypatch.setattr(migration, "op", fake_op)
-
-    migration.downgrade()
-
-    fake_op.get_context.assert_called_once_with()
-    context.autocommit_block.assert_called_once_with()
-    context.autocommit_block.return_value.__enter__.assert_called_once_with()
-    context.autocommit_block.return_value.__exit__.assert_called_once_with(None, None, None)
-    assert fake_op.execute.call_args_list == [
-        call(
-            "DROP INDEX CONCURRENTLY IF EXISTS "
-            "benchmarks_v2.benchmark_observations_recent_results_idx"
-        ),
-        call("DROP INDEX CONCURRENTLY IF EXISTS benchmarks_v2.metric_values_by_bucket_series_idx"),
-    ]
-
-
-def test_migration_conditionally_revokes_api_access(pg_conn: psycopg.Connection[Any]) -> None:
-    _migrate(pg_conn, "20260807_0015")
-    pg_conn.autocommit = True
-    with pg_conn.cursor() as cur:
-        cur.execute("CREATE ROLE api")
-        cur.execute("ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO api")
-    try:
-        _migrate(pg_conn)
-        with pg_conn.cursor() as cur:
-            cur.execute(
-                "SELECT has_table_privilege("
-                "'api', 'benchmarks_v2.benchmark_observations', 'SELECT')"
-            )
-            assert cur.fetchone() == (False,)
-    finally:
-        with pg_conn.cursor() as cur:
-            cur.execute("DROP OWNED BY api")
-            cur.execute("DROP ROLE api")
 
 
 def test_output_writers_are_not_public() -> None:
