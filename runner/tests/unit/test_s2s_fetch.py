@@ -223,15 +223,12 @@ def _stub_writer() -> MagicMock:
     writer.reserve_run_id = AsyncMock(return_value=1)
     writer.ensure_capture_run = AsyncMock(return_value=writer.start_run.return_value)
     writer.conversation_ttft = AsyncMock(return_value={})
-    writer.record_results = AsyncMock()
     writer.capture_results = AsyncMock()
     writer.finish_run = AsyncMock()
     writer.finish_run_exact = AsyncMock()
     writer.mark_run_capture_pending = AsyncMock()
     writer.preflight_required_capture_schema = AsyncMock()
-    writer.refresh_bucket = AsyncMock()
     writer.rebuild_run_rollup = AsyncMock()
-    writer.refresh_stats_matviews = AsyncMock()
     writer.refresh_window_views = AsyncMock(return_value="published")
     return writer
 
@@ -561,8 +558,6 @@ async def test_ingest_run_slots_by_create_time() -> None:
         )
     assert status is RunStatus.SUCCEEDED
     assert writer.start_run.await_args.kwargs["scheduled_at"] == datetime(2026, 7, 7, 0, tzinfo=UTC)
-    writer.record_results.assert_not_awaited()
-    writer.refresh_bucket.assert_not_awaited()
     writer.rebuild_run_rollup.assert_awaited_once_with(1)
     assert writer.finish_run.await_args.kwargs["status"] is RunStatus.SUCCEEDED
 
@@ -585,7 +580,6 @@ async def test_ingest_run_partial_and_failed() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.PARTIAL
-    writer.refresh_bucket.assert_not_awaited()
     writer.rebuild_run_rollup.assert_awaited_once_with(1)
 
     writer = _stub_writer()
@@ -600,7 +594,6 @@ async def test_ingest_run_partial_and_failed() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.FAILED
-    writer.refresh_bucket.assert_not_awaited()
     writer.rebuild_run_rollup.assert_not_awaited()
 
 
@@ -626,7 +619,6 @@ async def test_ingest_run_rollup_refresh_failure_does_not_change_status(
 
     assert status is RunStatus.SUCCEEDED
     writer.finish_run.assert_awaited_once_with(1, status=RunStatus.SUCCEEDED)
-    writer.refresh_bucket.assert_not_awaited()
     writer.rebuild_run_rollup.assert_awaited_once_with(1)
 
 
@@ -682,7 +674,6 @@ async def test_ingest_run_ignores_error_status() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -837,7 +828,6 @@ async def test_fetch_one_provider_stale_wins_over_backfill() -> None:
     async with _fake_client(list_json, _run_json(values)) as client:
         status, ingested = await _fetch(client, writer)
     assert (status, ingested) == (RunStatus.FAILED, 1)
-    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -948,7 +938,6 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
 
     # only openai runs (gemini unset), and it fully succeeds.
     assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
-    writer.refresh_stats_matviews.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1341,7 +1330,6 @@ async def test_fetch_and_write_v2v_noop_skips_matview_refresh(
     statuses = await fetch_v2v.fetch_and_write_v2v(settings)
 
     assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
-    writer.refresh_stats_matviews.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2134,7 +2122,6 @@ async def test_ingest_run_backfill_instruction_absent_is_noop() -> None:
         )
     assert status is None  # nothing to write -> no run row, stays retryable
     writer.start_run.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2179,7 +2166,6 @@ async def test_ingest_run_latency_required_on_the_standard_caller() -> None:
         )
     assert status is None
     writer.start_run.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2204,7 +2190,6 @@ async def test_ingest_run_rejects_duplicate_ids_in_the_anchor() -> None:
         )
     assert status is None
     writer.start_run.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2232,7 +2217,6 @@ async def test_ingest_run_latency_absent_instruction_without_rows_is_noop(
         )
     assert status is None
     writer.start_run.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2311,7 +2295,6 @@ async def test_ingest_run_no_metrics_present_is_noop() -> None:
         )
     assert status is None
     writer.start_run.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2457,7 +2440,6 @@ async def test_ingest_run_dual_writes_one_observation_per_conversation(
     assert calls["R1/s1"]["dataset_sha256"] == hashlib.sha256(b"test-set:persona").hexdigest()
     assert calls["R1/s1"]["executor"] is MetricExecutor.COVAL_API
     assert calls["R1/s1"]["captured_at"] == calls["R1/s2"]["captured_at"]
-    writer.record_results.assert_not_awaited()
     for kwargs in calls.values():
         assert kwargs["db_retry_attempts"] == 3
         assert not any("semaphore" in key for key in kwargs)
@@ -2520,7 +2502,6 @@ async def test_ingest_run_normalized_failure_does_not_fallback_to_legacy_rows(
         )
 
     assert status is RunStatus.SUCCEEDED
-    writer.record_results.assert_not_awaited()
     writer.finish_run.assert_awaited_once()
     dual_write.assert_awaited_once()
 
@@ -2586,7 +2567,6 @@ async def test_required_s2s_and_llm_capture_precedes_legacy_and_marks_backlog_pa
         )
 
     assert status is RunStatus.PARTIAL
-    writer.record_results.assert_not_awaited()
     writer.start_run.assert_not_awaited()
     writer.reserve_run_id.assert_awaited_once()
     writer.ensure_capture_run.assert_awaited_once()

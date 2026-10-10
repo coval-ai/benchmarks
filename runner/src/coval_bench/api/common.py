@@ -65,15 +65,3 @@ def has_enough_samples(benchmark: str, sample_count: int) -> bool:
     rather than silently read as "n/a" until someone adds a floor for it.
     """
     return sample_count >= MIN_SCORED_SAMPLES.get(benchmark, 0)
-
-
-# Bucket expression for chart timestamps: the run's cron trigger time,
-# falling back to created_at floored to the scheduler period for legacy rows.
-# Shared by /results and /results/aggregates so both bucket identically.
-# Expects ``r`` (results) and ``rn`` (runs) table aliases and a
-# ``schedule_period`` query parameter.
-SCHEDULED_AT_BUCKET_SQL = (
-    "COALESCE(rn.scheduled_at,"
-    " to_timestamp(floor(extract(epoch FROM r.created_at) / %(schedule_period)s)"
-    " * %(schedule_period)s))"
-)

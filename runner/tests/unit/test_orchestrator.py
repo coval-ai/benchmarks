@@ -193,14 +193,11 @@ def _make_stub_writer(run: Run) -> MagicMock:
     writer.start_run = AsyncMock(return_value=run)
     writer._normalized_rows = []
     writer.capture_results = AsyncMock()
-    writer.record_results = AsyncMock()
     writer.finish_run = AsyncMock()
     writer.finish_run_exact = writer.finish_run
     writer.mark_run_capture_pending = AsyncMock()
     writer.preflight_required_capture_schema = AsyncMock()
-    writer.refresh_stats_matviews = AsyncMock()
     writer.refresh_window_views = AsyncMock(return_value="published")
-    writer.refresh_bucket = AsyncMock()
     writer.rebuild_run_rollup = AsyncMock()
     writer.pool_diagnostics = MagicMock(return_value={"pool_size": 0})
     return writer
@@ -442,8 +439,6 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings, snapshot_fail
     assert writer.finish_run.await_args.kwargs["error"] is None
     writer.refresh_window_views.assert_awaited_once_with(1)
     writer.rebuild_run_rollup.assert_awaited_once_with(1)
-    writer.refresh_stats_matviews.assert_not_awaited()
-    writer.refresh_bucket.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +490,6 @@ async def test_partial_run(audio_file: Path, settings: Settings) -> None:
     assert writer.finish_run.await_args.kwargs["status"] is RunStatus.PARTIAL
     assert writer.finish_run.await_args.kwargs["error"] is None
     writer.refresh_window_views.assert_awaited_once_with(1)
-    writer.refresh_bucket.assert_not_awaited()
     writer.rebuild_run_rollup.assert_awaited_once_with(1)
 
 
@@ -561,7 +555,6 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
     assert writer.finish_run.await_args.kwargs["status"] is RunStatus.FAILED
     assert writer.finish_run.await_args.kwargs["error"] is None
     writer.refresh_window_views.assert_not_awaited()
-    writer.refresh_bucket.assert_not_awaited()
     writer.rebuild_run_rollup.assert_not_awaited()
 
 
@@ -907,7 +900,6 @@ async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
     assert max_concurrent <= 8, f"max concurrent was {max_concurrent}"
     assert persistence_max <= 8
     dual_write.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
     assert writer.capture_results.await_count == provider_cls.call_count
     assert writer.capture_results.await_count > 8
     assert summary.total_results >= 50 * 3
@@ -1879,7 +1871,7 @@ async def test_incremental_flush_persists_completed_tasks(
 ) -> None:
     """Each provider×item task flushes its own results — completed tasks are
     persisted before later tasks run, so a mid-run cancellation cannot lose
-    them. Asserts ordering: ``record_results`` is awaited *during* gather, not
+    them. Asserts ordering: ``capture_results`` is awaited *during* gather, not
     once at the end after all tasks finish.
     """
     good = _good_transcription()
@@ -1921,10 +1913,10 @@ async def test_incremental_flush_persists_completed_tasks(
     writer.capture_results = AsyncMock(side_effect=_record_and_observe)
 
     async def _release_after_a_persisted() -> None:
-        # Wait until provider A's record_results has been awaited at least once,
+        # Wait until provider A's capture_results has been awaited at least once,
         # then release provider B. If persistence were batched at end-of-run,
         # this would deadlock (provider B waits for release, gather waits for B,
-        # record_results never fires).
+        # capture_results never fires).
         await provider_b_started.wait()
         while writer.capture_results.await_count < 1:
             await asyncio.sleep(0.01)
@@ -1952,7 +1944,7 @@ async def test_incremental_flush_persists_completed_tasks(
     # At least two tasks → at least two flushes (default matrix has extra
     # deepgram/elevenlabs entries that the override map merges through).
     assert writer.capture_results.await_count >= 2
-    # The releaser only fired record_results once provider A had been persisted
+    # The releaser only fired capture_results once provider A had been persisted
     # — proving we don't wait for B before flushing A.
     assert provider_b_release.is_set()
 
@@ -2026,7 +2018,6 @@ async def test_sigterm_finalizes_run_as_partial(audio_file: Path, settings: Sett
     finish_kwargs = writer.finish_run.await_args.kwargs
     assert finish_kwargs["status"] == RunStatus.PARTIAL
     assert "sigterm" in (finish_kwargs.get("error") or "").lower()
-    writer.refresh_bucket.assert_not_awaited()
     writer.rebuild_run_rollup.assert_awaited_once_with(run.id)
 
 
@@ -3412,10 +3403,10 @@ async def test_sigterm_reliability_keeps_completed_items(
     run = _make_run()
     writer = _make_stub_writer(run)
 
-    async def record_results(*args: Any, **kwargs: Any) -> None:
+    async def capture_results(*args: Any, **kwargs: Any) -> None:
         persisted.set()
 
-    writer.capture_results.side_effect = record_results
+    writer.capture_results.side_effect = capture_results
 
     async def interrupt() -> None:
         await asyncio.wait_for(hanging.wait(), 5)
@@ -3746,7 +3737,6 @@ async def test_disabled_capture_fails_before_provider_or_client(
     storage_client.assert_not_called()
     provider.assert_not_called()
     writer.start_run.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3772,7 +3762,6 @@ async def test_missing_manifest_fails_before_provider_or_run(
             await run_benchmarks(settings=settings, benchmark_kind=benchmark_kind, smoke=True)
     provider.assert_not_called()
     writer.start_run.assert_not_awaited()
-    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3835,7 +3824,6 @@ async def test_tts_normalized_failure_preserves_audio_without_legacy_fallback(
     dual_write.assert_awaited_once()
     assert audio_existed_during_write == [True]
     assert not audio_file.exists()
-    writer.record_results.assert_not_awaited()
     writer.capture_results.assert_not_awaited()
     assert results
     assert dual_write.await_args is not None
@@ -3899,7 +3887,6 @@ async def test_tts_cancellation_propagates_after_audio_cleanup(
             )
 
     assert not audio_file.exists()
-    writer.record_results.assert_not_awaited()
     writer.capture_results.assert_not_awaited()
 
 
@@ -4062,7 +4049,6 @@ async def test_required_tts_cleanup_waits_for_durable_capture_ack(
 
     persist.assert_awaited_once()
     assert (not audio_file.exists()) is audio_removed
-    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio

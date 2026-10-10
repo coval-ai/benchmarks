@@ -59,6 +59,34 @@ async def _pool(
     return pool
 
 
+async def _insert_legacy(
+    pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]],
+    results: list[Result],
+) -> None:
+    async with pool.connection() as conn:
+        await conn.cursor().executemany(
+            """INSERT INTO benchmarks_v2.results
+               (run_id, provider, model, benchmark, metric_type, metric_value,
+                metric_units, audio_filename, status, error)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            [
+                (
+                    r.run_id,
+                    r.provider,
+                    r.model,
+                    r.benchmark,
+                    r.metric_type,
+                    r.metric_value,
+                    r.metric_units,
+                    r.audio_filename,
+                    r.status,
+                    r.error,
+                )
+                for r in results
+            ],
+        )
+
+
 def _report(**overrides: object) -> S2SAuditReport:
     values: dict[str, object] = {
         "bounds": {"legacy_result_id_min": 1, "legacy_result_id_max": 2},
@@ -137,7 +165,7 @@ def test_audit_presence_ignores_multiplicity_and_reports_metadata(
                 audio_filename="COVAL-1/sim-1",
                 status=ResultStatus.SUCCESS,
             )
-            await writer.record_results([legacy, legacy])
+            await _insert_legacy(pool, [legacy, legacy])
             await writer.finish_run(legacy_run.id, status=RunStatus.SUCCEEDED)
 
             run = await writer.start_run(dataset_id="s2s", dataset_sha256="b" * 64)
@@ -209,7 +237,7 @@ def test_audit_reports_bidirectional_gaps_and_unusable_identities(
                 status=ResultStatus.FAILED,
                 error="provider failed",
             )
-            await writer.record_results([legacy])
+            await _insert_legacy(pool, [legacy])
             valid_legacy = legacy.model_copy(
                 update={
                     "audio_filename": "LEGACY-ONLY/sim-1",
@@ -218,7 +246,7 @@ def test_audit_reports_bidirectional_gaps_and_unusable_identities(
                     "error": None,
                 }
             )
-            await writer.record_results([valid_legacy])
+            await _insert_legacy(pool, [valid_legacy])
             await writer.finish_run(legacy_run.id, status=RunStatus.SUCCEEDED)
 
             for sample_id in ("EXTRA/sim-1", "/sim-2", "slashless"):

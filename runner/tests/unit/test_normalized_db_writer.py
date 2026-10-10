@@ -336,7 +336,7 @@ async def _run_dual_write_retry_case(
 
 
 @pytest.mark.asyncio
-async def test_exact_capture_replay_serializes_and_promotes_pending_run(
+async def test_capture_recovery_promotes_pending_run(
     pg_conn: psycopg.Connection[Any],
 ) -> None:
     _migrate(pg_conn)
@@ -345,60 +345,6 @@ async def test_exact_capture_replay_serializes_and_promotes_pending_run(
         writer = RunWriter(pool)
         run = await writer.start_run(dataset_id="stt-v1", dataset_sha256=_SHA, scheduled_at=_NOW)
         run_id = _required(run.id)
-        result = _dual_result(run_id)
-        captured_at = _NOW + timedelta(seconds=1)
-        first_ids = await writer.reserve_result_ids(1)
-
-        await asyncio.gather(
-            writer.record_results_exact(
-                [result],
-                created_at=captured_at,
-                capture_identity="capture-one",
-                result_ids=first_ids,
-            ),
-            writer.record_results_exact(
-                [result],
-                created_at=captured_at,
-                capture_identity="capture-one",
-                result_ids=first_ids,
-            ),
-        )
-        async with pool.connection() as conn:
-            count = await (
-                await conn.execute(
-                    "SELECT count(*) FROM benchmarks_v2.results WHERE run_id = %s",
-                    (run_id,),
-                )
-            ).fetchone()
-        assert count is not None
-        assert count["count"] == 1
-
-        conflicting = result.model_copy(update={"metric_value": 11.0})
-        with pytest.raises(ValueError, match="conflicts"):
-            await writer.record_results_exact(
-                [conflicting],
-                created_at=captured_at,
-                capture_identity="capture-one",
-                result_ids=first_ids,
-            )
-
-        second_ids = await writer.reserve_result_ids(1)
-        await writer.record_results_exact(
-            [result],
-            created_at=captured_at,
-            capture_identity="capture-two",
-            result_ids=second_ids,
-        )
-        async with pool.connection() as conn:
-            count = await (
-                await conn.execute(
-                    "SELECT count(*) FROM benchmarks_v2.results WHERE run_id = %s",
-                    (run_id,),
-                )
-            ).fetchone()
-        assert count is not None
-        assert count["count"] == 2
-
         await writer.insert_observation(
             Observation(
                 run_id=run_id,
@@ -450,7 +396,6 @@ def test_dual_write_retries_ambiguous_database_operations(
     pg_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
     _migrate(pg_conn)
-    import asyncio
 
     asyncio.run(_run_dual_write_retry_case(pg_conn, monkeypatch, mode))
 

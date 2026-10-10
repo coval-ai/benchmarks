@@ -48,7 +48,6 @@ __all__ = [
     "MetricExecutor",
     "MetricValue",
     "MetricValueRole",
-    "MetricValueBucket",
     "TimestampArtifactSchema",
     "TimestampArtifactName",
     "MetricEvaluationInput",
@@ -280,35 +279,6 @@ class MetricArtifact(BaseModel):
     created_at: datetime | None = None
 
     _validate_uri = field_validator("uri")(_private_gs_uri)
-
-
-class MetricValueBucket(BaseModel):
-    provider: str = Field(min_length=1)
-    model: str = Field(min_length=1)
-    benchmark: Benchmark
-    dataset_id: str = Field(min_length=1)
-    metric_type: str = Field(min_length=1)
-    metric_version: str = Field(min_length=1)
-    evaluation_variant: str = Field(min_length=1)
-    value_key: str = Field(min_length=1)
-    unit: str = Field(min_length=1)
-    bucket_at: datetime
-    min_value: float
-    p25: float
-    p50: float
-    p75: float
-    max_value: float
-    value_sum: float
-    sample_count: int = Field(gt=0)
-
-    @model_validator(mode="after")
-    def _valid_percentiles(self) -> MetricValueBucket:
-        values = (self.min_value, self.p25, self.p50, self.p75, self.max_value, self.value_sum)
-        if not all(math.isfinite(value) for value in values):
-            raise ValueError("bucket values must be finite")
-        if not self.min_value <= self.p25 <= self.p50 <= self.p75 <= self.max_value:
-            raise ValueError("bucket percentiles must be ordered")
-        return self
 
 
 class RunStatus(StrEnum):
