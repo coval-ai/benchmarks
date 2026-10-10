@@ -106,8 +106,6 @@ class Settings(BaseSettings):
     # boundary.  It is intentionally opt-in and never enables dual writes by
     # itself.
     normalized_capture_required: bool = False
-    # Dashboard reads can be validated independently from additive capture.
-    normalized_dashboard_reads_enabled: bool = False
     # Fernet key shared by API instances for authenticated results cursors.
     # Missing or malformed configuration fails closed when /v2/results is called.
     results_cursor_key: SecretStr | None = None

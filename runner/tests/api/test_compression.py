@@ -10,32 +10,31 @@ uncompressed, which returns a 500. GZipMiddleware keeps it well under.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from tests.api.conftest import _fill_buckets, _insert_result, _insert_run, _refresh_mv
+from tests.api.conftest import (
+    _fill_timeline_buckets,
+    _insert_run,
+    _insert_value,
+    _publish_windows,
+)
 
 AppFactory = Callable[[dict[str, str] | None], Awaitable[FastAPI]]
 
 
 async def test_large_aggregates_response_is_gzipped(client: AsyncClient, postgresql: Any) -> None:
     """A response over the size threshold is gzip-encoded and still decodes."""
-    run_id = await _insert_run(postgresql)
+    run_id = await _insert_run(postgresql, scheduled_at=datetime.now(UTC))
     for i in range(12):
         for value in (1.0, 2.0, 3.0, 4.0):
-            await _insert_result(
-                postgresql,
-                run_id,
-                provider=f"prov{i}",
-                model=f"model{i}",
-                metric_type="WER",
-                metric_value=value,
-            )
-    await _refresh_mv(postgresql)
-    await _fill_buckets(postgresql)
+            await _insert_value(postgresql, run_id, value, provider=f"prov{i}", model=f"model{i}")
+    await _fill_timeline_buckets(postgresql)
+    await _publish_windows(postgresql)
 
     response = await client.get(
         "/v1/results/aggregates",
@@ -49,8 +48,9 @@ async def test_large_aggregates_response_is_gzipped(client: AsyncClient, postgre
     assert len(response.json()["model_stats"]) == 12
 
 
-async def test_small_response_is_not_compressed(client: AsyncClient) -> None:
+async def test_small_response_is_not_compressed(client: AsyncClient, postgresql: Any) -> None:
     """Responses under the size threshold are sent uncompressed."""
+    await _publish_windows(postgresql)
     response = await client.get(
         "/v1/results/aggregates",
         params={"benchmark": "STT"},

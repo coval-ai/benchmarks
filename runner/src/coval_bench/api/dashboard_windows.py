@@ -63,17 +63,12 @@ async def require_window_state(conn: AsyncConnection[Any]) -> Snapshot:
 
 
 @asynccontextmanager
-async def dashboard_read(
-    pool: AsyncConnectionPool[Any], *, saved: bool
-) -> AsyncIterator[AsyncConnection[Any]]:
+async def dashboard_read(pool: AsyncConnectionPool[Any]) -> AsyncIterator[AsyncConnection[Any]]:
     """Read saved state and rows in one transaction, including autocommit pools."""
     try:
         async with pool.connection() as conn, conn.transaction():
             conn.row_factory = dict_row
-            if saved:
-                await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             yield conn
     except (UndefinedTable, ObjectNotInPrerequisiteState) as exc:
-        if not saved:
-            raise
         raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready") from exc

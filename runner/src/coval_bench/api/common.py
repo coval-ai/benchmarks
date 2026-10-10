@@ -15,27 +15,12 @@ BenchmarkLiteral = Literal["STT", "TTS", "S2S", "LLM"]
 WindowLiteral = Literal["24h", "7d", "30d"]
 StatisticLiteral = Literal["default", "p50", "p90", "p95", "p100"]
 
-NORMALIZED_BENCHMARKS: frozenset[str] = frozenset({"STT", "TTS", "S2S", "LLM"})
-
-
-def reads_normalized(enabled: bool, benchmark: str) -> bool:
-    return enabled and benchmark in NORMALIZED_BENCHMARKS
-
-
 # Fixed interval strings — looked up by Python, never user-interpolated into
 # SQL. Used by live queries (the aggregates series block).
 WINDOW_INTERVALS: dict[str, str] = {
     "24h": "24 hours",
     "7d": "7 days",
     "30d": "30 days",
-}
-
-# Per-window stats materialized views (schema-qualified). Looked up by Python
-# from the validated WindowLiteral, never user-interpolated into SQL.
-LEGACY_WINDOW_VIEWS: dict[str, str] = {
-    "24h": "benchmarks_v2.results_24h",
-    "7d": "benchmarks_v2.results_7d",
-    "30d": "benchmarks_v2.results_30d",
 }
 
 # Fewest scored samples a headline stat may rest on, per modality. Below this a

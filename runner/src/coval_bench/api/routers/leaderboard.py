@@ -11,9 +11,7 @@ Metric/benchmark compatibility:
 - V2V  + S2S
 - TTFT + LLM
 
-Every window queries its materialized view (``benchmarks_v2.results_24h``/
-``results_7d``/``results_30d``), refreshed by the runner at the end of each
-benchmark run — read-only here. With normalized reads enabled it ranks on the
+Every window reads its published dashboard snapshot and ranks on the
 aggregates' headline value.
 """
 
@@ -29,19 +27,17 @@ from starlette.requests import Request
 
 from coval_bench import scenarios
 from coval_bench.api.common import (
-    LEGACY_WINDOW_VIEWS,
     WINDOW_INTERVALS,
     BenchmarkLiteral,
     WindowLiteral,
     has_enough_samples,
-    reads_normalized,
 )
 from coval_bench.api.dashboard_windows import dashboard_read, require_window_state
-from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
+from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
-from coval_bench.config import DATASET_ALL, Settings
+from coval_bench.config import DATASET_ALL
 from coval_bench.db.dashboard_windows import WINDOW_VIEWS
 from coval_bench.registries import is_metric_excluded
 from coval_bench.registries.benchmarks import Benchmark
@@ -71,22 +67,18 @@ _PRIMARY_DATASET_BY_BENCHMARK = {
     b.value: scenarios.ACTIVE.primary_dataset(b) for b in (Benchmark.S2S, Benchmark.LLM)
 }
 
-_MV_SQL_TEMPLATE = """
+_LEADERBOARD_SQL = """
     SELECT provider, model,
            avg_value AS avg,
            p50,
            p95,
            sample_count AS n
-    FROM {view}
-    WHERE metric_type = %(metric)s
+    FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id
+    WHERE m.code = %(metric)s
       AND benchmark = %(benchmark)s
       AND dataset_id = %(dataset)s
     ORDER BY avg_value ASC
 """
-_SAVED_MV_SQL_TEMPLATE = _MV_SQL_TEMPLATE.replace(
-    "FROM {view}",
-    "FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id",
-).replace("WHERE metric_type = %(metric)s", "WHERE m.code = %(metric)s")
 
 
 @router.get("/leaderboard", response_model=LeaderboardResponse)
@@ -99,14 +91,13 @@ async def get_leaderboard(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
-    settings: Settings = Depends(get_settings),
 ) -> LeaderboardResponse:
     """Return leaderboard entries sorted ascending by average metric value.
 
     Args:
         metric: One of WER, TTFA, TTFT, TTFS.
         benchmark: One of STT, TTS.
-        window: Time window — each is served by its materialized view.
+        window: Time window — each is served by its published snapshot.
 
     Returns:
         ``{"metric": ..., "window": ..., "entries": [LeaderboardEntry, ...]}``
@@ -127,17 +118,11 @@ async def get_leaderboard(
         "dataset": _PRIMARY_DATASET_BY_BENCHMARK.get(benchmark, DATASET_ALL),
         "interval": WINDOW_INTERVALS[window],
     }
-    normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
-    sql = (_SAVED_MV_SQL_TEMPLATE if normalized else _MV_SQL_TEMPLATE).format(
-        view=WINDOW_VIEWS[window] if normalized else LEGACY_WINDOW_VIEWS[window]
-    )
-
-    async with dashboard_read(pool, saved=normalized) as conn:
-        snapshot = await require_window_state(conn) if normalized else None
+    sql = _LEADERBOARD_SQL.format(view=WINDOW_VIEWS[window])
+    async with dashboard_read(pool) as conn:
+        snapshot = await require_window_state(conn)
         rows = await conn.execute(sql, params)
         entry_rows = await rows.fetchall()
-    if normalized:
-        entry_rows = sorted(entry_rows, key=lambda r: r["avg"])
 
     entries = [
         LeaderboardEntry.model_validate(r)
@@ -170,5 +155,5 @@ async def get_leaderboard(
         metric=metric,
         window=window,
         entries=entries,
-        snapshot=snapshot.as_dict() if snapshot else None,
+        snapshot=snapshot.as_dict(),
     )
