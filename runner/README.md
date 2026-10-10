@@ -113,38 +113,13 @@ The token lasts an hour and needs only a normal `gcloud auth login`. Model histo
 
 **Early-access models** are stripped from every data endpoint unless the request carries a Clerk session token. The coval org sees everything, a partner org sees what `CLERK_ORG_PROVIDERS` or `CLERK_ORG_EXCLUSIVE` names for it, and anything else gets the public view. The response says which case applied in `X-EA-Token-Status`.
 
-### Normalized read-index benchmark
-
-With Docker Postgres running, compare the baseline and the two candidate indexes
-against one million synthetic metric rows and a pagination-sized result limit:
-
-```bash
-docker compose up -d db
-cd runner
-uv run python scripts/benchmark_normalized_queries.py --rows 1000000 --result-limit 1000
-uv run python scripts/benchmark_normalized_queries.py --rows 1000000 --result-limit 1000 --candidate-indexes
-uv run python scripts/benchmark_normalized_queries.py --rows 1000000 --result-limit 100000 --candidate-indexes
-```
-
-In a local PostgreSQL 16 run, dashboard series measured about 2.63 ms for
-legacy, 3.29 ms for normalized baseline, and 2.86 ms with the composite series
-index. At a 1,000-row limit, normalized recent results improved from about 23.3
-ms to 6.3 ms with the observation index. At 100,000 rows, normalized recent
-results measured about 154.0 ms and PostgreSQL ignored that index; this is the
-negative/control case. The benchmarks web app currently requests
-`/v1/results/aggregates`, not `/v1/results`, so the observation index prepares
-for a future normalized paginated-results cutover; the series index maps to the
-current dashboard request shape.
-
 Apache-2.0.
 
 ### Metric catalog cutover runbook
 
 The application rollout precedes the destructive schema cleanup. Deploy the
-ID-only writer and catalog-join readers, then verify deployed consumers and the
-normalized readiness report for the agreed rollback period. Preserve the
-current normalized dashboard read configuration during this verification. The legacy
-`results` and `results_by_bucket` paths remain available during rollback.
+ID-only writer and catalog-join readers, then verify deployed consumers for the
+agreed rollback period.
 
 The default database boot migration is capped at revision `20261005_0043`.
 The cleanup revision is applied separately after the deployed-consumer and
@@ -160,6 +135,4 @@ before applying it, so later restarts recognize the installed Alembic revision.
 Never use an implicit head upgrade for this cutover. To roll back the
 application, restore the previous interface first, then run
 `uv run alembic downgrade 20261005_0043` before deploying an older application
-binary.
-Record the deployed runner, API,
-dashboard, and maintenance-job versions with the readiness report.
+binary. Record the deployed runner, API, dashboard, and maintenance-job versions.
