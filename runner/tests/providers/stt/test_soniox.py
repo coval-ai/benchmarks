@@ -12,6 +12,7 @@ of final-token text.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -66,6 +67,31 @@ async def test_soniox_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -
     assert result.audio_to_final_seconds is not None
     wer = compute_wer("hello world how are you", result.complete_transcript)
     assert wer.wer_percentage == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+async def test_soniox_authenticates_with_header(audio_pcm_bytes: bytes) -> None:
+    sent: list[object] = []
+    ws = FakeWebSocket([{"finished": True}], on_send=sent.append)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("coval_bench.providers.stt.soniox.ws_client.connect", return_value=cm) as connect:
+        await make_provider().measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert connect.call_args.kwargs["additional_headers"] == {
+        "Authorization": "Bearer test-key-soniox"
+    }
+    config = json.loads(next(m for m in sent if isinstance(m, str)))
+    assert "api_key" not in config
+    assert config["model"] == "stt-rt-v5"
 
 
 @pytest.mark.asyncio

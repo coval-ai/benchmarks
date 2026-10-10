@@ -83,14 +83,12 @@ class SonioxTTSProvider(TTSProvider):
         stream_id = str(uuid4())
 
         try:
-            async with ws_client.connect(_WS_URL) as ws:
+            headers = {"Authorization": f"Bearer {self._api_key}"}
+            async with ws_client.connect(_WS_URL, additional_headers=headers) as ws:
                 start = time.monotonic()
-                # Soniox authenticates in-band: the api_key rides the opening config
-                # frame rather than an Authorization header.
                 await ws.send(
                     json.dumps(
                         {
-                            "api_key": self._api_key,
                             "model": self._model,
                             "language": "en",
                             "voice": self._voice,
