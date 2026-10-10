@@ -25,7 +25,8 @@ async def run_stream(
     clip, since a socket that drops mid-clip leaves the transcript cut off even
     after an earlier final. A receiver failure is only stamped when no final
     landed. ``no_final_error`` is stamped when both tasks finish cleanly without
-    a final. Cancelling the caller cancels both tasks.
+    a final; stamping it here rather than in a receiver keeps a mid-stream close
+    from masking a sender exception. Cancelling the caller cancels both tasks.
     """
     tasks = (asyncio.create_task(send), asyncio.create_task(recv))
     try:
