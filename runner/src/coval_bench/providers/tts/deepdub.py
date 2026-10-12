@@ -17,22 +17,16 @@ import json
 import time
 from typing import Any
 
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 _WS_URL = "wss://wsapi.deepdub.ai/open"
 _LOCALE = "en-US"
 
 SAMPLE_RATE = 24000
-
-# How many trailing non-audio frames to retain for the silent-stream diagnostic.
-_LAST_FRAMES_KEPT = 3
 
 
 def _raise_on_error(frame: dict[str, Any]) -> None:
@@ -65,10 +59,7 @@ class DeepdubTTSProvider(TTSProvider):
         return self._model
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        last_frames: list[str] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("deepdub", self._model, self._voice, SAMPLE_RATE)
         finished = False
 
         request = {
@@ -86,7 +77,7 @@ class DeepdubTTSProvider(TTSProvider):
             async with ws_client.connect(
                 _WS_URL, additional_headers={"x-api-key": self._api_key}
             ) as ws:
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 await ws.send(json.dumps(request))
 
                 async for raw in ws:
@@ -94,20 +85,16 @@ class DeepdubTTSProvider(TTSProvider):
                     try:
                         frame = json.loads(text_frame)
                     except json.JSONDecodeError:
-                        last_frames.append(text_frame)
-                        del last_frames[:-_LAST_FRAMES_KEPT]
+                        synthesis.keep_frame(text_frame)
                         continue
 
                     _raise_on_error(frame)
                     data = frame.get("data")
                     pcm = base64.b64decode(data) if data else b""
                     if pcm:
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(pcm)
+                        synthesis.add_chunk(pcm)
                     else:
-                        last_frames.append(text_frame)
-                        del last_frames[:-_LAST_FRAMES_KEPT]
+                        synthesis.keep_frame(text_frame)
                     if frame.get("isFinished"):
                         finished = True
                         break
@@ -118,26 +105,6 @@ class DeepdubTTSProvider(TTSProvider):
                     raise RuntimeError("connection closed before the isFinished frame")
 
         except Exception as exc:
-            logger.warning("deepdub_tts_error", provider="deepdub", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="deepdub",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                last_frames=last_frames,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="deepdub",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-            last_frames=last_frames,
-        )
+        return synthesis.result()
