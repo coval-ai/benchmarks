@@ -28,11 +28,14 @@ from coval_bench.providers.stt.guava import GuavaSTTProvider
 from coval_bench.providers.stt.inworld import InworldSTTProvider
 from coval_bench.providers.stt.mistral import MistralSTTProvider
 from coval_bench.providers.stt.modulate import ModulateSTTProvider
+from coval_bench.providers.stt.nari import NariSTTProvider
+from coval_bench.providers.stt.openai import OpenAISTTProvider
 from coval_bench.providers.stt.reson8 import Reson8STTProvider
 from coval_bench.providers.stt.revai import RevAISTTProvider
 from coval_bench.providers.stt.smallest import SmallestSTTProvider
 from coval_bench.providers.stt.soniox import SonioxSTTProvider
 from coval_bench.providers.stt.speechmatics import SpeechmaticsProvider
+from coval_bench.providers.stt.stepfun import StepfunSTTProvider
 from coval_bench.providers.stt.together import TogetherSTTProvider
 from coval_bench.providers.stt.zoom import ZoomSTTProvider
 
@@ -43,6 +46,8 @@ _HANDSHAKES = (
     "_wait_for_setup_complete",
     "_await_session_created",
     "_wait_for_recognition_started",
+    "_wait_for_session_ready",
+    "_wait_for_session_updated",
 )
 
 _PROVIDERS: dict[str, Any] = {
@@ -59,11 +64,14 @@ _PROVIDERS: dict[str, Any] = {
     "inworld": lambda: InworldSTTProvider(_KEY),
     "mistral": lambda: MistralSTTProvider(_KEY),
     "modulate": lambda: ModulateSTTProvider(_KEY),
+    "nari": lambda: NariSTTProvider(_KEY),
+    "openai": lambda: OpenAISTTProvider(_KEY),
     "reson8": lambda: Reson8STTProvider(_KEY),
     "revai": lambda: RevAISTTProvider(_KEY),
     "smallest": lambda: SmallestSTTProvider(_KEY),
     "soniox": lambda: SonioxSTTProvider(_KEY),
     "speechmatics": lambda: SpeechmaticsProvider(_KEY),
+    "stepfun": lambda: StepfunSTTProvider(_KEY, "step-asr"),
     "together": lambda: TogetherSTTProvider(_KEY),
     "zoom": lambda: ZoomSTTProvider(_KEY, SecretStr("test-secret-at-least-32-bytes-long")),
 }
