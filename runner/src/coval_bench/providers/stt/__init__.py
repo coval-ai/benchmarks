@@ -27,6 +27,7 @@ from coval_bench.providers.stt.gladia import GladiaSTTProvider
 from coval_bench.providers.stt.gradium import GradiumSTTProvider
 from coval_bench.providers.stt.guava import GuavaSTTProvider
 from coval_bench.providers.stt.inworld import InworldSTTProvider
+from coval_bench.providers.stt.meta import MetaSTTProvider
 from coval_bench.providers.stt.mistral import MistralSTTProvider
 from coval_bench.providers.stt.modulate import ModulateSTTProvider
 from coval_bench.providers.stt.nari import NariSTTProvider
@@ -63,6 +64,7 @@ STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "gradium": GradiumSTTProvider,
     "guava": GuavaSTTProvider,
     "inworld": InworldSTTProvider,
+    "meta": MetaSTTProvider,
     "mistral": MistralSTTProvider,
     "modulate": ModulateSTTProvider,
     "nari": NariSTTProvider,
@@ -96,6 +98,7 @@ __all__ = [
     "GradiumSTTProvider",
     "GuavaSTTProvider",
     "InworldSTTProvider",
+    "MetaSTTProvider",
     "MistralSTTProvider",
     "ModulateSTTProvider",
     "NariSTTProvider",
