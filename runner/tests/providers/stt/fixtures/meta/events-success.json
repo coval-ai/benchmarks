@@ -1,0 +1,7 @@
+[
+  {"sessionId": "3f1c9a52-7d0e-4b8a-9c61-2e5f7a0b4d13"},
+  {"type": "transcript", "transcript": "Hello", "final": false, "audioProcessedMs": 480},
+  {"type": "transcript", "transcript": "Hello world", "final": false, "audioProcessedMs": 960},
+  {"type": "transcript", "transcript": "Hello world, how are", "final": false, "audioProcessedMs": 1600},
+  {"type": "transcript", "transcript": "Hello world, how are you?", "final": true, "audioProcessedMs": 3000}
+]

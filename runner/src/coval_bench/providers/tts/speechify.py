@@ -16,7 +16,7 @@ from coval_bench.providers._http_session import (
     submit_to_headers_ms,
 )
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
+from coval_bench.providers.tts._common import Synthesis
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -74,72 +74,26 @@ class SpeechifyTTSProvider(TTSProvider):
             "output_format": _OUTPUT_FORMAT,
         }
 
-        audio_chunks: list[bytes] = []
-        http_version: str | None = None
-        setup_ms: float | None = None
-        reused: bool | None = None
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("speechify", self._model, self._voice, SAMPLE_RATE)
 
         try:
-            start = time.monotonic()
+            synthesis.start = time.monotonic()
             async with client.stream(
                 "POST", "/v1/audio/stream", headers=headers, json=payload
             ) as response:
-                http_version = response.http_version
-                setup_ms = submit_to_headers_ms(response.request)
-                reused = connection_reused(response.request)
+                synthesis.http_version = response.http_version
+                synthesis.submit_to_headers_ms = submit_to_headers_ms(response.request)
+                synthesis.connection_reused = connection_reused(response.request)
                 if response.is_error:
                     body = await response.aread()
                     detail = body.decode("utf-8", "replace").strip() or response.reason_phrase
-                    return finalize_tts_result(
-                        provider="speechify",
-                        model=self._model,
-                        voice=self._voice,
-                        pcm=b"",
-                        sample_rate=SAMPLE_RATE,
-                        audio_synthesis_start=None,
-                        first_audio_chunk_at=None,
-                        error=f"HTTP {response.status_code}: {detail[:500]}",
-                        status_code=response.status_code,
-                        http_version=http_version,
-                        submit_to_headers_ms=setup_ms,
-                        connection_reused=reused,
-                    )
+                    synthesis.start = None
+                    synthesis.error = f"HTTP {response.status_code}: {detail[:500]}"
+                    synthesis.status_code = response.status_code
+                    return synthesis.result()
                 async for chunk in response.aiter_bytes():
-                    if chunk:
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(chunk)
+                    synthesis.add_chunk(chunk)
         except Exception as exc:
-            logger.warning("speechify_error", provider="speechify", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="speechify",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-                http_version=http_version,
-                submit_to_headers_ms=setup_ms,
-                connection_reused=reused,
-            )
+            synthesis.fail(exc)
 
-        audio_data = b"".join(audio_chunks)
-        if not audio_data:
-            logger.warning("speechify_no_audio", model=self._model)
-
-        return finalize_tts_result(
-            provider="speechify",
-            model=self._model,
-            voice=self._voice,
-            pcm=audio_data,
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-            http_version=http_version,
-            submit_to_headers_ms=setup_ms,
-            connection_reused=reused,
-        )
+        return synthesis.result()

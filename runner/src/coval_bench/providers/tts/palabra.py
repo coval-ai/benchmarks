@@ -12,16 +12,17 @@ from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
 
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
+from coval_bench.providers.tts._common import Synthesis
 
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
-
-_VALID_VOICES = ("default_low", "default_high")
+_VALID_VOICES = (
+    "default_low",
+    "36b6daf6-4792-4106-a0ad-0069f582e7f8",
+    "f1d62423-085e-4694-91cd-4d04085a2fc5",
+)
 _WS_URL = "wss://stream.us.palabra.ai/tts-api/v1/text-to-speech/stream"
 _SAMPLE_RATE = 24000
 
@@ -49,9 +50,7 @@ class PalabraTTSProvider(TTSProvider):
         return self._model
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("palabra", self._model, self._voice, _SAMPLE_RATE)
 
         try:
             # Platform auth: the API key authenticates the WebSocket directly.
@@ -70,7 +69,7 @@ class PalabraTTSProvider(TTSProvider):
                     )
                 )
 
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 generation_id = f"coval_{uuid4().hex}"
                 await ws.send(
                     json.dumps(
@@ -97,36 +96,12 @@ class PalabraTTSProvider(TTSProvider):
                     if event.get("message_type") != "audio_chunk":
                         continue
 
-                    audio_b64: str = data.get("audio", "")
-                    if audio_b64:
-                        chunk = base64.b64decode(audio_b64)
-                        if chunk:
-                            if first_chunk_at is None:
-                                first_chunk_at = time.monotonic()
-                            audio_chunks.append(chunk)
+                    synthesis.add_chunk(base64.b64decode(data.get("audio", "")))
 
                     if data.get("last_chunk"):
                         break
 
         except Exception as exc:
-            logger.warning("palabra_tts_error", provider="palabra", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="palabra",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=_SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="palabra",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=_SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()
