@@ -18,7 +18,11 @@ from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
 from coval_bench.providers.tts._common import Synthesis
 
-_VALID_VOICES = ("default_low", "default_high")
+_VALID_VOICES = (
+    "default_low",
+    "36b6daf6-4792-4106-a0ad-0069f582e7f8",
+    "f1d62423-085e-4694-91cd-4d04085a2fc5",
+)
 _WS_URL = "wss://stream.us.palabra.ai/tts-api/v1/text-to-speech/stream"
 _SAMPLE_RATE = 24000
 
