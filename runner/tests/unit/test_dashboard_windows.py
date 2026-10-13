@@ -14,11 +14,8 @@ import pytest
 from pytest_postgresql.factories import postgresql
 
 from coval_bench.db import dashboard_windows
-from coval_bench.db.dashboard_windows import (
-    WINDOW_VIEWS,
-    RefreshResult,
-    validate_window_rules,
-)
+from coval_bench.db.dashboard_windows import WINDOW_VIEWS, RefreshResult
+from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS, Metric
 
 from .conftest import apply_migrations, open_pool
 
@@ -27,14 +24,24 @@ summary_pg = postgresql("pg_proc")
 
 def test_summary_views_cover_every_saved_window() -> None:
     assert WINDOW_VIEWS == {
-        "24h": "benchmarks_v2.normalized_results_24h",
-        "7d": "benchmarks_v2.normalized_results_7d",
-        "30d": "benchmarks_v2.normalized_results_30d",
+        "24h": "benchmarks_v2.results_24h",
+        "7d": "benchmarks_v2.results_7d",
+        "30d": "benchmarks_v2.results_30d",
     }
 
 
-def test_registered_contracts_are_supported() -> None:
-    validate_window_rules()
+def test_wer_contract_carries_the_keys_the_window_views_pool() -> None:
+    contract = METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")]
+    assert {definition.key: definition.unit for definition in contract.values} == {
+        "primary": "percent",
+        "insertions": "percent",
+        "deletions": "percent",
+        "substitutions": "percent",
+        "substitution_count": "count",
+        "deletion_count": "count",
+        "insertion_count": "count",
+        "reference_words": "count",
+    }
 
 
 def test_naive_as_of_is_rejected() -> None:
@@ -152,7 +159,7 @@ def test_refresh_materializes_wer_percentiles_and_pooled_values(
             assert result.status == "published"
             async with pool.connection() as conn:
                 cur = await conn.execute(
-                    "SELECT * FROM benchmarks_v2.normalized_results_24h WHERE dataset_id='d'"
+                    "SELECT * FROM benchmarks_v2.results_24h WHERE dataset_id='d'"
                 )
                 row = await cur.fetchone()
                 assert row is not None
@@ -188,9 +195,7 @@ def test_unknown_summary_metric_rolls_back_state_and_views(
                     )
                 ).fetchone()
                 before_view = await (
-                    await conn.execute(
-                        "SELECT count(*) AS n FROM benchmarks_v2.normalized_results_24h"
-                    )
+                    await conn.execute("SELECT count(*) AS n FROM benchmarks_v2.results_24h")
                 ).fetchone()
             run_id = _insert_summary_run(summary_pg, as_of)
             observation_id = uuid4()
@@ -238,9 +243,7 @@ def test_unknown_summary_metric_rolls_back_state_and_views(
                     )
                 ).fetchone()
                 after_view = await (
-                    await conn.execute(
-                        "SELECT count(*) AS n FROM benchmarks_v2.normalized_results_24h"
-                    )
+                    await conn.execute("SELECT count(*) AS n FROM benchmarks_v2.results_24h")
                 ).fetchone()
             assert after == before
             assert after_view == before_view

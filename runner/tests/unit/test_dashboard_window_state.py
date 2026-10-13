@@ -1,11 +1,12 @@
-"""Pure readiness checks for normalized dashboard readers."""
+"""Pure readiness checks for dashboard readers."""
 
 from __future__ import annotations
 
 import datetime as dt
 from typing import Any, cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
+import psycopg
 import pytest
 from fastapi import HTTPException
 from psycopg import AsyncConnection
@@ -70,3 +71,23 @@ async def test_snapshot_freshness_allows_hourly_maintenance(
     row[field] = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=age_minutes)
     snapshot = await dashboard_windows.require_window_state(_connection(row))
     assert snapshot.stale is stale
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        psycopg.errors.UndefinedTable,
+        psycopg.errors.UndefinedColumn,
+        psycopg.errors.ObjectNotInPrerequisiteState,
+    ],
+)
+async def test_unready_schema_is_a_503(error: type[Exception]) -> None:
+    connection = MagicMock()
+    connection.execute = AsyncMock()
+    pool = MagicMock()
+    pool.connection.return_value.__aenter__.return_value = connection
+    with pytest.raises(HTTPException) as raised:
+        async with dashboard_windows.dashboard_read(pool):
+            raise error()
+    assert raised.value.status_code == 503

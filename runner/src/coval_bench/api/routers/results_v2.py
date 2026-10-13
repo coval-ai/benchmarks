@@ -1,13 +1,13 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Evaluation-level reads from normalized benchmark storage."""
+"""Evaluation-level reads from benchmark storage."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID
 
@@ -17,7 +17,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import SecretStr
 from starlette.requests import Request
 
-from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
+from coval_bench.api.common import WINDOW_DURATIONS, BenchmarkLiteral, WindowLiteral
 from coval_bench.api.deps import get_pool, get_settings
 from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
@@ -30,8 +30,6 @@ from coval_bench.config import Settings
 router = APIRouter(tags=["results"])
 
 _CURSOR_VERSION = 1
-_RUN_STATUSES = frozenset(("succeeded", "partial"))
-_WINDOWS = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
 _DefaultEvaluationVariant = Literal["default"]
 _SucceededEvaluationStatus = Literal["succeeded"]
 _AllowedRunStatus = Literal["succeeded", "partial"]
@@ -88,10 +86,6 @@ def _cursor_payload(
     return normalized_since, normalized_until, normalized_anchor_time, anchor_id, fingerprint
 
 
-def _unsupported_status(name: str) -> HTTPException:
-    return HTTPException(422, f"{name} is restricted for normalized results")
-
-
 def _require_cursor_key(settings: Settings = Depends(get_settings)) -> SecretStr:
     try:
         return validate_key(settings.results_cursor_key)
@@ -142,7 +136,7 @@ async def list_results(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
 ) -> ResultsV2Response:
-    """Return one successful primary evaluation per normalized result."""
+    """Return one successful primary evaluation per result."""
     del request
     since = _utc(since, "since")
     until = _utc(until, "until")
@@ -150,13 +144,7 @@ async def list_results(
         raise HTTPException(400, "since must be before until")
     if window is not None and (since is not None or until is not None):
         raise HTTPException(400, "window cannot be combined with since/until")
-    if evaluation_status != "succeeded":
-        raise _unsupported_status("evaluation_status")
-    if evaluation_variant != "default":
-        raise _unsupported_status("evaluation_variant")
     parent_statuses = ("succeeded", "partial") if run_status is None else (run_status,)
-    if any(status not in _RUN_STATUSES for status in parent_statuses):
-        raise _unsupported_status("run_status")
 
     requested_time = {
         "window": window,
@@ -166,9 +154,9 @@ async def list_results(
     now = datetime.now(UTC)
     if cursor is None:
         if run_id is None and window is None and since is None and until is None:
-            since, until = now - _WINDOWS["7d"], now
+            since, until = now - WINDOW_DURATIONS["7d"], now
         elif window is not None:
-            since, until = now - _WINDOWS[window], now
+            since, until = now - WINDOW_DURATIONS[window], now
     anchor_time: datetime | None = None
     anchor_id: UUID | None = None
     expected: str | None = None
@@ -301,7 +289,7 @@ async def list_results(
             payload["components"] = row["components"]
         response_rows.append(ResultV2Out.model_validate(payload))
     next_cursor = None
-    if has_more and rows:
+    if has_more:
         last = rows[-1]
         try:
             next_cursor = encode_cursor(

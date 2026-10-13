@@ -42,10 +42,9 @@ from coval_bench.runner.capture import (
     read_receipt,
     upload_envelope,
     upload_import_run_claim,
-    upload_legacy_result_allocation,
     upload_run_state,
 )
-from coval_bench.runner.normalized import (
+from coval_bench.runner.persistence import (
     CaptureOutcome,
     persist_capture,
     prepare_capture_envelope,
@@ -168,9 +167,8 @@ class _Writer:
         evaluation: MetricEvaluation,
         *,
         inputs: Sequence[MetricEvaluationInput] = (),
-        validate_contract: bool = True,
     ) -> MetricEvaluation:
-        del inputs, validate_contract
+        del inputs
         current = self.evaluations.get(evaluation.metric_type)
         if current is None:
             current = evaluation.model_copy(update={"id": uuid4()})
@@ -198,9 +196,7 @@ class _Writer:
         *,
         finished_at: datetime,
         values: Sequence[MetricValue],
-        validate_contract: bool = True,
     ) -> None:
-        del validate_contract
         metric, current = next(
             (metric, evaluation)
             for metric, evaluation in self.evaluations.items()
@@ -282,7 +278,7 @@ def _envelope(
 
 
 @pytest.mark.asyncio
-async def test_ambiguous_normalized_commit_is_discoverable_and_replays_once() -> None:
+async def test_ambiguous_commit_is_discoverable_and_replays_once() -> None:
     storage_value = _Storage()
     writer = _Writer()
     writer.fail_after_observation_once = True
@@ -326,7 +322,7 @@ async def test_ambiguous_normalized_commit_is_discoverable_and_replays_once() ->
 
 
 @pytest.mark.asyncio
-async def test_distinct_same_timestamp_captures_replay_without_legacy_ids() -> None:
+async def test_distinct_same_timestamp_captures_replay() -> None:
     storage_value = _Storage()
     writer = _Writer()
 
@@ -351,18 +347,19 @@ async def test_distinct_same_timestamp_captures_replay_without_legacy_ids() -> N
         is CaptureOutcome.COMPLETED
     )
 
-    assert not any(name.endswith("legacy-allocation.json") for name in storage_value.objects)
-
 
 @pytest.mark.asyncio
-async def test_old_envelope_and_legacy_allocation_replay_without_legacy_writer() -> None:
+async def test_envelope_with_legacy_rows_replays() -> None:
     storage_value = _Storage()
     client = _client(storage_value)
-    envelope = _envelope()
+    current = _envelope()
+    payload = {**current.payload, "legacy_rows": [{"metric_type": "WER"}]}
+    envelope = current.model_copy(
+        update={"payload": payload, "payload_sha256": payload_digest(payload)}
+    )
     upload_envelope(client, "private", envelope)
-    upload_legacy_result_allocation(client, "private", envelope, [918273])
     preserved = {name: record.payload for name, record in storage_value.objects.items()}
-    writer = _Writer()  # Deliberately exposes only normalized persistence methods.
+    writer = _Writer()  # Deliberately exposes only persistence methods.
 
     for _ in range(2):
         assert (
@@ -463,6 +460,72 @@ def test_all_benchmark_kinds_freeze_without_provider_replay(benchmark: Benchmark
     envelope = _envelope(benchmark)
     assert envelope.identity.benchmark == str(benchmark)
     assert envelope.payload["captured_at"] == "2026-09-17T00:00:00Z"
+
+
+def test_capture_groups_components_and_freezes_input_lineage() -> None:
+    def row(metric: Metric, value: float | None, unit: str | None, **extra: float) -> Result:
+        return Result(
+            run_id=1,
+            provider="provider",
+            model="model",
+            benchmark=Benchmark.TTS,
+            metric_type=metric,
+            metric_value=value,
+            metric_units=unit,
+            status=ResultStatus.SUCCESS,
+            **extra,
+        )
+
+    envelope = prepare_capture_envelope(
+        run_id=1,
+        dataset_id="tts-v1",
+        dataset_sha256="a" * 64,
+        sample_id="tts-1",
+        entry=SimpleNamespace(provider="provider", model="model"),
+        benchmark=Benchmark.TTS,
+        results=[
+            row(Metric.TTFA, 120, "milliseconds"),
+            row(Metric.TTFA_ROUNDTRIP, 75, "milliseconds"),
+            row(Metric.TTFA_LEADING_SILENCE, 45, "milliseconds"),
+            row(
+                Metric.WER,
+                10,
+                "percent",
+                wer_insertions_pct=2,
+                wer_deletions_pct=3,
+                wer_substitutions_pct=5,
+                wer_substitutions=5,
+                wer_deletions=3,
+                wer_insertions=2,
+                wer_reference_words=100,
+            ),
+            row(Metric.TTFT, None, None),
+        ],
+        provider_error=None,
+        captured_at=datetime(2026, 9, 17, tzinfo=UTC),
+        timing_events={"ttfa_ms": 120},
+        audio_snapshot=(b"RIFFaudio", 10.0),
+    )
+
+    evaluations = {e["metric_type"]: e for e in envelope.payload["evaluations"]}
+    assert set(evaluations) == {str(Metric.TTFA), str(Metric.WER)}
+    ttfa, wer = evaluations[str(Metric.TTFA)], evaluations[str(Metric.WER)]
+    assert [v["value_key"] for v in ttfa["values"]] == ["primary", "roundtrip", "leading_silence"]
+    assert [v["value_key"] for v in wer["values"]] == [
+        "primary",
+        "insertions",
+        "deletions",
+        "substitutions",
+        "substitution_count",
+        "deletion_count",
+        "insertion_count",
+        "reference_words",
+    ]
+    assert [(i["artifact_name"], i["input_role"]) for i in ttfa["inputs"]] == [
+        ("timing", "timing"),
+        ("audio", "raw"),
+    ]
+    assert [(i["artifact_name"], i["input_role"]) for i in wer["inputs"]] == [("audio", "raw")]
 
 
 @pytest.mark.asyncio
@@ -579,45 +642,30 @@ def test_concurrent_import_claim_adopts_the_first_run_allocation() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("denied_table", [None, "metric_values"])
-async def test_required_database_preflight_checks_normalized_privileges(
+async def test_required_database_preflight_checks_privileges(
     denied_table: str | None,
 ) -> None:
-    pool = MagicMock()
-    schema_cursor = MagicMock()
-    schema_cursor.execute = AsyncMock()
-    schema_cursor.fetchall = AsyncMock(return_value=[])
-    privilege_cursor = MagicMock()
-    privilege_cursor.execute = AsyncMock()
-    privilege_cursor.fetchall = AsyncMock(
-        return_value=[] if denied_table is None else [(denied_table,)]
+    cursor = MagicMock()
+    cursor.execute = AsyncMock()
+    cursor.fetchall = AsyncMock(
+        side_effect=[[], [] if denied_table is None else [{"name": denied_table}], []]
     )
-    sequence_cursor = MagicMock()
-    sequence_cursor.execute = AsyncMock()
-    sequence_cursor.fetchall = AsyncMock(return_value=[])
-
-    def connection(cursor: MagicMock) -> MagicMock:
-        cursor_context = MagicMock()
-        cursor_context.__aenter__ = AsyncMock(return_value=cursor)
-        cursor_context.__aexit__ = AsyncMock(return_value=None)
-        conn = MagicMock()
-        conn.cursor.return_value = cursor_context
-        conn_context = MagicMock()
-        conn_context.__aenter__ = AsyncMock(return_value=conn)
-        conn_context.__aexit__ = AsyncMock(return_value=None)
-        return conn_context
-
-    pool.connection.side_effect = [
-        connection(schema_cursor),
-        connection(privilege_cursor),
-        connection(sequence_cursor),
-    ]
+    cursor_context = MagicMock()
+    cursor_context.__aenter__ = AsyncMock(return_value=cursor)
+    cursor_context.__aexit__ = AsyncMock(return_value=None)
+    conn = MagicMock()
+    conn.cursor.return_value = cursor_context
+    conn_context = MagicMock()
+    conn_context.__aenter__ = AsyncMock(return_value=conn)
+    conn_context.__aexit__ = AsyncMock(return_value=None)
+    pool = MagicMock()
+    pool.connection.return_value = conn_context
     writer = RunWriter(pool)
 
     if denied_table is None:
         await writer.preflight_required_capture_schema()
-        assert "results" not in sequence_cursor.execute.call_args.args[1][0]
+        assert cursor.execute.await_count == 3
     else:
         with pytest.raises(RuntimeError, match="privileges unavailable: metric_values"):
             await writer.preflight_required_capture_schema()
-    assert "results" not in schema_cursor.execute.call_args.args[1][0]
-    assert "results" not in privilege_cursor.execute.call_args.args[1][0]
+    assert all("results" not in call.args[1][0] for call in cursor.execute.await_args_list)

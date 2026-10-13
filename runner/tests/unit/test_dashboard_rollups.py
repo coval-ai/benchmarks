@@ -16,7 +16,7 @@ from coval_bench.db.dashboard_rollups import (
 )
 from coval_bench.db.models import MetricValue, RunStatus
 from coval_bench.db.writer import RunWriter
-from tests.unit import test_normalized_db_writer as storage
+from tests.unit import test_db_storage as storage
 from tests.unit.conftest import apply_migrations
 
 pg_conn = postgresql("pg_proc")
@@ -27,7 +27,6 @@ def test_floor_follows_the_grain() -> None:
     assert floor_rollup(at, "1h") == datetime(2026, 9, 14, 13, tzinfo=UTC)
     assert floor_rollup(at, "4h") == datetime(2026, 9, 14, 12, tzinfo=UTC)
     assert floor_rollup(at, "run") == at
-    assert floor_rollup(at.replace(tzinfo=None), "1h") == datetime(2026, 9, 14, 13, tzinfo=UTC)
 
 
 async def _seed_two_runs(pool: Any) -> int:

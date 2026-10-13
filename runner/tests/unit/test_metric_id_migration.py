@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Standalone PostgreSQL checks for the normalized metric identity migration."""
+"""Standalone PostgreSQL checks for the metric identity migration."""
 
 # ruff: noqa: E501, S608
 

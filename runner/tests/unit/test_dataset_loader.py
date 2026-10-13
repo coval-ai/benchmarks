@@ -447,7 +447,7 @@ def test_stt_sample_identity_is_explicit_or_manifest_path_fallback(
     test_settings: Settings,
     tmp_path: Path,
 ) -> None:
-    """Normalized STT identity is stable without changing existing manifests."""
+    """STT identity is stable without changing existing manifests."""
     manifest = Manifest(
         id="stt-v1",
         version="1.0.0",
@@ -476,7 +476,7 @@ def test_stt_sample_identity_is_explicit_or_manifest_path_fallback(
 
 
 def test_empty_dataset_identities_are_rejected(tmp_path: Path) -> None:
-    """Every identity entering a normalized observation must be non-empty."""
+    """Every identity entering an observation must be non-empty."""
     stt_fields = {
         "sha256": "a" * 64,
         "transcript": "test",

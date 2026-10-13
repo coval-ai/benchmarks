@@ -4,7 +4,7 @@
 """Explicit retirement response for the legacy ``GET /v1/results`` reader.
 
 The aggregate and timeline routes under ``/v1/results/*`` remain available.
-Row-level normalized evaluations are served by ``GET /v2/results``.
+Row-level evaluations are served by ``GET /v2/results``.
 """
 
 from __future__ import annotations

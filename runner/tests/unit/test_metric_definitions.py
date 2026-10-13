@@ -50,9 +50,9 @@ def test_frozen_seeds_have_generated_ids_and_current_display_names(
     assert identity == ("bigint", "ALWAYS")
     for table in (
         "dashboard_rollups",
-        "normalized_results_24h",
-        "normalized_results_7d",
-        "normalized_results_30d",
+        "results_24h",
+        "results_7d",
+        "results_30d",
     ):
         columns = metric_pg.execute(
             """SELECT attname FROM pg_attribute
@@ -60,7 +60,7 @@ def test_frozen_seeds_have_generated_ids_and_current_display_names(
             (f"benchmarks_v2.{table}",),
         ).fetchall()
         assert ("metric_id",) in columns
-        assert (("metric_type",) in columns) == table.startswith("normalized_results_")
+        assert (("metric_type",) in columns) == table.startswith("results_")
 
 
 @pytest.mark.parametrize(

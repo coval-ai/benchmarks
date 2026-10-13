@@ -25,9 +25,15 @@ import structlog
 from google.cloud import storage
 
 from coval_bench import scenarios
-from coval_bench.config import Settings, get_settings, require_normalized_persisted_capture
+from coval_bench.config import Settings, get_settings, require_capture_bucket
 from coval_bench.db.conn import lifespan_pool
-from coval_bench.db.models import MetricExecutor, Result, ResultStatus, RunStatus
+from coval_bench.db.models import (
+    CAPTURE_PENDING_ERROR,
+    MetricExecutor,
+    Result,
+    ResultStatus,
+    RunStatus,
+)
 from coval_bench.db.registry_store import fetch_models
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import METRIC_SPECS, Metric
@@ -36,6 +42,7 @@ from coval_bench.registries.models import RegisteredModel
 from coval_bench.runner.capture import (
     ImportRunClaim,
     ImportRunIdentity,
+    RunSeal,
     read_import_run_claim,
     read_run_state,
     upload_import_run_claim,
@@ -135,7 +142,7 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
             family=FAMILY_DENTAL,
         ),
         # Pre-launch models under codenames: the provider and model strings are what
-        # land in the results table, so they carry no vendor identity of their own.
+        # land in stored results, so they carry no vendor identity of their own.
         AgentSpec(
             agent_id=settings.coval_s2s_gray_agent_id,
             provider="colors",
@@ -272,8 +279,8 @@ def _dataset_sha256() -> str:
         return "unknown"
 
 
-def _normalized_dataset_sha256(provenance: str) -> str:
-    """Return the normalized schema stable 64-hex dataset fingerprint.
+def _dataset_fingerprint(provenance: str) -> str:
+    """Return a stable 64-hex dataset fingerprint.
 
     Packaged datasets already carry a content SHA. Coval-hosted S2S datasets
     carry immutable test-set/persona provenance in the legacy run column, so
@@ -740,7 +747,7 @@ def _import_identity(
         provider=spec.provider,
         model=spec.model,
         dataset_id=dataset_id,
-        dataset_sha256=_normalized_dataset_sha256(dataset_sha256),
+        dataset_sha256=_dataset_fingerprint(dataset_sha256),
         persona_id=coval_run.persona_id,
     )
 
@@ -785,13 +792,11 @@ async def _ingest_run(
     dataset_id: str = DATASET_ID,
     dataset_sha256: str = "",
     period_seconds: int,
-    normalized_dual_write_enabled: bool = False,
-    normalized_capture_required: bool = False,
-    artifact_client: storage.Client | None = None,
-    artifact_bucket: str = "",
+    artifact_client: storage.Client,
+    artifact_bucket: str,
     workspace_id: str | None = None,
-    import_identity: ImportRunIdentity | None = None,
-    import_generation: int | None = None,
+    import_identity: ImportRunIdentity,
+    import_generation: int,
     import_claim: ImportRunClaim | None = None,
 ) -> RunStatus | None:
     """Ingest one Coval run into its own run row; None = skipped, nothing written.
@@ -806,16 +811,9 @@ async def _ingest_run(
     """
     if pending is None:
         pending = condition.fetched | (condition.local & frozenset(_LOCAL_SOURCES))
-    if normalized_capture_required and (artifact_client is None or not artifact_bucket):
-        raise RuntimeError("required normalized capture is not initialized")
-    if normalized_capture_required and (import_identity is None or import_generation is None):
-        raise RuntimeError("required normalized capture import identity is not initialized")
     if import_claim is not None:
         pending = frozenset(Metric(metric) for metric in import_claim.metric_types)
     run_pk: int | None = None
-    claimed_run_finished_at: datetime | None = None
-    claimed_run_status: RunStatus | None = None
-    claimed_run_error: str | None = None
     headers = {"X-Coval-Workspace-Id": workspace_id} if workspace_id else None
     try:
         resp = await client.get(f"/runs/{coval_run.run_id}", headers=headers)
@@ -943,54 +941,37 @@ async def _ingest_run(
 
         run_dataset_sha256 = dataset_sha256 or _dataset_sha256()
         scheduled_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
-        if normalized_capture_required:
-            if import_identity is None or import_generation is None or artifact_client is None:
-                raise RuntimeError("required normalized capture import state is missing")
-            claim = import_claim
-            if claim is None:
-                started_at = datetime.now(UTC)
-                reserved_run_id = await writer.reserve_run_id()
-                claim = await asyncio.to_thread(
-                    upload_import_run_claim,
-                    artifact_client,
-                    artifact_bucket,
-                    ImportRunClaim(
-                        identity=import_identity,
-                        generation=import_generation,
-                        run_id=reserved_run_id,
-                        started_at=started_at,
-                        scheduled_at=scheduled_at,
-                        captured_at=started_at,
-                        metric_types=sorted(str(metric) for metric in set(writable) | set(local)),
-                    ),
-                )
-            elif claim.identity != import_identity or claim.generation != import_generation:
-                raise ValueError("external import claim does not match the requested generation")
-            run_pk = claim.run_id
-            scheduled_at = claim.scheduled_at
-            captured_at = claim.captured_at
-            claimed_run = await writer.ensure_capture_run(
-                run_pk,
-                started_at=claim.started_at,
-                dataset_id=dataset_id,
-                dataset_sha256=run_dataset_sha256,
-                scheduled_at=scheduled_at,
-                persona_id=coval_run.persona_id or None,
+        claim = import_claim
+        if claim is None:
+            started_at = datetime.now(UTC)
+            reserved_run_id = await writer.reserve_run_id()
+            claim = await asyncio.to_thread(
+                upload_import_run_claim,
+                artifact_client,
+                artifact_bucket,
+                ImportRunClaim(
+                    identity=import_identity,
+                    generation=import_generation,
+                    run_id=reserved_run_id,
+                    started_at=started_at,
+                    scheduled_at=scheduled_at,
+                    captured_at=started_at,
+                    metric_types=sorted(str(metric) for metric in set(writable) | set(local)),
+                ),
             )
-            claimed_run_finished_at = claimed_run.finished_at
-            claimed_run_status = claimed_run.status
-            claimed_run_error = claimed_run.error
-        else:
-            run_row = await writer.start_run(
-                dataset_id=dataset_id,
-                dataset_sha256=run_dataset_sha256,
-                scheduled_at=scheduled_at,
-                persona_id=coval_run.persona_id or None,
-            )
-            if run_row.id is None:  # pragma: no cover -- start_run always returns an id
-                raise RuntimeError("start_run returned a run with no id")
-            run_pk = run_row.id
-            captured_at = datetime.now(UTC)
+        elif claim.identity != import_identity or claim.generation != import_generation:
+            raise ValueError("external import claim does not match the requested generation")
+        run_pk = claim.run_id
+        scheduled_at = claim.scheduled_at
+        captured_at = claim.captured_at
+        claimed_run = await writer.ensure_capture_run(
+            run_pk,
+            started_at=claim.started_at,
+            dataset_id=dataset_id,
+            dataset_sha256=run_dataset_sha256,
+            scheduled_at=scheduled_at,
+            persona_id=coval_run.persona_id or None,
+        )
 
         # Grouped as built: metric_type is a plain str on Result, so filtering the
         # flat list by enum identity would silently match nothing.
@@ -1026,122 +1007,75 @@ async def _ingest_run(
         if all_rows:
             grouped: dict[str, list[Result]] = {}
             for row in all_rows:
-                if row.audio_filename is None:  # pragma: no cover -- S2S rows set it
-                    logger.warning(
-                        "normalized_s2s_sample_id_missing",
-                        provider=spec.provider,
-                        coval_run_id=coval_run.run_id,
-                    )
-                    continue
-                grouped.setdefault(row.audio_filename, []).append(row)
-            normalized_sha256 = _normalized_dataset_sha256(dataset_sha256 or _dataset_sha256())
-            if normalized_capture_required:
-                from coval_bench.runner.capture import (
-                    RunManifest,
-                    build_capture_identity,
-                    identity_digest,
-                    upload_run_state,
-                )
-                from coval_bench.runner.normalized import persist_capture, prepare_capture_envelope
+                grouped.setdefault(cast("str", row.audio_filename), []).append(row)
+            dataset_fingerprint = _dataset_fingerprint(run_dataset_sha256)
+            from coval_bench.runner.capture import (
+                RunManifest,
+                build_capture_identity,
+                identity_digest,
+                upload_run_state,
+            )
+            from coval_bench.runner.persistence import persist_capture, prepare_capture_envelope
 
-                expected_capture_ids = [
-                    identity_digest(
-                        build_capture_identity(
-                            run_id=run_pk,
-                            benchmark=spec.benchmark.value,
-                            dataset_id=dataset_id,
-                            sample_id=sample_id,
-                            provider=spec.provider,
-                            model=spec.model,
-                            capture_id=f"{coval_run.run_id}:{sample_id}",
-                        )
-                    )
-                    for sample_id in sorted(grouped)
-                ]
-                await asyncio.to_thread(
-                    upload_run_state,
-                    artifact_client,
-                    artifact_bucket,
-                    run_pk,
-                    "manifest",
-                    RunManifest(
+            expected_capture_ids = [
+                identity_digest(
+                    build_capture_identity(
                         run_id=run_pk,
-                        scheduled_at=scheduled_at,
-                        benchmark_kind=spec.benchmark.value.lower(),
-                        source="coval-api",
-                        datasets={dataset_id: normalized_sha256},
-                        expected_capture_ids=expected_capture_ids,
-                    ),
-                )
-                for index, (sample_id, sample_rows) in enumerate(sorted(grouped.items())):
-                    sample_captured_at = captured_at + timedelta(microseconds=index)
-                    provider_error = None
-                    if not any(row.status is ResultStatus.SUCCESS for row in sample_rows):
-                        provider_error = next(
-                            (row.error for row in sample_rows if row.error),
-                            "Coval conversation produced no successful metric value",
-                        )
-                    envelope = prepare_capture_envelope(
-                        run_id=run_pk,
+                        benchmark=spec.benchmark.value,
                         dataset_id=dataset_id,
-                        dataset_sha256=normalized_sha256,
                         sample_id=sample_id,
-                        entry=spec,
-                        benchmark=spec.benchmark,
-                        results=sample_rows,
-                        provider_error=provider_error,
-                        captured_at=sample_captured_at,
-                        executor=MetricExecutor.COVAL_API,
+                        provider=spec.provider,
+                        model=spec.model,
                         capture_id=f"{coval_run.run_id}:{sample_id}",
-                        provider_extras={"coval_run_id": coval_run.run_id},
                     )
-                    capture_outcomes.append(
-                        await persist_capture(
-                            writer=writer,
-                            storage_client=artifact_client,
-                            bucket=artifact_bucket,
-                            envelope=envelope,
-                        )
+                )
+                for sample_id in sorted(grouped)
+            ]
+            await asyncio.to_thread(
+                upload_run_state,
+                artifact_client,
+                artifact_bucket,
+                run_pk,
+                "manifest",
+                RunManifest(
+                    run_id=run_pk,
+                    scheduled_at=scheduled_at,
+                    benchmark_kind=spec.benchmark.value.lower(),
+                    source="coval-api",
+                    datasets={dataset_id: dataset_fingerprint},
+                    expected_capture_ids=expected_capture_ids,
+                ),
+            )
+            for index, (sample_id, sample_rows) in enumerate(sorted(grouped.items())):
+                sample_captured_at = captured_at + timedelta(microseconds=index)
+                provider_error = None
+                if not any(row.status is ResultStatus.SUCCESS for row in sample_rows):
+                    provider_error = next(
+                        (row.error for row in sample_rows if row.error),
+                        "Coval conversation produced no successful metric value",
                     )
-            else:
-                if normalized_dual_write_enabled and spec.benchmark in (
-                    Benchmark.S2S,
-                    Benchmark.LLM,
-                ):
-                    from coval_bench.runner.normalized import dual_write
-
-                    for sample_id, sample_rows in grouped.items():
-                        provider_error = None
-                        if not any(row.status is ResultStatus.SUCCESS for row in sample_rows):
-                            provider_error = next(
-                                (row.error for row in sample_rows if row.error),
-                                "Coval conversation produced no successful metric value",
-                            )
-                        try:
-                            await dual_write(
-                                writer=writer,
-                                storage_client=None,
-                                bucket="",
-                                run_id=run_pk,
-                                dataset_id=dataset_id,
-                                dataset_sha256=normalized_sha256,
-                                sample_id=sample_id,
-                                entry=spec,
-                                benchmark=spec.benchmark,
-                                results=sample_rows,
-                                provider_error=provider_error,
-                                captured_at=captured_at,
-                                executor=MetricExecutor.COVAL_API,
-                                db_retry_attempts=3,
-                            )
-                        except Exception:
-                            logger.warning(
-                                "normalized_s2s_dual_write_failed",
-                                provider=spec.provider,
-                                coval_run_id=coval_run.run_id,
-                                sample_id=sample_id,
-                                exc_info=True,
-                            )
+                envelope = prepare_capture_envelope(
+                    run_id=run_pk,
+                    dataset_id=dataset_id,
+                    dataset_sha256=dataset_fingerprint,
+                    sample_id=sample_id,
+                    entry=spec,
+                    benchmark=spec.benchmark,
+                    results=sample_rows,
+                    provider_error=provider_error,
+                    captured_at=sample_captured_at,
+                    executor=MetricExecutor.COVAL_API,
+                    capture_id=f"{coval_run.run_id}:{sample_id}",
+                    provider_extras={"coval_run_id": coval_run.run_id},
+                )
+                capture_outcomes.append(
+                    await persist_capture(
+                        writer=writer,
+                        storage_client=artifact_client,
+                        bucket=artifact_bucket,
+                        envelope=envelope,
+                    )
+                )
         logger.info(
             "fetched_clips",
             provider=spec.provider,
@@ -1165,115 +1099,31 @@ async def _ingest_run(
         else:
             # This condition has no latency, or it landed on an earlier scan.
             status = RunStatus.SUCCEEDED
-        intended_status = status
-        capture_pending = normalized_capture_required and (
-            len(capture_outcomes) != len(expected_capture_ids)
-            or any(str(outcome) != "completed" for outcome in capture_outcomes)
-        )
-        if capture_pending and status is not RunStatus.FAILED:
-            status = RunStatus.PARTIAL
-        finish_error = (
-            "normalized capture pending"
-            if capture_pending and intended_status is not RunStatus.FAILED
-            else None
-        )
-        finished_at = datetime.now(UTC)
-        if normalized_capture_required:
-            from coval_bench.runner.capture import (
-                FinalizedReceipt,
-                RunSeal,
-                upload_run_state,
-            )
+        from coval_bench.runner.persistence import capture_pending, seal_and_finish_run
 
-            if claimed_run_finished_at is not None and claimed_run_status is not None:
-                finished_at = claimed_run_finished_at
-                status = claimed_run_status
-                finish_error = claimed_run_error
-            seal = RunSeal(
+        incomplete = capture_pending(capture_outcomes, expected_capture_ids)
+        held = incomplete and status is not RunStatus.FAILED
+        if claimed_run.finished_at is not None:
+            stored_status, finish_error = claimed_run.status, claimed_run.error
+            finished_at = claimed_run.finished_at
+        else:
+            stored_status = RunStatus.PARTIAL if held else status
+            finish_error = CAPTURE_PENDING_ERROR if held else None
+            finished_at = datetime.now(UTC)
+        status = await seal_and_finish_run(
+            writer=writer,
+            storage_client=artifact_client,
+            bucket=artifact_bucket,
+            seal=RunSeal(
                 run_id=run_pk,
-                intended_status=str(intended_status),
-                stored_status=str(status),
+                intended_status=str(status),
+                stored_status=str(stored_status),
                 finished_at=finished_at,
                 error=finish_error,
                 expected_capture_ids=expected_capture_ids,
-            )
-            seal_sha256: str | None = None
-            try:
-                _, seal_sha256 = await asyncio.to_thread(
-                    upload_run_state,
-                    artifact_client,
-                    artifact_bucket,
-                    run_pk,
-                    "seal",
-                    seal,
-                )
-            except ValueError:
-                existing_value = await asyncio.to_thread(
-                    read_run_state, artifact_client, artifact_bucket, run_pk, "seal"
-                )
-                if existing_value is None:
-                    raise
-                existing_seal = RunSeal.model_validate(existing_value)
-                if (
-                    existing_seal.run_id != run_pk
-                    or existing_seal.intended_status != str(intended_status)
-                    or existing_seal.expected_capture_ids != expected_capture_ids
-                ):
-                    raise ValueError("durable import seal conflicts with this replay") from None
-                seal = existing_seal
-                _, seal_sha256 = await asyncio.to_thread(
-                    upload_run_state,
-                    artifact_client,
-                    artifact_bucket,
-                    run_pk,
-                    "seal",
-                    seal,
-                )
-            except Exception:
-                logger.warning("normalized_capture_seal_failed", exc_info=True)
-                if intended_status is not RunStatus.FAILED:
-                    status = RunStatus.PARTIAL
-                    finish_error = "normalized capture pending"
-                await writer.finish_run_exact(
-                    run_pk,
-                    status=status,
-                    error=finish_error,
-                    finished_at=finished_at,
-                )
-            if seal_sha256 is not None:
-                stored_status = RunStatus(seal.stored_status)
-                recovered_complete = (
-                    not capture_pending
-                    and stored_status is RunStatus.PARTIAL
-                    and seal.error == "normalized capture pending"
-                )
-                status = RunStatus(seal.intended_status) if recovered_complete else stored_status
-                finish_error = None if recovered_complete else seal.error
-                finished_at = seal.finished_at
-                await writer.finish_run_exact(
-                    run_pk,
-                    status=status,
-                    error=finish_error,
-                    finished_at=finished_at,
-                    allow_capture_recovery=recovered_complete,
-                )
-                try:
-                    await asyncio.to_thread(
-                        upload_run_state,
-                        artifact_client,
-                        artifact_bucket,
-                        run_pk,
-                        "finalized",
-                        FinalizedReceipt(run_id=run_pk, seal_sha256=seal_sha256),
-                    )
-                except Exception:
-                    logger.warning("normalized_capture_finalize_receipt_failed", exc_info=True)
-                    if intended_status is not RunStatus.FAILED:
-                        await writer.mark_run_capture_pending(run_pk, finished_at=finished_at)
-                        status = RunStatus.PARTIAL
-                        finish_error = "normalized capture pending"
-        else:
-            await writer.finish_run(run_pk, status=status)
+            ),
+            capture_pending=incomplete,
+        )
         if status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
             try:
                 await writer.rebuild_run_rollup(run_pk)
@@ -1283,7 +1133,7 @@ async def _ingest_run(
                 )
         return status
     except Exception as exc:
-        if run_pk is not None and normalized_capture_required:
+        if run_pk is not None:
             logger.warning(
                 "normalized_import_capture_pending",
                 provider=spec.provider,
@@ -1292,15 +1142,6 @@ async def _ingest_run(
                 error=str(exc),
             )
             return RunStatus.PARTIAL
-        if run_pk is not None:
-            try:
-                current = await writer.get_run(run_pk)
-                if current.status is RunStatus.RUNNING:
-                    await writer.finish_run(run_pk, status=RunStatus.FAILED, error=str(exc))
-            except Exception:
-                logger.warning(
-                    "finish_run_failed", provider=spec.provider, run_id=run_pk, exc_info=True
-                )
         logger.warning(
             "run_ingest_failed",
             provider=spec.provider,
@@ -1357,8 +1198,6 @@ async def _fetch_one_provider(
     window_seconds: int | None = None,
     page_size: int = WINDOW_PAGE_SIZE,
     matched_run_ids: set[str] | None = None,
-    normalized_dual_write_enabled: bool = False,
-    normalized_capture_required: bool = False,
     artifact_client: storage.Client | None = None,
     artifact_bucket: str = "",
     workspace_id: str | None = None,
@@ -1462,22 +1301,18 @@ async def _fetch_one_provider(
                 )
                 continue
             ingestable = _ingestable(condition, metric_ids)
-            import_identity_value: ImportRunIdentity | None = None
-            import_claim: ImportRunClaim | None = None
-            import_generation: int | None = None
-            if normalized_capture_required:
-                if artifact_client is None:
-                    raise RuntimeError("required normalized capture storage is unavailable")
-                import_identity_value = _import_identity(
-                    spec=spec,
-                    coval_run=coval_run,
-                    dataset_id=dataset_id,
-                    dataset_sha256=dataset_sha256 or _dataset_sha256(),
-                    workspace_id=workspace_id,
-                )
-                import_claim, import_generation = await _import_generation(
-                    artifact_client, artifact_bucket, import_identity_value
-                )
+            if artifact_client is None:
+                raise RuntimeError("required capture storage is unavailable")
+            import_identity_value = _import_identity(
+                spec=spec,
+                coval_run=coval_run,
+                dataset_id=dataset_id,
+                dataset_sha256=dataset_sha256 or _dataset_sha256(),
+                workspace_id=workspace_id,
+            )
+            import_claim, import_generation = await _import_generation(
+                artifact_client, artifact_bucket, import_identity_value
+            )
             database_pending = await _pending_metrics(
                 writer,
                 benchmark=spec.benchmark,
@@ -1491,7 +1326,7 @@ async def _fetch_one_provider(
                 note_sample_candidate(coval_run, dataset_id)
             if condition.required in persisted and not data_seen:
                 data_seen, newest_data_at = True, coval_run.create_time
-            if normalized_capture_required and import_generation is None:
+            if import_generation is None:
                 logger.warning(
                     "normalized_import_recovery_pending",
                     provider=spec.provider,
@@ -1521,8 +1356,6 @@ async def _fetch_one_provider(
                 dataset_id=dataset_id,
                 dataset_sha256=dataset_sha256,
                 period_seconds=period_seconds,
-                normalized_dual_write_enabled=normalized_dual_write_enabled,
-                normalized_capture_required=normalized_capture_required,
                 artifact_client=artifact_client,
                 artifact_bucket=artifact_bucket,
                 workspace_id=workspace_id,
@@ -1610,7 +1443,7 @@ async def fetch_and_write_v2v(
     the cron may run more often than the sims.
     """
     settings = settings or get_settings()
-    require_normalized_persisted_capture(settings)
+    require_capture_bucket(settings)
     specs = s2s_specs(settings) if benchmark is Benchmark.S2S else ()
 
     metric_id = settings.coval_s2s_latency_metric_id
@@ -1704,16 +1537,12 @@ async def fetch_and_write_v2v(
             _require_family_test_sets(settings, specs)
         registered = frozenset((m.provider, m.model) for m in models)
         writer = RunWriter(pool)
-        artifact_client: storage.Client | None = None
-        artifact_bucket = settings.benchmark_artifact_bucket
-        if settings.normalized_capture_required:
-            from coval_bench.runner.capture import preflight_capture_storage
+        from coval_bench.runner.capture import preflight_capture_storage
 
-            if not artifact_bucket:
-                raise RuntimeError("benchmark_artifact_bucket is required for normalized capture")
-            artifact_client = storage.Client()
-            await asyncio.to_thread(preflight_capture_storage, artifact_client, artifact_bucket)
-            await writer.preflight_required_capture_schema()
+        artifact_bucket = settings.benchmark_artifact_bucket
+        artifact_client = storage.Client()
+        await asyncio.to_thread(preflight_capture_storage, artifact_client, artifact_bucket)
+        await writer.preflight_required_capture_schema()
         statuses: dict[str, RunStatus] = {}
         total_ingested = 0
         matched_run_ids: set[str] = set()
@@ -1787,8 +1616,6 @@ async def fetch_and_write_v2v(
                 window_seconds=window_seconds,
                 page_size=page_size,
                 matched_run_ids=matched_run_ids,
-                normalized_dual_write_enabled=settings.normalized_dual_write_enabled,
-                normalized_capture_required=settings.normalized_capture_required,
                 artifact_client=artifact_client,
                 artifact_bucket=artifact_bucket,
                 workspace_id=spec_workspace_id,

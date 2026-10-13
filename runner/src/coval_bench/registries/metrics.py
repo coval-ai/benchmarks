@@ -63,7 +63,7 @@ class MetricSpec(BaseModel, frozen=True):
 
 
 class MetricValueDefinition(BaseModel, frozen=True):
-    """One value in the normalized, versioned metric result contract."""
+    """One value in the versioned metric result contract."""
 
     key: str
     unit: str
@@ -219,8 +219,7 @@ def _primary(metric: Metric) -> MetricValueDefinition:
     )
 
 
-# This is deliberately independent from the legacy result-column layout.  A
-# metric implementation can add a new version without changing public rows.
+# A metric implementation can add a new version without changing public rows.
 METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
     (metric, "v1"): MetricValueContract(
         metric=metric,
@@ -296,7 +295,7 @@ def validate_metric_values(
     version: str,
     values: tuple[tuple[str, str, float, MetricValueRole], ...],
 ) -> None:
-    """Validate one normalized metric evaluation before it reaches the DB.
+    """Validate one metric evaluation before it reaches the DB.
 
     Values are ``(key, unit, value, value_role)`` tuples so the persistence
     layer remains free to use its own Pydantic input models.
@@ -350,17 +349,6 @@ def validate_metric_values(
             and abs(sum(components) - by_key["primary"]) > contract.component_sum_tolerance
         ):
             raise ValueError("metric components must sum to primary within tolerance")
-
-
-# Metrics kept out of the per-bucket series rollup (results_by_bucket) and
-# therefore out of every aggregates response's `series` array. The TTFA
-# components are consumed as window aggregates only (the Latency Variation
-# breakdown); TTS runs ~48x/day, so carrying them per bucket would double an
-# already multi-MB 30d series payload for rows nothing reads. Remove a metric
-# here if a per-run surface ever ships for it.
-SERIES_EXCLUDED_METRICS: frozenset[Metric] = frozenset(
-    {Metric.TTFA_ROUNDTRIP, Metric.TTFA_LEADING_SILENCE}
-)
 
 
 # (provider, model) pairs whose metric is not comparable with the cohort:

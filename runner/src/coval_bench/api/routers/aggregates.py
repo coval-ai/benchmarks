@@ -7,17 +7,12 @@ Serves the dashboard's chart data as pre-computed aggregates. Two blocks:
 
 * ``model_stats`` — per (provider, model, metric_type): avg, sample stddev
   (n-1 denominator, coalesced to 0 for n=1), p25/p50/p75/p90/p95
-  (percentile_cont), min, max, count. Read from the per-window materialized
-  views (``results_24h``/``results_7d``/``results_30d``), refreshed by the
-  runner at the end of each benchmark run — read-only here. Normalized reads
-  read atomically published snapshots built from the transactional value projection,
-  with observation/run eligibility and window boundaries fixed at publication.
+  (percentile_cont), min, max, count. Read from atomically published window
+  snapshots, with observation/run eligibility and window boundaries fixed at
+  publication.
 * ``series`` — per (provider, model, metric_type, bucket_at) distribution
-  (min/p25/p50/p75/max/value_sum/count), read from the ``results_by_bucket``
-  rollup table, filled by the orchestrator's end-of-run hook.
-
-Both blocks are pre-aggregated from rows with status='success' and a non-null
-metric_value, from parent runs in (succeeded, partial) — read-only here.
+  (min/p25/p50/p75/max/value_sum/count), read from the run-grain
+  ``dashboard_rollups`` rows.
 
 ``/results/aggregates/by-dataset`` serves the per-dataset views (the WER
 radar): every dataset's ``model_stats`` in one response, so a window toggle
@@ -29,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 from collections import defaultdict
+from dataclasses import asdict
 from typing import Any
 
 import structlog
@@ -40,13 +36,11 @@ from starlette.requests import Request
 
 from coval_bench.api.cache import get_or_fill
 from coval_bench.api.common import (
-    LEGACY_WINDOW_VIEWS,
-    WINDOW_INTERVALS,
+    WINDOW_DURATIONS,
     BenchmarkLiteral,
     StatisticLiteral,
     WindowLiteral,
     has_enough_samples,
-    reads_normalized,
 )
 from coval_bench.api.dashboard_windows import dashboard_read, require_window_state
 from coval_bench.api.deps import (
@@ -55,7 +49,6 @@ from coval_bench.api.deps import (
     get_cache_locks,
     get_pool,
     get_posthog,
-    get_settings,
 )
 from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
@@ -70,8 +63,8 @@ from coval_bench.api.schemas import (
     TimelinePoint,
     TimelineResponse,
 )
-from coval_bench.config import DATASET_ALL, Settings
-from coval_bench.db.dashboard_rollups import grain_for_seconds
+from coval_bench.config import DATASET_ALL
+from coval_bench.db.dashboard_rollups import GRAINS, RUN_SLOT
 from coval_bench.db.dashboard_windows import WINDOW_VIEWS
 from coval_bench.registries import (
     METRIC_SPECS,
@@ -83,117 +76,31 @@ logger = structlog.get_logger("coval_bench.api")
 
 router = APIRouter(tags=["results"])
 
-_STATS_SQL_TEMPLATE = (
-    "SELECT provider, model, metric_type,"
-    " avg_value, stddev_value, p25, p50, p75, p90, p95,"
-    " min_value, max_value, sample_count,"
-    " wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct"
-    " FROM {view}"
-    " WHERE benchmark = %(benchmark)s"
-    " AND dataset_id = %(dataset)s"
-    " ORDER BY provider, model, metric_type"
-)
+_STATS_SQL = """
+SELECT provider, model, m.code AS metric_type,
+       mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,
+       pooled_substitutions_pct, avg_value, stddev_value, p25, p50, p75, p90, p95,
+       min_value, max_value, sample_count,
+       wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct
+FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id
+WHERE benchmark = %(benchmark)s
+  AND dataset_id = %(dataset)s
+ORDER BY provider, model, metric_type
+"""
 
-_SAVED_STATS_SQL_TEMPLATE = (
-    _STATS_SQL_TEMPLATE.replace(
-        "SELECT provider, model, metric_type,",
-        "SELECT provider, model, m.code AS metric_type,",
-    )
-    .replace(
-        " FROM {view}",
-        " FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id",
-    )
-    .replace(
-        " avg_value,",
-        " mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,"
-        " pooled_substitutions_pct, avg_value,",
-    )
-)
+_STATS_BY_DATASET_SQL = """
+SELECT v.dataset_id, v.provider, v.model, m.code AS metric_type,
+       mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,
+       pooled_substitutions_pct, avg_value, stddev_value, p25, p50, p75, p90, p95,
+       min_value, max_value, sample_count,
+       wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct
+FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id
+WHERE benchmark = %(benchmark)s
+  AND dataset_id <> %(sentinel)s
+ORDER BY dataset_id, provider, model, metric_type
+"""
 
-_SERIES_SQL = (
-    "SELECT provider, model, metric_type, bucket_at AS scheduled_at,"
-    " min_value, p25, p50, p75, max_value, value_sum, sample_count"
-    " FROM benchmarks_v2.results_by_bucket"
-    " WHERE benchmark = %(benchmark)s"
-    " AND dataset_id = %(dataset)s"
-    " AND bucket_at >= NOW() - %(interval)s::interval"
-    " ORDER BY bucket_at, provider, model, metric_type"
-)
-
-_TIMELINE_SQL = (
-    "SELECT provider, model, metric_type, bucket_at AS scheduled_at,"
-    " CASE WHEN metric_type = 'WER'"
-    " THEN value_sum / NULLIF(sample_count, 0) ELSE p50 END AS value"
-    " FROM benchmarks_v2.results_by_bucket"
-    " WHERE benchmark = %(benchmark)s"
-    " AND dataset_id = %(dataset)s"
-    " AND bucket_at >= NOW() - %(interval)s::interval"
-    " ORDER BY bucket_at, provider, model, metric_type"
-)
-
-# Select a bounded, representative 30-day timeline in PostgreSQL.  Each exact
-# provider/model/metric group is split into 119 ordinal bins; retaining the min
-# and max plotted value in every bin plus the endpoints caps the result at 240
-# points per group while preserving endpoints and plotted extrema.  All tie
-# breaks include bucket_at so identical requests have identical ordering.
-_COMPACT_SERIES_TAIL = (
-    "), ranked AS ("
-    " SELECT *, row_number() OVER grp AS ordinal,"
-    " count(*) OVER (PARTITION BY provider, model, metric_type) AS group_count"
-    " FROM base WINDOW grp AS (PARTITION BY provider, model, metric_type ORDER BY scheduled_at)"
-    "), binned AS ("
-    " SELECT *, floor((ordinal - 1) * 119.0 / group_count)::int AS bin"
-    " FROM ranked"
-    "), selected AS ("
-    " SELECT *, row_number() OVER (PARTITION BY provider, model, metric_type, bin"
-    " ORDER BY value ASC, scheduled_at ASC) AS min_rank,"
-    " row_number() OVER (PARTITION BY provider, model, metric_type, bin"
-    " ORDER BY value DESC, scheduled_at ASC) AS max_rank"
-    " FROM binned"
-    ") SELECT provider, model, metric_type, scheduled_at, min_value, p25, p50, p75,"
-    " max_value, value_sum, sample_count, value, error_sum, reference_word_sum, pooled_value"
-    " FROM selected"
-    " WHERE min_rank = 1 OR max_rank = 1 OR ordinal = 1 OR ordinal = group_count"
-    " ORDER BY scheduled_at, provider, model, metric_type"
-)  # noqa: S608
-
-_COMPACT_SERIES_SQL = (
-    "WITH base AS ("  # noqa: S608
-    " SELECT provider, model, metric_type, bucket_at AS scheduled_at,"
-    " min_value, p25, p50, p75, max_value, value_sum, sample_count,"
-    " CASE WHEN metric_type = 'WER'"
-    " THEN value_sum / NULLIF(sample_count, 0) ELSE p50 END AS value,"
-    " NULL::float8 AS error_sum, NULL::float8 AS reference_word_sum, NULL::float8 AS pooled_value"
-    " FROM benchmarks_v2.results_by_bucket"
-    " WHERE benchmark = %(benchmark)s AND dataset_id = %(dataset)s"
-    " AND bucket_at >= NOW() - %(interval)s::interval" + _COMPACT_SERIES_TAIL
-)
-
-_DATASETS_SQL_TEMPLATE = (
-    "SELECT DISTINCT dataset_id FROM {view}"
-    " WHERE benchmark = %(benchmark)s AND dataset_id <> %(sentinel)s"
-    " ORDER BY dataset_id"
-)
-
-_STATS_BY_DATASET_SQL_TEMPLATE = (
-    "SELECT dataset_id, provider, model, metric_type,"
-    " avg_value, stddev_value, p25, p50, p75, p90, p95,"
-    " min_value, max_value, sample_count,"
-    " wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct"
-    " FROM {view}"
-    " WHERE benchmark = %(benchmark)s"
-    " AND dataset_id <> %(sentinel)s"
-    " ORDER BY dataset_id, provider, model, metric_type"
-)
-_SAVED_STATS_BY_DATASET_SQL_TEMPLATE = _STATS_BY_DATASET_SQL_TEMPLATE.replace(
-    "SELECT dataset_id, provider, model, metric_type,",
-    "SELECT v.dataset_id, v.provider, v.model, m.code AS metric_type,",
-).replace(
-    " FROM {view}",
-    " FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id",
-)
-
-_NORMALIZED_DATASETS_SQL = """
+_DATASETS_SQL = """
 SELECT DISTINCT dataset_id
 FROM {view}
 WHERE benchmark = %(benchmark)s
@@ -206,56 +113,72 @@ _RUN_SLOT_SQL = """
 SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS scheduled_at,
        b.min_value, b.p25, b.p50, b.p75, b.max_value, b.value_sum, b.sample_count,
        b.wer_error_words AS error_sum, b.wer_reference_words AS reference_word_sum,
-       100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0) AS pooled_value
+       100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0) AS pooled_value,
+       CASE WHEN m.code = 'WER'
+            THEN COALESCE(100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0),
+                          b.value_sum / NULLIF(b.sample_count, 0))
+            ELSE b.p50 END AS value
 FROM benchmarks_v2.dashboard_rollups b
 JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
 WHERE b.grain = 'run' AND b.value_key = 'primary'
   AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
   AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
-  AND b.bucket_at >= NOW() - %(interval)s::interval
+  AND b.bucket_at >= %(since)s
+  AND (%(metric_type)s::text IS NULL OR m.code = %(metric_type)s)
+ORDER BY scheduled_at, provider, model, metric_type
 """
 
-_BUCKET_VALUE = (
-    " CASE WHEN metric_type = 'WER'"
-    " THEN COALESCE(pooled_value, value_sum / NULLIF(sample_count, 0)) ELSE p50 END AS value"
+# A bounded, representative 30-day series: each provider/model/metric group is
+# split into 119 ordinal bins, keeping each bin's min and max value plus the
+# endpoints, so at most 240 points per group with extrema preserved.
+_COMPACT_SERIES_SQL = """
+WITH base AS (
+  SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS scheduled_at,
+         b.min_value, b.p25, b.p50, b.p75, b.max_value, b.value_sum, b.sample_count,
+         b.wer_error_words AS error_sum, b.wer_reference_words AS reference_word_sum,
+         100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0) AS pooled_value,
+         CASE WHEN m.code = 'WER'
+              THEN COALESCE(100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0),
+                            b.value_sum / NULLIF(b.sample_count, 0))
+              ELSE b.p50 END AS value
+  FROM benchmarks_v2.dashboard_rollups b
+  JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
+  WHERE b.grain = 'run' AND b.value_key = 'primary'
+    AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
+    AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
+    AND b.bucket_at >= %(since)s
+), ranked AS (
+  SELECT *, row_number() OVER grp AS ordinal,
+         count(*) OVER (PARTITION BY provider, model, metric_type) AS group_count
+  FROM base
+  WINDOW grp AS (PARTITION BY provider, model, metric_type ORDER BY scheduled_at)
+), binned AS (
+  SELECT *, floor((ordinal - 1) * 119.0 / group_count)::int AS bin
+  FROM ranked
+), selected AS (
+  SELECT *,
+         row_number() OVER (PARTITION BY provider, model, metric_type, bin
+                            ORDER BY value ASC, scheduled_at ASC) AS min_rank,
+         row_number() OVER (PARTITION BY provider, model, metric_type, bin
+                            ORDER BY value DESC, scheduled_at ASC) AS max_rank
+  FROM binned
 )
-
-_NORMALIZED_SERIES_SQL = (
-    "SELECT * FROM (" + _RUN_SLOT_SQL + ") b"  # noqa: S608
-    " ORDER BY scheduled_at, provider, model, metric_type"
-)
-
-_NORMALIZED_TIMELINE_SQL = (
-    "SELECT provider, model, metric_type, scheduled_at, pooled_value,"  # noqa: S608
-    + _BUCKET_VALUE
-    + " FROM ("
-    + _RUN_SLOT_SQL
-    + ") b"
-    " ORDER BY scheduled_at, provider, model, metric_type"
-)
-
-_NORMALIZED_COMPACT_SERIES_SQL = (
-    "WITH base AS (SELECT *,"  # noqa: S608
-    + _BUCKET_VALUE
-    + " FROM ("
-    + _RUN_SLOT_SQL
-    + ") b"
-    + _COMPACT_SERIES_TAIL
-)
+SELECT provider, model, metric_type, scheduled_at, min_value, p25, p50, p75,
+       max_value, value_sum, sample_count, value, error_sum, reference_word_sum, pooled_value
+FROM selected
+WHERE min_rank = 1 OR max_rank = 1 OR ordinal = 1 OR ordinal = group_count
+ORDER BY scheduled_at, provider, model, metric_type
+"""
 
 # Rules are data bound through psycopg, including metric and component names.
 # Source buckets retain sums/counts, so larger intervals never average averages.
-_AVERAGE_HEAD_SQL = """
+_ROLLUP_AVERAGE_SQL = """
 SELECT provider, model, metric_type, scheduled_at, sample_count, latest_source_at,
        COALESCE(pooled_value, value_sum / NULLIF(sample_count, 0)) AS value,
        pooled_value,
        CASE WHEN metric_type <> 'WER' THEN 'mean'
             WHEN pooled_value IS NOT NULL THEN 'ratio'
             ELSE 'mean_fallback' END AS aggregation_method
-"""
-
-_ROLLUP_AVERAGE_SQL = f"""
-{_AVERAGE_HEAD_SQL}
 FROM (
  SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS scheduled_at,
         b.value_sum, b.sample_count, b.latest_run_at AS latest_source_at,
@@ -267,23 +190,9 @@ FROM (
    AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
    AND b.grain = %(grain)s
    AND b.bucket_at >= %(since)s AND b.bucket_at + %(step)s <= %(until)s
+   AND (%(metric_type)s::text IS NULL OR m.code = %(metric_type)s)
 ) buckets ORDER BY scheduled_at, provider, model, metric_type
-"""  # noqa: S608
-
-_LEGACY_AVERAGE_SQL = f"""
-{_AVERAGE_HEAD_SQL}
-FROM (
- SELECT provider, model, metric_type,
-        to_timestamp(floor(extract(epoch FROM bucket_at) / %(bucket_seconds)s)
-                     * %(bucket_seconds)s) AS scheduled_at,
-        SUM(value_sum)::float8 AS value_sum, SUM(sample_count) AS sample_count,
-        MAX(bucket_at) AS latest_source_at, NULL::float8 AS pooled_value
- FROM benchmarks_v2.results_by_bucket
- WHERE benchmark = %(benchmark)s AND dataset_id = %(dataset)s
-   AND bucket_at >= %(since)s AND bucket_at < %(until)s
- GROUP BY provider, model, metric_type, scheduled_at
-) buckets ORDER BY scheduled_at, provider, model, metric_type
-"""  # noqa: S608
+"""
 
 _PERCENTILE_METRICS = frozenset(
     {"WER", "TTFT", "TTFS", "AudioToFinal", "TTFA", "TTFARoundtrip", "TTFALeadingSilence", "V2V"}
@@ -315,9 +224,9 @@ ORDER BY scheduled_at, provider, model
 """
 
 
-def _timeline_bucket_seconds(duration_seconds: float) -> int:
-    """Hourly buckets up to roughly 200 points, four-hour buckets beyond that."""
-    return 3600 if duration_seconds / 200.0 <= 3600 else 14400
+def _timeline_grain(duration: dt.timedelta) -> str:
+    """Hourly buckets up to 200 points, four-hour buckets beyond that."""
+    return "1h" if duration <= dt.timedelta(hours=200) else "4h"
 
 
 def _percentile_sql(statistic: str) -> str:
@@ -372,105 +281,57 @@ async def get_results_aggregates(
     ),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
-    cache: TTLCache[Any, Any] = Depends(get_cache),
-    cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
-    settings: Settings = Depends(get_settings),
 ) -> AggregatesResponse:
     """Return per-model stats and per-bucket series for one benchmark.
 
     Args:
-        benchmark: One of STT, TTS.
-        window: Time window — stats over results.created_at, series over
-            bucket_at. Defaults to 24h.
+        benchmark: One of STT, TTS, S2S, LLM.
+        window: Time window. Defaults to 24h.
         dataset: Dataset id the blocks are computed over. Omitted, the pooled
             rows (every dataset together) are served — the pre-dataset-dimension
             behavior.
     """
     dataset_key = dataset or DATASET_ALL
-
-    async def fill() -> AggregatesResponse:
-        normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
-        stats_sql = (
-            _SAVED_STATS_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
-            if normalized
-            else _STATS_SQL_TEMPLATE.format(view=LEGACY_WINDOW_VIEWS[window])
-        )
-        datasets_sql = (
-            _NORMALIZED_DATASETS_SQL.format(view=WINDOW_VIEWS[window])
-            if normalized
-            else _DATASETS_SQL_TEMPLATE.format(view=LEGACY_WINDOW_VIEWS[window])
-        )
-        stats_params: dict[str, Any] = {
-            "benchmark": benchmark,
-            "dataset": dataset_key,
-            "interval": WINDOW_INTERVALS[window],
-        }
-        async with dashboard_read(pool, saved=normalized) as conn:
-            snapshot = await require_window_state(conn) if normalized else None
-            stat_rows = await (await conn.execute(stats_sql, stats_params)).fetchall()
-            if include_series:
-                series_rows = await (
-                    await conn.execute(
-                        (
-                            _NORMALIZED_COMPACT_SERIES_SQL
-                            if window == "30d"
-                            else _NORMALIZED_SERIES_SQL
-                        )
-                        if normalized
-                        else (_COMPACT_SERIES_SQL if window == "30d" else _SERIES_SQL),
-                        {
-                            "benchmark": benchmark,
-                            "dataset": dataset_key,
-                            "interval": WINDOW_INTERVALS[window],
-                        },
-                    )
-                ).fetchall()
-            else:
-                series_rows = []
-            dataset_rows = await (
+    params = {
+        "benchmark": benchmark,
+        "dataset": dataset_key,
+        "sentinel": DATASET_ALL,
+        "since": dt.datetime.now(dt.UTC) - WINDOW_DURATIONS[window],
+        "metric_type": None,
+    }
+    view = WINDOW_VIEWS[window]
+    async with dashboard_read(pool) as conn:
+        snapshot = await require_window_state(conn)
+        stat_rows = await (await conn.execute(_STATS_SQL.format(view=view), params)).fetchall()
+        series_rows = (
+            await (
                 await conn.execute(
-                    datasets_sql,
-                    {
-                        "benchmark": benchmark,
-                        "sentinel": DATASET_ALL,
-                        "interval": WINDOW_INTERVALS[window],
-                    },
+                    _COMPACT_SERIES_SQL if window == "30d" else _RUN_SLOT_SQL, params
                 )
             ).fetchall()
-
-        return AggregatesResponse(
-            benchmark=benchmark,
-            window=window,
-            dataset=dataset_key,
-            datasets=[r["dataset_id"] for r in dataset_rows],
-            model_stats=[
-                _flag_thin(ModelStatEntry.model_validate(r), benchmark)
-                for r in stat_rows
-                if _visible(r, hidden)
-            ],
-            # Series points are deliberately unflagged: one bucket holds a single
-            # run's samples, so every point sits under the floor by design.
-            series=[SeriesPoint.model_validate(r) for r in series_rows if _visible(r, hidden)],
-            snapshot=snapshot.as_dict() if snapshot else None,
+            if include_series
+            else []
         )
+        dataset_rows = await (
+            await conn.execute(_DATASETS_SQL.format(view=view), params)
+        ).fetchall()
 
-    # The hidden set is part of the key: two callers who can see different models
-    # must never share a cache entry, or one would be served the other's rows.
-    cache_key = (
-        "aggregates",
-        benchmark,
-        window,
-        dataset_key,
-        include_series,
-        settings.normalized_dashboard_reads_enabled,
-        tuple(sorted(hidden)),
+    response = AggregatesResponse(
+        benchmark=benchmark,
+        window=window,
+        dataset=dataset_key,
+        datasets=[r["dataset_id"] for r in dataset_rows],
+        model_stats=[
+            _flag_thin(ModelStatEntry.model_validate(r), benchmark)
+            for r in stat_rows
+            if _visible(r, hidden)
+        ],
+        # Series points are deliberately unflagged: one bucket holds a single
+        # run's samples, so every point sits under the floor by design.
+        series=[SeriesPoint.model_validate(r) for r in series_rows if _visible(r, hidden)],
+        snapshot=asdict(snapshot),
     )
-    if reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark):
-        response, cache_status = await fill(), "bypass"
-    else:
-        response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
-
     capture_api_event(
         posthog_client,
         "results_aggregates_queried",
@@ -481,8 +342,6 @@ async def get_results_aggregates(
             "include_series": include_series,
             "model_stat_count": len(response.model_stats),
             "series_point_count": len(response.series),
-            "cache_hit": cache_status != "miss",
-            "cache_status": cache_status,
             "$process_person_profile": False,
         },
     )
@@ -508,12 +367,10 @@ async def get_results_timeline(
     cache: TTLCache[Any, Any] = Depends(get_cache),
     cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
-    settings: Settings = Depends(get_settings),
 ) -> TimelineResponse:
     """Return run points or intervals using each metric's aggregation rule."""
     _validate_percentile_request(benchmark, statistic, metric_type)
     dataset_key = dataset or DATASET_ALL
-    bucket_seconds: int | None
     if (since is None) != (until is None):
         raise HTTPException(status_code=422, detail="since and until must be provided together")
     if since is not None and until is not None:
@@ -527,23 +384,19 @@ async def get_results_timeline(
         until = until.astimezone(dt.UTC)
         if until <= since:
             raise HTTPException(status_code=422, detail="until must be after since")
-        duration = (until - since).total_seconds()
-        if duration > 30 * 86400:
+        if until - since > dt.timedelta(days=30):
             raise HTTPException(status_code=422, detail="timeline range cannot exceed 30 days")
         response_window: WindowLiteral | None = None
-        bucket_seconds = _timeline_bucket_seconds(duration)
-        aggregation = "average"
+        grain = _timeline_grain(until - since)
     else:
         response_window = window or "24h"
-        duration = {"24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400}[response_window]
-        now = dt.datetime.now(dt.UTC)
-        since = now - dt.timedelta(seconds=duration)
-        until = now
-        bucket_seconds = _timeline_bucket_seconds(duration) if response_window != "24h" else None
-        aggregation = "run" if response_window == "24h" else "average"
+        until = dt.datetime.now(dt.UTC)
+        since = until - WINDOW_DURATIONS[response_window]
+        grain = RUN_SLOT if response_window == "24h" else _timeline_grain(until - since)
+    aggregation = "run" if grain == RUN_SLOT else "average"
+    bucket_seconds = GRAINS.get(grain)
 
     async def fill() -> TimelineResponse:
-        normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
         rule_params: dict[str, Any] = {}
         if statistic != "default":
             sql = _percentile_sql(statistic)
@@ -552,40 +405,24 @@ async def get_results_timeline(
             )
             rule_params = {"base_metric": base_metric, "value_key": value_key}
         elif aggregation == "run":
-            sql = _NORMALIZED_TIMELINE_SQL if normalized else _TIMELINE_SQL
+            sql = _RUN_SLOT_SQL
         else:
-            sql = _ROLLUP_AVERAGE_SQL if normalized else _LEGACY_AVERAGE_SQL
+            sql = _ROLLUP_AVERAGE_SQL
         params = {
             "benchmark": benchmark,
             "dataset": dataset_key,
-            # Only the unchanged run query uses this interval; averages use
-            # the explicit source bounds below.
-            "interval": (
-                f"{int(duration)} seconds"
-                if response_window is None
-                else WINDOW_INTERVALS[response_window]
-            ),
             "since": since,
             "until": until,
-            "bucket_seconds": bucket_seconds,
-            "grain": grain_for_seconds(bucket_seconds),
+            "grain": grain,
             "step": dt.timedelta(seconds=bucket_seconds or 0),
             "metric_type": metric_type,
         }
         params.update(rule_params)
-        # Percentiles only exist in normalized storage, whatever the read flag says.
-        saved = normalized or statistic != "default"
-        materialization = None
-        async with dashboard_read(pool, saved=saved) as conn:
+        async with dashboard_read(pool) as conn:
             rows = await (await conn.execute(sql, params)).fetchall()
-            if saved:
-                pending = await (await conn.execute(_STALE_QUEUE_SQL)).fetchone()
-                materialization = DashboardMaterialization(stale=bool(pending and pending["stale"]))
-        visible_rows = [
-            row
-            for row in rows
-            if _visible(row, hidden) and (metric_type is None or row["metric_type"] == metric_type)
-        ]
+            pending = await (await conn.execute(_STALE_QUEUE_SQL)).fetchone()
+        materialization = DashboardMaterialization(stale=bool(pending and pending["stale"]))
+        visible_rows = [row for row in rows if _visible(row, hidden)]
         return TimelineResponse(
             benchmark=benchmark,
             statistic=statistic,
@@ -627,7 +464,6 @@ async def get_results_timeline(
         bucket_seconds,
         # Preset keys intentionally omit request time; custom bounds are isolated.
         None if response_window is not None else (since, until),
-        settings.normalized_dashboard_reads_enabled,
         tuple(sorted(hidden)),
     )
     response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
@@ -657,10 +493,7 @@ async def get_results_aggregates_by_dataset(
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
-    cache: TTLCache[Any, Any] = Depends(get_cache),
-    cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
-    settings: Settings = Depends(get_settings),
 ) -> AggregatesByDatasetResponse:
     """Return per-model stats for every dataset of one benchmark and window.
 
@@ -669,62 +502,33 @@ async def get_results_aggregates_by_dataset(
     endpoint serves those.
     """
 
-    async def fill() -> AggregatesByDatasetResponse:
-        normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
-        stats_sql = (
-            _SAVED_STATS_BY_DATASET_SQL_TEMPLATE.replace(
-                " avg_value,",
-                " mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,"
-                " pooled_substitutions_pct, avg_value,",
-            ).format(view=WINDOW_VIEWS[window])
-            if normalized
-            else _STATS_BY_DATASET_SQL_TEMPLATE.format(view=LEGACY_WINDOW_VIEWS[window])
-        )
-        params = {
-            "benchmark": benchmark,
-            "sentinel": DATASET_ALL,
-            "interval": WINDOW_INTERVALS[window],
-        }
+    params = {"benchmark": benchmark, "sentinel": DATASET_ALL}
+    async with dashboard_read(pool) as conn:
+        snapshot = await require_window_state(conn)
+        rows = await (
+            await conn.execute(_STATS_BY_DATASET_SQL.format(view=WINDOW_VIEWS[window]), params)
+        ).fetchall()
 
-        async with dashboard_read(pool, saved=normalized) as conn:
-            snapshot = await require_window_state(conn) if normalized else None
-            rows = await (await conn.execute(stats_sql, params)).fetchall()
+    grouped: dict[str, list[ModelStatEntry]] = {}
+    for row in rows:
+        if _visible(row, hidden):
+            grouped.setdefault(row["dataset_id"], []).append(
+                _flag_thin(ModelStatEntry.model_validate(row), benchmark)
+            )
 
-        grouped: dict[str, list[ModelStatEntry]] = {}
-        for row in rows:
-            if _visible(row, hidden):
-                grouped.setdefault(row["dataset_id"], []).append(
-                    _flag_thin(ModelStatEntry.model_validate(row), benchmark)
-                )
-
-        return AggregatesByDatasetResponse(
-            benchmark=benchmark,
-            window=window,
-            blocks=[
-                DatasetAggregates(
-                    dataset=dataset,
-                    model_stats=stats,
-                    persona=DatasetPersona.for_dataset(dataset),
-                )
-                for dataset, stats in grouped.items()
-            ],
-            snapshot=snapshot.as_dict() if snapshot else None,
-        )
-
-    # The hidden set is part of the key: two callers who can see different models
-    # must never share a cache entry, or one would be served the other's rows.
-    cache_key = (
-        "aggregates_by_dataset",
-        benchmark,
-        window,
-        settings.normalized_dashboard_reads_enabled,
-        tuple(sorted(hidden)),
+    response = AggregatesByDatasetResponse(
+        benchmark=benchmark,
+        window=window,
+        blocks=[
+            DatasetAggregates(
+                dataset=dataset,
+                model_stats=stats,
+                persona=DatasetPersona.for_dataset(dataset),
+            )
+            for dataset, stats in grouped.items()
+        ],
+        snapshot=asdict(snapshot),
     )
-    if reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark):
-        response, cache_status = await fill(), "bypass"
-    else:
-        response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
-
     capture_api_event(
         posthog_client,
         "results_aggregates_by_dataset_queried",
@@ -733,8 +537,6 @@ async def get_results_aggregates_by_dataset(
             "window": window,
             "dataset_count": len(response.blocks),
             "model_stat_count": sum(len(b.model_stats) for b in response.blocks),
-            "cache_hit": cache_status != "miss",
-            "cache_status": cache_status,
             "$process_person_profile": False,
         },
     )
