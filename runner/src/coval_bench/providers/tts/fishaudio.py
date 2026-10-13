@@ -23,6 +23,8 @@ from coval_bench.providers.tts._common import Synthesis
 _WS_URL = "wss://api.fish.audio/v1/tts/live"
 _SAMPLE_RATE = 24000
 _MAX_WS_SIZE = 16 * 1024 * 1024
+# Same model on Fish's US East cluster; the row id carries the routing.
+_US_EAST_SUFFIX = "-us-east"
 
 
 class FishAudioTTSProvider(TTSProvider):
@@ -50,6 +52,9 @@ class FishAudioTTSProvider(TTSProvider):
     async def synthesize(self, text: str) -> TTSResult:
         synthesis = Synthesis("fishaudio", self._model, self._voice, _SAMPLE_RATE)
         headers = {"Authorization": f"Bearer {self._api_key}", "model": self._model}
+        if self._model.endswith(_US_EAST_SUFFIX):
+            headers["model"] = self._model.removesuffix(_US_EAST_SUFFIX)
+            headers["x-fish-datacenter"] = "us-east"
 
         try:
             async with ws_client.connect(

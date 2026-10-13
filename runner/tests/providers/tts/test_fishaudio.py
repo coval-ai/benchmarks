@@ -87,6 +87,32 @@ async def test_fishaudio_tts_url_and_headers(fishaudio_settings: Settings) -> No
     headers = captured["kwargs"]["additional_headers"]  # type: ignore[index]
     assert headers["Authorization"] == "Bearer test-fishaudio-key"
     assert headers["model"] == "s2.1-pro"
+    assert "x-fish-datacenter" not in headers
+    if result.audio_path is not None:
+        result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_fishaudio_tts_us_east_model_sets_datacenter(fishaudio_settings: Settings) -> None:
+    ws = FakeWebSocket(_finish_events([make_pcm_bytes(240)]))
+    captured: dict[str, object] = {}
+
+    def connect_side_effect(url: str, **kwargs: object) -> FakeWebSocket:
+        captured["kwargs"] = kwargs
+        return ws
+
+    provider = FishAudioTTSProvider(fishaudio_settings, model="s2.1-pro-us-east", voice=_VOICE)
+
+    with patch(
+        "coval_bench.providers.tts.fishaudio.ws_client.connect",
+        side_effect=connect_side_effect,
+    ):
+        result = await provider.synthesize("Hello")
+
+    headers = captured["kwargs"]["additional_headers"]  # type: ignore[index]
+    assert headers["model"] == "s2.1-pro"
+    assert headers["x-fish-datacenter"] == "us-east"
+    assert provider.model == "s2.1-pro-us-east"
     if result.audio_path is not None:
         result.audio_path.unlink()
 
