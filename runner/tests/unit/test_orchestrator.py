@@ -4246,3 +4246,105 @@ async def test_stt_guava_receives_base_url_and_domain(audio_file: Path, settings
 
     assert seen["base_url"] == "https://guava.test"
     assert seen["domain"] == "healthcare"
+
+
+@pytest.mark.asyncio
+async def test_only_runs_selected_models(audio_file: Path, settings: Settings) -> None:
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
+    selected_cls = MagicMock(return_value=provider_inst)
+    other_cls = MagicMock()
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": selected_cls, "speechmatics": other_cls},
+    ):
+        await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=[
+                *_paused_registry(Benchmark.STT),
+                _stt_entry("deepgram", "nova-2"),
+                _stt_entry("speechmatics", "enhanced"),
+            ],
+            only=frozenset({"deepgram/nova-2"}),
+        )
+
+    selected_cls.assert_called()
+    other_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_only_rejects_unmatched_selector(audio_file: Path, settings: Settings) -> None:
+    async with _orchestrator_env(audio_path=audio_file):
+        with pytest.raises(ValueError, match="paused-stt/one"):
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=[
+                    *_paused_registry(Benchmark.STT),
+                    _stt_entry("deepgram", "nova-2"),
+                ],
+                only=frozenset({"paused-stt/one"}),
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("configured", "expected"), [(None, "tts-v2"), ("tts-v1", "tts-v1")])
+async def test_only_defaults_tts_dataset_to_board_set(
+    audio_file: Path, settings: Settings, configured: str | None, expected: str
+) -> None:
+    run_settings = (
+        settings
+        if configured is None
+        else settings.model_copy(update={"tts_dataset_id": configured})
+    )
+    provider_inst = MagicMock()
+    provider_inst.synthesize = AsyncMock(
+        return_value=TTSResult(
+            provider="elevenlabs",
+            model="eleven_flash_v2_5",
+            voice="v",
+            ttfa_ms=120.0,
+            audio_path=audio_file,
+            error=None,
+        )
+    )
+    tts_dataset = MagicMock()
+    tts_dataset.items = [_make_tts_item()]
+    loads: list[str] = []
+
+    def _load(
+        dataset_id: str, *, settings: Any, sample_size: int | None = None, rng: Any = None
+    ) -> Any:
+        loads.append(dataset_id)
+        return tts_dataset
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        tts_providers={"elevenlabs": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ):
+        with (
+            patch("coval_bench.runner.orchestrator._get_load_dataset", return_value=_load),
+            patch(
+                "coval_bench.runner.orchestrator._transcribe_with_whisper",
+                side_effect=RuntimeError("whisper unavailable"),
+            ),
+        ):
+            await run_benchmarks(
+                settings=run_settings,
+                benchmark_kind="tts",
+                smoke=False,
+                matrix_overrides=[_tts_entry("elevenlabs", "eleven_flash_v2_5", "v")],
+                only=frozenset({"elevenlabs/eleven_flash_v2_5"}),
+            )
+
+    assert loads == [expected]
+    assert writer.start_run.await_args.kwargs["dataset_id"] == expected
