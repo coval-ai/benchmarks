@@ -11,7 +11,7 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Self
+from typing import Any, Protocol, Self
 
 import psycopg
 import structlog
@@ -41,7 +41,7 @@ from coval_bench.observation_artifacts import (
     prepare_timing_events,
     upload_prepared_observation_artifact,
 )
-from coval_bench.registries import Benchmark, Metric, RegisteredModel
+from coval_bench.registries import Benchmark, Metric
 from coval_bench.runner import capture as capture_store
 from coval_bench.runner.capture import (
     CaptureEnvelope,
@@ -54,10 +54,17 @@ from coval_bench.runner.capture import (
     upload_receipt,
 )
 
-if TYPE_CHECKING:
-    from coval_bench.s2s.fetch_v2v import AgentSpec
-
 logger = structlog.get_logger("coval_bench.runner")
+
+
+class CaptureEntry(Protocol):
+    """The provider and model a capture is recorded under."""
+
+    @property
+    def provider(self) -> str: ...
+
+    @property
+    def model(self) -> str: ...
 
 
 class FrozenEvaluation(BaseModel):
@@ -255,7 +262,7 @@ def prepare_capture_envelope(
     dataset_id: str,
     dataset_sha256: str,
     sample_id: str,
-    entry: RegisteredModel | AgentSpec,
+    entry: CaptureEntry,
     benchmark: Benchmark,
     results: Sequence[Result],
     provider_error: str | None,

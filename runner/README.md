@@ -114,6 +114,22 @@ The token lasts an hour and needs only a normal `gcloud auth login`. Model histo
 
 Apache-2.0.
 
+### Legacy results drop runbook (migration 0045)
+
+Migration `20261010_0045` drops the legacy `results` storage and renames the
+dashboard window views to `results_24h/7d/30d`. The default boot migration stops
+at `20261005_0043`, so 0045 runs by hand. Run it as soon as the release that
+contains it lands: until it does, `/v1/results/aggregates`, `/by-dataset` and
+`/v1/leaderboard` return the `dashboard_snapshot_not_ready` 503.
+
+```bash
+gcloud run jobs execute benchmarks-runner --project=coval-benchmarks-prod --region=us-east1 --wait --args='db,migrate,--revision,20261010_0045'
+```
+
+If it fails on the 10s lock timeout, an hourly window refresh was holding the
+views; rerun it. Legacy rows exist only in Cloud SQL backups afterwards, and a
+downgrade recreates the legacy objects empty.
+
 ### Metric catalog cutover runbook
 
 The application rollout precedes the destructive schema cleanup. Deploy the

@@ -32,6 +32,7 @@ from coval_bench.runner.capture import (
 )
 from coval_bench.s2s import fetch_v2v
 from coval_bench.s2s.conditions import (
+    DATASET_ID,
     DATASET_ID_BANK,
     DATASET_ID_BANK_LOW,
     DATASET_ID_DENTAL,
@@ -257,7 +258,7 @@ async def _ingest_run(*args: Any, **kwargs: Any) -> RunStatus | None:
         fetch_v2v._import_identity(
             spec=kwargs["spec"],
             coval_run=kwargs["coval_run"],
-            dataset_id=kwargs.get("dataset_id", fetch_v2v.DATASET_ID),
+            dataset_id=kwargs.get("dataset_id", DATASET_ID),
             dataset_sha256=kwargs.get("dataset_sha256") or "f" * 64,
             workspace_id=kwargs.get("workspace_id"),
         ),

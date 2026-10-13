@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from psycopg import AsyncConnection
-from psycopg.errors import ObjectNotInPrerequisiteState, UndefinedTable
+from psycopg.errors import ObjectNotInPrerequisiteState, UndefinedColumn, UndefinedTable
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -58,5 +58,6 @@ async def dashboard_read(pool: AsyncConnectionPool[Any]) -> AsyncIterator[AsyncC
             conn.row_factory = dict_row
             await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             yield conn
-    except (UndefinedTable, ObjectNotInPrerequisiteState) as exc:
+    # UndefinedColumn covers a release that is live before migration 0045 renames the views.
+    except (UndefinedTable, UndefinedColumn, ObjectNotInPrerequisiteState) as exc:
         raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready") from exc
