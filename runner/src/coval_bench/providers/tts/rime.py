@@ -10,14 +10,11 @@ import json
 import time
 from urllib.parse import urlencode
 
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 _WS_BASE = "wss://users-ws.rime.ai/ws3"
 
@@ -50,10 +47,8 @@ class RimeTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via Rime /ws3 WebSocket and return a TTSResult."""
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
         sample_rate = _MODEL_SAMPLE_RATES.get(self._model, 24000)
+        synthesis = Synthesis("rime", self._model, self._voice, sample_rate)
 
         qs = urlencode(
             {
@@ -70,7 +65,7 @@ class RimeTTSProvider(TTSProvider):
 
         try:
             async with ws_client.connect(url, additional_headers=headers) as ws:
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
 
                 await ws.send(json.dumps({"text": text}))
                 await ws.send(json.dumps({"operation": "eos"}))
@@ -80,11 +75,7 @@ class RimeTTSProvider(TTSProvider):
                     msg_type = msg.get("type", "")
 
                     if msg_type == "chunk":
-                        audio_bytes = base64.b64decode(msg["data"])
-                        if audio_bytes:
-                            if first_chunk_at is None:
-                                first_chunk_at = time.monotonic()
-                            audio_chunks.append(audio_bytes)
+                        synthesis.add_chunk(base64.b64decode(msg["data"]))
 
                     elif msg_type == "done":
                         break
@@ -94,24 +85,6 @@ class RimeTTSProvider(TTSProvider):
                     # "timestamps" events are silently dropped — not needed for benchmark.
 
         except Exception as exc:
-            logger.warning("rime_error", provider="rime", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="rime",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=sample_rate,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="rime",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=sample_rate,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()

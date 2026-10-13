@@ -55,7 +55,9 @@ from pydantic import BaseModel, Field
 from coval_bench import telemetry
 from coval_bench.datasets.suite import (
     DEDICATED_STT_SUITE,
+    DEDICATED_TTS_SUITE,
     DEFAULT_STT_DATASET,
+    SHARED_TTS_SUITE,
     stt_sample_size,
     tts_sample_size,
 )
@@ -1189,12 +1191,17 @@ async def run_suite(
     benchmark_kind: Literal["stt", "tts", "both"] = "both",
     smoke: bool = False,
     source: Literal["shared", "dedicated"] = "shared",
+    only: frozenset[str] | None = None,
 ) -> list[RunSummary]:
     """Dedicated STT walks the suite, one run row per dataset on one tick; else a single run."""
     if source != "dedicated" or benchmark_kind != "stt" or settings.dataset_id is not None:
         return [
             await run_benchmarks(
-                settings=settings, benchmark_kind=benchmark_kind, smoke=smoke, source=source
+                settings=settings,
+                benchmark_kind=benchmark_kind,
+                smoke=smoke,
+                source=source,
+                only=only,
             )
         ]
 
@@ -1209,6 +1216,7 @@ async def run_suite(
                 source=source,
                 dataset_id=dataset_id,
                 scheduled_at=scheduled_at,
+                only=only,
             )
         except Exception:
             logger.exception("suite_dataset_failed", dataset_id=dataset_id)
@@ -1228,6 +1236,7 @@ async def run_benchmarks(
     matrix_overrides: list[RegisteredModel] | None = None,
     dataset_id: str | None = None,
     scheduled_at: datetime | None = None,
+    only: frozenset[str] | None = None,
 ) -> RunSummary:
     """Execute one complete benchmark run.
 
@@ -1242,6 +1251,7 @@ async def run_benchmarks(
             override the registry by ``(benchmark, provider, model)`` key.
         dataset_id: STT dataset for this run; defaults to ``settings.dataset_id``.
         scheduled_at: Tick the run is attributed to; suite runs share one.
+        only: ``provider/model`` selectors; when set, only those collected models run.
 
     Returns:
         A :class:`RunSummary` with final counts and run status.
@@ -1264,6 +1274,10 @@ async def run_benchmarks(
     stt_dataset_id = dataset_id or settings.dataset_id or DEFAULT_STT_DATASET
     stt_size = stt_sample_size(source, stt_dataset_id, settings.dataset_sample_size)
     tts_dataset_id = settings.tts_dataset_id
+    if only and "tts_dataset_id" not in settings.model_fields_set:
+        tts_dataset_id = next(
+            iter(DEDICATED_TTS_SUITE if source == "dedicated" else SHARED_TTS_SUITE)
+        )
     tts_override = (
         settings.tts_dataset_sample_size
         if settings.tts_dataset_sample_size is not None
@@ -1319,6 +1333,18 @@ async def run_benchmarks(
         dedicated = source == "dedicated"
         enabled_stt = [e for e in stt_matrix if e.collected and _runs_daily(e) == dedicated]
         enabled_tts = [e for e in tts_matrix if e.collected and _runs_daily(e) == dedicated]
+        if only:
+            enabled_stt = [e for e in enabled_stt if f"{e.provider}/{e.model}" in only]
+            enabled_tts = [e for e in enabled_tts if f"{e.provider}/{e.model}" in only]
+            in_run = (enabled_stt if benchmark_kind in ("stt", "both") else []) + (
+                enabled_tts if benchmark_kind in ("tts", "both") else []
+            )
+            missing = only - {f"{e.provider}/{e.model}" for e in in_run}
+            if missing:
+                raise ValueError(
+                    f"--only matched no model collected for a {source} {benchmark_kind} run: "
+                    f"{sorted(missing)}"
+                )
 
         # A TTS-only run never touches the configured STT dataset; a 'both'
         # run's row still records the STT id. Storage carries the

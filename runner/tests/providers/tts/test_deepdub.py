@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the Deepdub WebSocket TTS provider."""
+"""Tests for the Deepdub streaming WebSocket TTS provider."""
 
 from __future__ import annotations
 
@@ -34,26 +34,31 @@ def _settings(**overrides: object) -> Settings:
     return Settings(**values)  # type: ignore[arg-type]
 
 
+def _welcome() -> str:
+    return json.dumps({"action": "status", "connectionId": "conn-1", "message": "connected"})
+
+
 def _ack() -> str:
     return json.dumps({"data": "", "generationId": "gen-1", "isFinished": False})
 
 
-def _chunk(pcm: bytes, index: int, is_finished: bool = False) -> str:
+def _chunk(pcm: bytes, index: int, is_final: bool = False) -> str:
     return json.dumps(
         {
             "index": index,
             "generationId": "gen-1",
             "data": base64.b64encode(pcm).decode(),
-            "isFinished": is_finished,
+            "isFinished": is_final,
+            "isFinal": is_final,
         }
     )
 
 
 def _events(pcm_chunks: list[bytes]) -> list[str | bytes]:
-    events: list[str | bytes] = [_ack()]
+    events: list[str | bytes] = [_welcome(), _ack()]
     last = len(pcm_chunks) - 1
     events.extend(
-        _chunk(pcm, index, is_finished=index == last) for index, pcm in enumerate(pcm_chunks)
+        _chunk(pcm, index, is_final=index == last) for index, pcm in enumerate(pcm_chunks)
     )
     return events
 
@@ -102,49 +107,59 @@ async def test_deepdub_tts_url_headers_and_request_frame(deepdub_settings: Setti
         result = await provider.synthesize("Hello world")
 
     assert result.error is None
-    assert captured["url"] == "wss://wsapi.deepdub.ai/open"
+    assert captured["url"] == "wss://wss.deepdub.ai/ws"
     assert captured["additional_headers"] == {"x-api-key": "test-deepdub-key"}
     sent = [json.loads(m) for m in ws.sent if isinstance(m, str)]
     assert sent == [
         {
-            "action": "text-to-speech",
-            "model": _MODEL,
-            "targetText": "Hello world",
-            "locale": "en-US",
-            "voicePromptId": _VOICE,
-            "format": "s16le",
-            "sampleRate": SAMPLE_RATE,
-            "realtime": True,
-        }
+            "action": "stream-config",
+            "data": {
+                "model": _MODEL,
+                "voicePromptId": _VOICE,
+                "locale": "en-US",
+                "format": "s16le",
+                "sampleRate": SAMPLE_RATE,
+                "realtime": True,
+            },
+        },
+        {"action": "stream-text", "data": {"text": "Hello world"}},
+        {"action": "end-stream"},
     ]
     if result.audio_path is not None:
         result.audio_path.unlink()
 
 
 @pytest.mark.asyncio
-async def test_deepdub_tts_error_frame(deepdub_settings: Settings) -> None:
-    events: list[str | bytes] = [
-        _ack(),
-        json.dumps(
-            {"error": "Rate limit exceeded", "errorType": "RateLimit", "generationId": "gen-1"}
+@pytest.mark.parametrize(
+    ("frame", "expected"),
+    [
+        (
+            {"action": "error", "message": "queue route not found for model: x", "time": 1},
+            "deepdub session error: queue route not found for model: x",
         ),
-    ]
-    ws = FakeWebSocket(events)
+        (
+            {"generationId": "gen-1", "error": "Rate limit exceeded"},
+            "deepdub worker error: Rate limit exceeded",
+        ),
+    ],
+)
+async def test_deepdub_tts_error_frame(
+    deepdub_settings: Settings, frame: dict[str, object], expected: str
+) -> None:
+    ws = FakeWebSocket([_welcome(), json.dumps(frame)])
     provider = DeepdubTTSProvider(deepdub_settings, model=_MODEL, voice=_VOICE)
 
     with patch("coval_bench.providers.tts.deepdub.ws_client.connect", return_value=ws):
         result = await provider.synthesize("Hello")
 
-    assert result.error is not None
-    assert "RateLimit" in result.error
-    assert "Rate limit exceeded" in result.error
+    assert result.error == expected
     assert result.audio_path is None
     assert result.ttfa_ms is None
 
 
 @pytest.mark.asyncio
 async def test_deepdub_tts_final_frame_audio_is_kept(deepdub_settings: Settings) -> None:
-    """The isFinished frame may carry audio; it must land in the WAV before the break."""
+    """The isFinal frame may carry audio; it must land in the WAV before the break."""
     ws = FakeWebSocket(_events([make_pcm_bytes(240), make_pcm_bytes(240)]))
     provider = DeepdubTTSProvider(deepdub_settings, model=_MODEL, voice=_VOICE)
 
@@ -183,17 +198,24 @@ async def test_deepdub_tts_ttfa_skips_empty_ack(deepdub_settings: Settings) -> N
 
 
 @pytest.mark.asyncio
-async def test_deepdub_tts_close_before_isfinished_fails(deepdub_settings: Settings) -> None:
-    """A clean close before the isFinished frame is truncation, never a scored result."""
-    events: list[str | bytes] = [_ack(), _chunk(make_pcm_bytes(240), 0)]
-    ws = FakeWebSocket(events)
+async def test_deepdub_tts_close_before_isfinal_fails(deepdub_settings: Settings) -> None:
+    """A generation can finish mid-turn; only isFinal ends it, so a close before is truncation."""
+    finished_segment = json.dumps(
+        {
+            "index": 0,
+            "generationId": "gen-1",
+            "data": base64.b64encode(make_pcm_bytes(240)).decode(),
+            "isFinished": True,
+        }
+    )
+    ws = FakeWebSocket([_welcome(), finished_segment])
     provider = DeepdubTTSProvider(deepdub_settings, model=_MODEL, voice=_VOICE)
 
     with patch("coval_bench.providers.tts.deepdub.ws_client.connect", return_value=ws):
         result = await provider.synthesize("Hello")
 
     assert result.error is not None
-    assert "isFinished" in result.error
+    assert "isFinal" in result.error
     assert result.audio_path is None
 
 
@@ -201,8 +223,8 @@ async def test_deepdub_tts_close_before_isfinished_fails(deepdub_settings: Setti
 async def test_deepdub_tts_silent_stream_is_a_failure(deepdub_settings: Settings) -> None:
     """A stream that finishes without audio or an error frame gets the stable reason."""
     events: list[str | bytes] = [
-        _ack(),
-        json.dumps({"index": 0, "generationId": "gen-1", "data": "", "isFinished": True}),
+        _welcome(),
+        json.dumps({"index": 0, "generationId": "gen-1", "isFinished": True, "isFinal": True}),
     ]
     ws = FakeWebSocket(events)
     provider = DeepdubTTSProvider(deepdub_settings, model=_MODEL, voice=_VOICE)
@@ -212,7 +234,7 @@ async def test_deepdub_tts_silent_stream_is_a_failure(deepdub_settings: Settings
 
     assert result.error is not None
     assert result.error.startswith("provider closed the stream without sending audio or an error")
-    assert "isFinished" in result.error
+    assert "isFinal" in result.error
     assert result.audio_path is None
     assert result.ttfa_ms is None
 
