@@ -26,6 +26,7 @@ from coval_bench.providers.stt.gemini import GeminiSTTProvider
 from coval_bench.providers.stt.gradium import GradiumSTTProvider
 from coval_bench.providers.stt.guava import GuavaSTTProvider
 from coval_bench.providers.stt.inworld import InworldSTTProvider
+from coval_bench.providers.stt.meta import MetaSTTProvider
 from coval_bench.providers.stt.mistral import MistralSTTProvider
 from coval_bench.providers.stt.modulate import ModulateSTTProvider
 from coval_bench.providers.stt.nari import NariSTTProvider
@@ -62,6 +63,7 @@ _PROVIDERS: dict[str, Any] = {
     "gradium": lambda: GradiumSTTProvider(_KEY),
     "guava": lambda: GuavaSTTProvider(_KEY, base_url="https://guava.example"),
     "inworld": lambda: InworldSTTProvider(_KEY),
+    "meta": lambda: MetaSTTProvider(_KEY),
     "mistral": lambda: MistralSTTProvider(_KEY),
     "modulate": lambda: ModulateSTTProvider(_KEY),
     "nari": lambda: NariSTTProvider(_KEY),
