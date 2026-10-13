@@ -56,6 +56,7 @@ async def get_pool(
             min_size=1,
             max_size=4,
             open=False,  # explicit open in caller's startup
+            check=AsyncConnectionPool.check_connection,
             kwargs={
                 "autocommit": False,
                 "row_factory": psycopg.rows.dict_row,

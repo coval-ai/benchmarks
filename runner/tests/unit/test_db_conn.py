@@ -15,7 +15,10 @@ from coval_bench.db import conn
 class _Pool:
     instances: list[_Pool] = []
 
-    def __init__(self, **_: Any) -> None:
+    check_connection = object()
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
         self.opened = 0
         self.closed = True
         self.instances.append(self)
@@ -40,6 +43,7 @@ async def test_lifespan_pool_can_be_entered_again_after_closing(
 
     async with conn.lifespan_pool(settings) as first:  # type: ignore[arg-type]
         assert not first.closed
+        assert _Pool.instances[-1].kwargs["check"] is _Pool.check_connection
     async with conn.lifespan_pool(settings) as second:  # type: ignore[arg-type]
         assert not second.closed
     assert first is not second
