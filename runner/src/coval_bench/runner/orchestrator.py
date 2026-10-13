@@ -55,6 +55,7 @@ from pydantic import BaseModel, Field
 from coval_bench import telemetry
 from coval_bench.datasets.suite import (
     DEDICATED_STT_SUITE,
+    DEDICATED_TTS_SUITE,
     DEFAULT_STT_DATASET,
     SHARED_TTS_SUITE,
     stt_sample_size,
@@ -1354,7 +1355,9 @@ async def run_benchmarks(
     stt_size = stt_sample_size(source, stt_dataset_id, settings.dataset_sample_size)
     tts_dataset_id = settings.tts_dataset_id
     if only and "tts_dataset_id" not in settings.model_fields_set:
-        tts_dataset_id = next(iter(SHARED_TTS_SUITE))
+        tts_dataset_id = next(
+            iter(DEDICATED_TTS_SUITE if source == "dedicated" else SHARED_TTS_SUITE)
+        )
     tts_override = (
         settings.tts_dataset_sample_size
         if settings.tts_dataset_sample_size is not None
@@ -1413,9 +1416,15 @@ async def run_benchmarks(
         if only:
             enabled_stt = [e for e in enabled_stt if f"{e.provider}/{e.model}" in only]
             enabled_tts = [e for e in enabled_tts if f"{e.provider}/{e.model}" in only]
-            missing = only - {f"{e.provider}/{e.model}" for e in enabled_stt + enabled_tts}
+            in_run = (enabled_stt if benchmark_kind in ("stt", "both") else []) + (
+                enabled_tts if benchmark_kind in ("tts", "both") else []
+            )
+            missing = only - {f"{e.provider}/{e.model}" for e in in_run}
             if missing:
-                raise ValueError(f"--only matched no collected model: {sorted(missing)}")
+                raise ValueError(
+                    f"--only matched no model collected for a {source} {benchmark_kind} run: "
+                    f"{sorted(missing)}"
+                )
 
         # A TTS-only run never touches the configured STT dataset; a 'both'
         # run's row still records the STT id. Normalized storage carries the

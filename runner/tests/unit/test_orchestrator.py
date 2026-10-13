@@ -50,6 +50,7 @@ from structlog.testing import capture_logs
 
 from coval_bench import telemetry
 from coval_bench.config import Settings
+from coval_bench.datasets.suite import DEDICATED_TTS_SUITE, SHARED_TTS_SUITE
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
 from coval_bench.registries import RegisteredModel, Source
@@ -4293,14 +4294,41 @@ async def test_only_rejects_unmatched_selector(audio_file: Path, settings: Setti
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("configured", "expected"), [(None, "tts-v2"), ("tts-v1", "tts-v1")])
+async def test_only_rejects_selector_of_other_kind(audio_file: Path, settings: Settings) -> None:
+    async with _orchestrator_env(audio_path=audio_file):
+        with pytest.raises(ValueError, match="elevenlabs/eleven_flash_v2_5"):
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=[
+                    _stt_entry("deepgram", "nova-2"),
+                    _tts_entry("elevenlabs", "eleven_flash_v2_5", "v"),
+                ],
+                only=frozenset({"elevenlabs/eleven_flash_v2_5"}),
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "configured", "expected"),
+    [
+        ("shared", None, next(iter(SHARED_TTS_SUITE))),
+        ("dedicated", None, next(iter(DEDICATED_TTS_SUITE))),
+        ("shared", "tts-v1", "tts-v1"),
+    ],
+)
 async def test_only_defaults_tts_dataset_to_board_set(
-    audio_file: Path, settings: Settings, configured: str | None, expected: str
+    audio_file: Path,
+    settings: Settings,
+    source: Literal["shared", "dedicated"],
+    configured: str | None,
+    expected: str,
 ) -> None:
-    run_settings = (
-        settings
-        if configured is None
-        else settings.model_copy(update={"tts_dataset_id": configured})
+    unset = settings.model_fields_set - {"tts_dataset_id"}
+    run_settings = Settings.model_construct(
+        _fields_set=unset if configured is None else unset | {"tts_dataset_id"},
+        **{**settings.model_dump(), "tts_dataset_id": configured or "tts-v1"},
     )
     provider_inst = MagicMock()
     provider_inst.synthesize = AsyncMock(
@@ -4342,7 +4370,16 @@ async def test_only_defaults_tts_dataset_to_board_set(
                 settings=run_settings,
                 benchmark_kind="tts",
                 smoke=False,
-                matrix_overrides=[_tts_entry("elevenlabs", "eleven_flash_v2_5", "v")],
+                source=source,
+                matrix_overrides=[
+                    _tts_entry("elevenlabs", "eleven_flash_v2_5", "v").model_copy(
+                        update={
+                            "source": Source.DEDICATED_INFERENCE
+                            if source == "dedicated"
+                            else Source.OFFICIAL_API
+                        }
+                    )
+                ],
                 only=frozenset({"elevenlabs/eleven_flash_v2_5"}),
             )
 
