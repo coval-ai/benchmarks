@@ -15,13 +15,11 @@ from alembic.config import Config
 from pytest_postgresql.factories import postgresql
 
 pg_conn = postgresql("pg_proc")
-COMPAT = "20261005_0043"
-CLEANUP = "20261007_0044"
+COMPAT = "20261010_0045"
+CLEANUP = "20261014_0046"
 TABLES = (
     "metric_evaluations",
     "dashboard_metric_values",
-    "metric_values_by_bucket",
-    "dashboard_hourly_aggregates",
 )
 WINDOWS = ("24h", "7d", "30d")
 
@@ -105,23 +103,30 @@ def _seed(conn: Any, *, sample: str = "first") -> None:
                     "UPDATE benchmarks_v2.metric_evaluations SET status='succeeded',finished_at=now() WHERE id=%s",
                     (evaluation,),
                 )
-        conn.execute("""INSERT INTO benchmarks_v2.metric_values_by_bucket
-          (provider,model,benchmark,dataset_id,metric_type,metric_version,evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,max_value,value_sum,sample_count)
-          VALUES ('p','m','S2S','d','WER','v1','default','primary','percent','2026-10-01 11:00Z',5,5,5,5,5,5,1)
-          ON CONFLICT DO NOTHING""")
-        conn.execute("""INSERT INTO benchmarks_v2.dashboard_hourly_aggregates
-          (provider,model,benchmark,dataset_id,metric_type,metric_version,evaluation_variant,hour_at,primary_sum,sample_count,coverage_complete,source_count,definition_revision)
-          VALUES ('p','m','S2S','d','WER','v1','default','2026-10-01 11:00Z',5,1,true,1,2)
-          ON CONFLICT DO NOTHING""")
+        metric_id = conn.execute(
+            "SELECT id FROM benchmarks_v2.metrics WHERE code='WER'"
+        ).fetchone()[0]
+        conn.execute(
+            """INSERT INTO benchmarks_v2.dashboard_rollups
+          (provider,model,benchmark,dataset_id,metric_id,metric_version,evaluation_variant,value_key,grain,bucket_at,
+           min_value,p25,p50,p75,p90,p95,max_value,value_sum,sample_count,latest_run_at)
+          VALUES ('p','m','S2S','d',%s,'v1','default','primary','run','2026-10-01 12:00Z',
+                  5,5,5,5,5,5,5,5,1,'2026-10-01 12:00Z')
+          ON CONFLICT DO NOTHING""",
+            (metric_id,),
+        )
+        conn.execute(
+            "INSERT INTO benchmarks_v2.dashboard_rollup_queue (slot_at) VALUES ('2026-10-01 12:00Z') ON CONFLICT DO NOTHING"
+        )
 
 
 def _publish(conn: Any) -> None:
     with conn.transaction():
-        conn.execute("""UPDATE benchmarks_v2.dashboard_summary_state SET generation=7,
+        conn.execute("""UPDATE benchmarks_v2.dashboard_window_state SET generation=7,
           as_of='2026-10-01 12:00Z',published_at='2026-10-01 12:00Z',definition_revision=2,
           definition_fingerprint='published' WHERE id=true""")
         for window in WINDOWS:
-            conn.execute(f"REFRESH MATERIALIZED VIEW benchmarks_v2.normalized_results_{window}")
+            conn.execute(f"REFRESH MATERIALIZED VIEW benchmarks_v2.results_{window}")
 
 
 def _rows(conn: psycopg.Connection[Any], table: str) -> list[Any]:
@@ -133,11 +138,11 @@ def _rows(conn: psycopg.Connection[Any], table: str) -> list[Any]:
 def _payloads(conn: Any) -> dict[str, list[Any]]:
     tables = (
         *TABLES,
+        "dashboard_rollups",
+        "dashboard_rollup_queue",
         "metrics",
-        "dashboard_summary_state",
-        "results",
-        "results_by_bucket",
-        *(f"normalized_results_{w}" for w in WINDOWS),
+        "dashboard_window_state",
+        *(f"results_{w}" for w in WINDOWS),
     )
     return {table: _rows(conn, table) for table in tables}
 
@@ -146,7 +151,7 @@ def _view_acl(conn: psycopg.Connection[Any]) -> list[Any]:
     return conn.execute("""SELECT c.relname,pg_get_userbyid(c.relowner),a.grantee,a.privilege_type,a.is_grantable
       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
       CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) a
-      WHERE n.nspname='benchmarks_v2' AND c.relkind='m' AND c.relname LIKE 'normalized_results_%'
+      WHERE n.nspname='benchmarks_v2' AND c.relkind='m' AND c.relname LIKE 'results_%'
       ORDER BY 1,2,3,4,5""").fetchall()
 
 
@@ -170,16 +175,16 @@ def populated(compat: Any) -> Any:
     compat.execute(
         "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='metric_cleanup_reader') THEN CREATE ROLE metric_cleanup_reader NOLOGIN; END IF; END $$"
     )
-    compat.execute("GRANT SELECT ON benchmarks_v2.normalized_results_24h TO PUBLIC")
+    compat.execute("GRANT SELECT ON benchmarks_v2.results_24h TO PUBLIC")
     compat.execute(
-        "GRANT SELECT ON benchmarks_v2.normalized_results_24h TO metric_cleanup_reader WITH GRANT OPTION"
+        "GRANT SELECT ON benchmarks_v2.results_24h TO metric_cleanup_reader WITH GRANT OPTION"
     )
     compat.execute("GRANT USAGE ON SCHEMA benchmarks_v2 TO metric_cleanup_reader")
     compat.execute(
-        "GRANT SELECT ON benchmarks_v2.dashboard_metric_values, benchmarks_v2.benchmark_observations, benchmarks_v2.runs, benchmarks_v2.dashboard_summary_state, benchmarks_v2.metrics TO metric_cleanup_reader"
+        "GRANT SELECT ON benchmarks_v2.dashboard_metric_values, benchmarks_v2.benchmark_observations, benchmarks_v2.runs, benchmarks_v2.dashboard_window_state, benchmarks_v2.metrics TO metric_cleanup_reader"
     )
     compat.execute(
-        "ALTER MATERIALIZED VIEW benchmarks_v2.normalized_results_7d OWNER TO metric_cleanup_reader"
+        "ALTER MATERIALIZED VIEW benchmarks_v2.results_7d OWNER TO metric_cleanup_reader"
     )
     return compat
 
@@ -196,9 +201,7 @@ def test_requires_explicit_opt_in(compat: Any) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "damage", ["nullability", "foreign_key", "evaluation_index", "bucket_index"]
-)
+@pytest.mark.parametrize("damage", ["nullability", "foreign_key", "evaluation_index"])
 def test_preflight_refuses_incomplete_identity_invariants(compat: Any, damage: str) -> None:
     if damage == "nullability":
         compat.execute(
@@ -209,7 +212,7 @@ def test_preflight_refuses_incomplete_identity_invariants(compat: Any, damage: s
             "ALTER TABLE benchmarks_v2.metric_evaluations DROP CONSTRAINT metric_evaluations_metric_id_fkey"
         )
     else:
-        table = "metric_evaluations" if damage == "evaluation_index" else "metric_values_by_bucket"
+        table = "metric_evaluations"
         compat.execute(f"DROP INDEX benchmarks_v2.{table}_metric_identity_key")
         compat.execute(
             f"CREATE UNIQUE INDEX {table}_metric_identity_key ON benchmarks_v2.{table} (metric_id)"
@@ -229,9 +232,14 @@ def test_populated_cleanup_and_rollback_preserve_payloads_and_privileges(populat
     before = _payloads(populated)
     acl = _view_acl(populated)
     checks = _metric_type_checks(populated)
+    indexes = populated.execute(
+        "SELECT indexname,indexdef FROM pg_indexes WHERE schemaname='benchmarks_v2' AND tablename=ANY(%s) ORDER BY indexname",
+        ([f"results_{window}" for window in WINDOWS],),
+    ).fetchall()
+    populated.execute("""CREATE OR REPLACE FUNCTION benchmarks_v2.sync_dashboard_metric_identity() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$""")
     assert {table for table, _definition in checks} == {
         "metric_evaluations",
-        "metric_values_by_bucket",
     }
     _migrate(populated, CLEANUP, opt_in=True)
     assert _payloads(populated) == before
@@ -239,14 +247,17 @@ def test_populated_cleanup_and_rollback_preserve_payloads_and_privileges(populat
     columns = populated.execute(
         """SELECT c.relname,a.attname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
       JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped
-      WHERE n.nspname='benchmarks_v2' AND (c.relname=ANY(%s) OR c.relname LIKE 'normalized_results_%%') AND a.attname='metric_type'""",
+      WHERE n.nspname='benchmarks_v2' AND (c.relname=ANY(%s) OR c.relname LIKE 'results_%%') AND a.attname='metric_type'""",
         (list(TABLES),),
     ).fetchall()
     assert columns == []
     assert populated.execute(
         "SELECT count(*) FROM pg_trigger WHERE tgname LIKE '%%sync_metric_identity' AND NOT tgisinternal"
     ).fetchone() == (0,)
-    metrics = populated.execute("""SELECT m.code,v.avg_value FROM benchmarks_v2.normalized_results_24h v
+    assert populated.execute(
+        "SELECT count(*) FROM pg_proc WHERE pronamespace='benchmarks_v2'::regnamespace AND proname='sync_dashboard_metric_identity'"
+    ).fetchone() == (1,)
+    metrics = populated.execute("""SELECT m.code,v.avg_value FROM benchmarks_v2.results_24h v
       JOIN benchmarks_v2.metrics m ON m.id=v.metric_id WHERE v.dataset_id='d' ORDER BY m.code""").fetchall()
     assert dict(metrics) == pytest.approx(
         {"WER": 100 * 3 / 42, "TTFA": 150, "TTFARoundtrip": 35, "TTFALeadingSilence": 12.5}
@@ -255,12 +266,22 @@ def test_populated_cleanup_and_rollback_preserve_payloads_and_privileges(populat
     assert _payloads(populated) == before
     assert _view_acl(populated) == acl
     assert _metric_type_checks(populated) == checks
+    assert (
+        populated.execute(
+            "SELECT indexname,indexdef FROM pg_indexes WHERE schemaname='benchmarks_v2' AND tablename=ANY(%s) ORDER BY indexname",
+            ([f"results_{window}" for window in WINDOWS],),
+        ).fetchall()
+        == indexes
+    )
     assert populated.execute(
-        "SELECT count(*) FROM pg_indexes WHERE schemaname='benchmarks_v2' AND indexname IN ('metric_evaluations_metric_identity_key','metric_values_by_bucket_metric_identity_key','dashboard_hourly_aggregates_metric_identity_key')"
-    ).fetchone() == (3,)
+        "SELECT to_regprocedure('benchmarks_v2.sync_dashboard_metric_identity()') IS NOT NULL"
+    ).fetchone() == (True,)
+    assert populated.execute(
+        "SELECT count(*) FROM pg_indexes WHERE schemaname='benchmarks_v2' AND indexname IN ('metric_evaluations_metric_identity_key','results_24h_key','results_7d_key','results_30d_key')"
+    ).fetchone() == (4,)
     assert populated.execute(
         "SELECT count(*) FROM pg_trigger WHERE tgname LIKE '%%sync_metric_identity' AND NOT tgisinternal"
-    ).fetchone() == (4,)
+    ).fetchone() == (2,)
     # Both old code-only and new ID-only applications can write after rollback.
     observation = populated.execute(
         "SELECT observation_id FROM benchmarks_v2.metric_evaluations LIMIT 1"
@@ -274,23 +295,23 @@ def test_populated_cleanup_and_rollback_preserve_payloads_and_privileges(populat
         ).fetchone()
         assert row == ("WER", 1)
     _migrate(populated, CLEANUP, opt_in=True)
-    assert _rows(populated, "normalized_results_24h") == before["normalized_results_24h"]
+    assert _rows(populated, "results_24h") == before["results_24h"]
 
 
 def test_unpopulated_views_remain_unpopulated(compat: Any) -> None:
-    before = _rows(compat, "dashboard_summary_state")
+    before = _rows(compat, "dashboard_window_state")
     _migrate(compat, CLEANUP, opt_in=True)
-    assert _rows(compat, "dashboard_summary_state") == before
+    assert _rows(compat, "dashboard_window_state") == before
     for window in WINDOWS:
         assert compat.execute(
             "SELECT relispopulated FROM pg_class WHERE oid=%s::regclass",
-            (f"benchmarks_v2.normalized_results_{window}",),
+            (f"benchmarks_v2.results_{window}",),
         ).fetchone() == (False,)
     _migrate(compat, COMPAT, down=True)
     for window in WINDOWS:
         assert compat.execute(
             "SELECT relispopulated FROM pg_class WHERE oid=%s::regclass",
-            (f"benchmarks_v2.normalized_results_{window}",),
+            (f"benchmarks_v2.results_{window}",),
         ).fetchone() == (False,)
 
 
@@ -300,12 +321,12 @@ def test_stale_published_payload_aborts_atomically(populated: Any) -> None:
     with pytest.raises(RuntimeError, match="parity failed.*refresh"):
         _migrate(populated, CLEANUP, opt_in=True)
     assert populated.execute("SELECT version_num FROM alembic_version").fetchone() == (COMPAT,)
-    assert _rows(populated, "normalized_results_24h") == before["normalized_results_24h"]
-    assert _rows(populated, "dashboard_summary_state") == before["dashboard_summary_state"]
+    assert _rows(populated, "results_24h") == before["results_24h"]
+    assert _rows(populated, "dashboard_window_state") == before["dashboard_window_state"]
     _publish(populated)
     _migrate(populated, CLEANUP, opt_in=True)
     assert populated.execute(
-        "SELECT sum(sample_count) FROM benchmarks_v2.normalized_results_24h WHERE dataset_id='d'"
+        "SELECT sum(sample_count) FROM benchmarks_v2.results_24h WHERE dataset_id='d'"
     ).fetchone() == (16,)
 
 
@@ -354,6 +375,32 @@ def test_lifecycle_catalog_and_projection_guards_survive(populated: Any) -> None
           VALUES (%s,%s,'v1','default','test','queued')""",
             (observation, metric),
         )
+    id_only = populated.execute(
+        """INSERT INTO benchmarks_v2.metric_evaluations
+      (observation_id,metric_id,metric_version,evaluation_variant,executor,status)
+      VALUES (%s,%s,'v1','id-only','test','queued') RETURNING id""",
+        (observation, metric),
+    ).fetchone()[0]
+    with populated.transaction():
+        populated.execute(
+            "UPDATE benchmarks_v2.metric_evaluations SET status='running',started_at=now() WHERE id=%s",
+            (id_only,),
+        )
+        populated.execute(
+            """INSERT INTO benchmarks_v2.metric_values
+              (metric_evaluation_id,value_key,unit,value,value_role)
+              SELECT %s,value_key,unit,value,value_role FROM benchmarks_v2.metric_values
+              WHERE metric_evaluation_id=%s""",
+            (id_only, evaluation),
+        )
+        populated.execute(
+            "UPDATE benchmarks_v2.metric_evaluations SET status='succeeded',finished_at=now() WHERE id=%s",
+            (id_only,),
+        )
+    assert populated.execute(
+        "SELECT metric_id FROM benchmarks_v2.dashboard_metric_values WHERE evaluation_id=%s",
+        (id_only,),
+    ).fetchone() == (metric,)
     # Cascade deletion remains permitted when the observation itself is removed.
     populated.execute(
         "DELETE FROM benchmarks_v2.benchmark_observations WHERE id=%s", (observation,)
@@ -362,3 +409,32 @@ def test_lifecycle_catalog_and_projection_guards_survive(populated: Any) -> None
         "SELECT count(*) FROM benchmarks_v2.metric_evaluations WHERE observation_id=%s",
         (observation,),
     ).fetchone() == (0,)
+
+
+def test_removed_bucket_objects_and_old_views_stay_absent(compat: Any) -> None:
+    removed = (
+        "results",
+        "results_by_bucket",
+        "metric_values_by_bucket",
+        "dashboard_hourly_aggregates",
+        "dashboard_hourly_state",
+        "dashboard_source_refreshes",
+        "dashboard_summary_state",
+        "normalized_results_24h",
+        "normalized_results_7d",
+        "normalized_results_30d",
+    )
+    for name in removed:
+        assert compat.execute("SELECT to_regclass(%s)", (f"benchmarks_v2.{name}",)).fetchone() == (
+            None,
+        )
+    _migrate(compat, CLEANUP, opt_in=True)
+    for name in removed:
+        assert compat.execute("SELECT to_regclass(%s)", (f"benchmarks_v2.{name}",)).fetchone() == (
+            None,
+        )
+    _migrate(compat, COMPAT, down=True)
+    for name in removed:
+        assert compat.execute("SELECT to_regclass(%s)", (f"benchmarks_v2.{name}",)).fetchone() == (
+            None,
+        )

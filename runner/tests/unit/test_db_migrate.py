@@ -21,21 +21,29 @@ from coval_bench.db import cli
 def graph(monkeypatch: pytest.MonkeyPatch) -> tuple[Mock, Mock, Mock]:
     cap = SimpleNamespace(revision="20261005_0043")
     old = SimpleNamespace(revision="20260929_0042")
-    newer = SimpleNamespace(revision="20261007_0044")
+    rollups = SimpleNamespace(revision="20261008_0044")
+    compat = SimpleNamespace(revision="20261010_0045")
+    newer = SimpleNamespace(revision="20261014_0046")
     divergent = SimpleNamespace(revision="divergent")
     divergent = SimpleNamespace(revision="20260930_0043")
     script = MagicMock()
     script.get_revision.side_effect = lambda revision: {
         "20261005_0043": cap,
-        "20261007_0044": newer,
+        "20261008_0044": rollups,
+        "20261010_0045": compat,
+        "20261014_0046": newer,
         "20260929_0042": old,
         "divergent": divergent,
         "20260930_0043": divergent,
     }.get(revision)
 
     def iterate(revision: str, _: str) -> list[SimpleNamespace]:
-        if revision == "20261007_0044":
-            return [newer, cap]
+        if revision == "20261014_0046":
+            return [newer, compat, rollups, cap]
+        if revision == "20261010_0045":
+            return [compat, rollups, cap]
+        if revision == "20261008_0044":
+            return [rollups, cap]
         if revision == "20261005_0043":
             return [cap, old]
         return [divergent] if revision == "20260930_0043" else [old]
@@ -57,11 +65,13 @@ def graph(monkeypatch: pytest.MonkeyPatch) -> tuple[Mock, Mock, Mock]:
         ((), "20261005_0043"),
         (("20260929_0042",), "20261005_0043"),
         (("20261005_0043",), None),
-        (("20261007_0044",), None),
+        (("20261008_0044",), None),
+        (("20261010_0045",), None),
+        (("20261014_0046",), None),
         (("20260930_0043",), "error"),
         (("unknown",), "error"),
         (("divergent",), "error"),
-        (("20261005_0043", "20261007_0044"), "error"),
+        (("20261005_0043", "20261008_0044"), "error"),
     ],
 )
 def test_default_target_uses_graph_ancestry(
@@ -86,11 +96,11 @@ def test_explicit_target_sets_cleanup_attribute(monkeypatch: pytest.MonkeyPatch)
     settings = SimpleNamespace(database_url="postgresql://fixture")
     monkeypatch.setattr(coval_bench.config, "get_settings", Mock(return_value=settings))
     monkeypatch.setattr(alembic_command, "upgrade", upgrade)
-    result = CliRunner().invoke(cli.db_migrate, ["--revision", "20261007_0044"])
+    result = CliRunner().invoke(cli.db_migrate, ["--revision", "20261014_0046"])
     assert result.exit_code == 0, result.output
     cfg = upgrade.call_args.args[0]
     assert cfg.attributes["allow_metric_code_cleanup"] is True
-    assert upgrade.call_args.args[1] == "20261007_0044"
+    assert upgrade.call_args.args[1] == "20261014_0046"
 
 
 def test_invalid_explicit_target_does_not_fall_back(monkeypatch: pytest.MonkeyPatch) -> None:

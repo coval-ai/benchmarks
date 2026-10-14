@@ -14,22 +14,18 @@ from alembic import context, op
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-revision = "20261007_0044"
-down_revision = "20261005_0043"
+revision = "20261014_0046"
+down_revision = "20261010_0045"
 branch_labels = None
 depends_on = None
 
 _TABLES = (
     "metric_evaluations",
     "dashboard_metric_values",
-    "metric_values_by_bucket",
-    "dashboard_hourly_aggregates",
 )
 _WINDOWS = (("24h", "24 hours"), ("7d", "7 days"), ("30d", "30 days"))
 _ID_KEYS = {
     "metric_evaluations": "observation_id, metric_id, metric_version, evaluation_variant",
-    "metric_values_by_bucket": "provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant, value_key, bucket_at",
-    "dashboard_hourly_aggregates": "provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant, hour_at",
 }
 
 # Frozen definitions from 0018, 0035, 0036 and 0043. Do not import application SQL:
@@ -129,43 +125,6 @@ CREATE OR REPLACE FUNCTION benchmarks_v2.sync_metric_evaluation_identity()
           BEFORE INSERT OR UPDATE
           ON benchmarks_v2.dashboard_metric_values FOR EACH ROW
           EXECUTE FUNCTION benchmarks_v2.sync_normalized_metric_identity();
-        CREATE TRIGGER metric_values_by_bucket_sync_metric_identity
-          BEFORE INSERT OR UPDATE
-          ON benchmarks_v2.metric_values_by_bucket FOR EACH ROW
-          EXECUTE FUNCTION benchmarks_v2.sync_normalized_metric_identity();
-"""
-
-_HOURLY_SYNC_SQL = """
-CREATE FUNCTION benchmarks_v2.sync_dashboard_metric_identity() RETURNS trigger
-    LANGUAGE plpgsql AS $$
-    BEGIN
-      -- An UPDATE from either application changes only its own identifier.
-      -- Discard the unchanged counterpart before resolving the new identity.
-      IF TG_OP = 'UPDATE' THEN
-        IF NEW.metric_type IS DISTINCT FROM OLD.metric_type
-           AND NEW.metric_id IS NOT DISTINCT FROM OLD.metric_id THEN
-          NEW.metric_id := NULL;
-        ELSIF NEW.metric_id IS DISTINCT FROM OLD.metric_id
-           AND NEW.metric_type IS NOT DISTINCT FROM OLD.metric_type THEN
-          NEW.metric_type := NULL;
-        END IF;
-      END IF;
-      IF NEW.metric_id IS NULL AND NEW.metric_type IS NULL THEN
-        RAISE EXCEPTION 'a metric code or id is required' USING ERRCODE='23502';
-      ELSIF NEW.metric_id IS NULL THEN
-        NEW.metric_id := benchmarks_v2.metric_id_for_code(NEW.metric_type);
-      ELSIF NEW.metric_type IS NULL THEN
-        NEW.metric_type := benchmarks_v2.metric_code_for_id(NEW.metric_id);
-      ELSIF NEW.metric_id <> benchmarks_v2.metric_id_for_code(NEW.metric_type) THEN
-        RAISE EXCEPTION 'metric code and id must refer to the same definition'
-          USING ERRCODE='23514';
-      END IF;
-      RETURN NEW;
-    END $$;
-    CREATE TRIGGER dashboard_hourly_sync_metric_identity
-      BEFORE INSERT OR UPDATE OF metric_type, metric_id
-      ON benchmarks_v2.dashboard_hourly_aggregates FOR EACH ROW
-      EXECUTE FUNCTION benchmarks_v2.sync_dashboard_metric_identity();
 """
 
 _RETRY_SYNC_SQL = """
@@ -215,8 +174,8 @@ WITH evaluations AS (
  JOIN benchmarks_v2.runs r ON r.id=o.run_id
  WHERE o.status='succeeded' AND r.status IN ('succeeded','partial')
    AND e.metric_version='v1' AND e.evaluation_variant='default'
-   AND o.captured_at >= (SELECT as_of FROM benchmarks_v2.dashboard_summary_state WHERE id=true) - INTERVAL '__WINDOW__'
-   AND o.captured_at < (SELECT as_of FROM benchmarks_v2.dashboard_summary_state WHERE id=true)
+   AND o.captured_at >= (SELECT as_of FROM benchmarks_v2.dashboard_window_state WHERE id=true) - INTERVAL '__WINDOW__'
+   AND o.captured_at < (SELECT as_of FROM benchmarks_v2.dashboard_window_state WHERE id=true)
 ), public_values AS (
  SELECT e.* , p.metric_type AS public_metric, p.value AS public_value
  FROM evaluations e CROSS JOIN LATERAL (VALUES
@@ -298,12 +257,11 @@ def _lock(bind: Connection) -> None:
     bind.exec_driver_sql("SET LOCAL statement_timeout = '10min'")
     # Coordinate with publication, then prevent source changes during snapshots,
     # parity checks, interface replacement and downgrade hydration.
-    bind.exec_driver_sql("SELECT pg_advisory_xact_lock(hashtextextended('dashboard_summary', 0))")
+    bind.exec_driver_sql("SELECT pg_advisory_xact_lock(hashtextextended('dashboard_windows', 0))")
     bind.exec_driver_sql("""LOCK TABLE benchmarks_v2.runs, benchmarks_v2.metrics,
         benchmarks_v2.benchmark_observations, benchmarks_v2.metric_evaluations,
         benchmarks_v2.metric_values, benchmarks_v2.dashboard_metric_values,
-        benchmarks_v2.metric_values_by_bucket, benchmarks_v2.dashboard_hourly_aggregates,
-        benchmarks_v2.dashboard_summary_state IN ACCESS EXCLUSIVE MODE""")
+        benchmarks_v2.dashboard_window_state IN ACCESS EXCLUSIVE MODE""")
 
 
 def _check_index(bind: Connection, table: str, columns: str) -> None:
@@ -378,7 +336,7 @@ def _view_definition(*, codes: bool) -> str:
 
 def _replace_views(bind: Connection, *, codes: bool) -> None:
     for name, window in _WINDOWS:
-        view = f"benchmarks_v2.normalized_results_{name}"
+        view = f"benchmarks_v2.results_{name}"
         owner, populated = bind.exec_driver_sql(
             "SELECT pg_get_userbyid(relowner), relispopulated FROM pg_class WHERE oid=%s::regclass",
             (view,),
@@ -402,14 +360,14 @@ def _replace_views(bind: Connection, *, codes: bool) -> None:
         )
         identity = "metric_type" if codes else "metric_id"
         bind.exec_driver_sql(
-            f"CREATE UNIQUE INDEX normalized_results_{name}_key ON {view} (provider,model,benchmark,dataset_id,{identity},metric_version,evaluation_variant)"
+            f"CREATE UNIQUE INDEX results_{name}_key ON {view} (provider,model,benchmark,dataset_id,{identity},metric_version,evaluation_variant)"
         )
         bind.exec_driver_sql(
-            f"CREATE INDEX normalized_results_{name}_lookup ON {view} (benchmark,dataset_id,{identity},metric_version,evaluation_variant)"
+            f"CREATE INDEX results_{name}_lookup ON {view} (benchmark,dataset_id,{identity},metric_version,evaluation_variant)"
         )
         if codes:
             bind.exec_driver_sql(
-                f"CREATE INDEX normalized_results_{name}_metric_id_lookup ON {view} (benchmark,dataset_id,metric_id,metric_version,evaluation_variant)"
+                f"CREATE INDEX results_{name}_metric_id_lookup ON {view} (benchmark,dataset_id,metric_id,metric_version,evaluation_variant)"
             )
         if populated:
             bind.exec_driver_sql(f"REFRESH MATERIALIZED VIEW {view}")
@@ -491,22 +449,14 @@ def upgrade() -> None:
     for table, trigger in (
         ("metric_evaluations", "metric_evaluations_sync_metric_identity"),
         ("dashboard_metric_values", "dashboard_metric_values_sync_metric_identity"),
-        ("metric_values_by_bucket", "metric_values_by_bucket_sync_metric_identity"),
-        ("dashboard_hourly_aggregates", "dashboard_hourly_sync_metric_identity"),
     ):
         bind.exec_driver_sql(f"DROP TRIGGER {trigger} ON benchmarks_v2.{table}")
     for function in (
         "sync_metric_evaluation_identity",
         "sync_normalized_metric_identity",
-        "sync_dashboard_metric_identity",
     ):
         bind.exec_driver_sql(f"DROP FUNCTION benchmarks_v2.{function}()")
     _drop_code_key(bind, "metric_evaluations", primary=False)
-    for table in ("metric_values_by_bucket", "dashboard_hourly_aggregates"):
-        _drop_code_key(bind, table, primary=True)
-        bind.exec_driver_sql(
-            f"ALTER TABLE benchmarks_v2.{table} ADD CONSTRAINT {table}_pkey PRIMARY KEY USING INDEX {table}_metric_identity_key"
-        )
     for table in _TABLES:
         bind.exec_driver_sql(f"ALTER TABLE benchmarks_v2.{table} DROP COLUMN metric_type")
     bind.exec_driver_sql("""CREATE FUNCTION benchmarks_v2.lock_metric_evaluation_identity() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -536,13 +486,12 @@ def downgrade() -> None:
         bind.exec_driver_sql(
             f"ALTER TABLE benchmarks_v2.{table} ALTER COLUMN metric_type SET NOT NULL"
         )
-    for table in ("metric_evaluations", "metric_values_by_bucket"):
+    for table in ("metric_evaluations",):
         bind.exec_driver_sql(f"ALTER TABLE benchmarks_v2.{table} ADD CHECK (metric_type <> '')")
     _frozen_sql(bind, _LIFECYCLE_SQL)
     _frozen_sql(bind, _PROJECTION_SQL)
     _frozen_sql(bind, _SYNC_SQL)
     _frozen_sql(bind, _RETRY_SYNC_SQL)
-    _frozen_sql(bind, _HOURLY_SYNC_SQL)
     _frozen_sql(bind, _PARENT_SQL)
     bind.exec_driver_sql(
         "ALTER TABLE benchmarks_v2.metric_evaluations ENABLE TRIGGER metric_evaluations_validate_update"
@@ -554,12 +503,4 @@ def downgrade() -> None:
     bind.exec_driver_sql(
         "ALTER TABLE benchmarks_v2.metric_evaluations ADD UNIQUE (observation_id,metric_type,metric_version,evaluation_variant)"
     )
-    for table in ("metric_values_by_bucket", "dashboard_hourly_aggregates"):
-        bind.exec_driver_sql(f"ALTER TABLE benchmarks_v2.{table} DROP CONSTRAINT {table}_pkey")
-        bind.exec_driver_sql(
-            f"ALTER TABLE benchmarks_v2.{table} ADD PRIMARY KEY ({_ID_KEYS[table].replace('metric_id', 'metric_type')})"
-        )
-        bind.exec_driver_sql(
-            f"CREATE UNIQUE INDEX {table}_metric_identity_key ON benchmarks_v2.{table} ({_ID_KEYS[table]})"
-        )
     _replace_views(bind, codes=True)
