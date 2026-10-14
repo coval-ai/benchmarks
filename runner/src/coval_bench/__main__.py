@@ -23,15 +23,8 @@ from coval_bench.db.cli import (
     db_check,
     db_migrate,
     refresh_dashboard_aggregates,
-    repair_dashboard_aggregates,
 )
 from coval_bench.llm.coval_agent import sync_llm
-from coval_bench.migrations.backfill_normalized_s2s_storage import (
-    backfill_normalized_s2s_storage_cli,
-)
-from coval_bench.migrations.backfill_normalized_storage import backfill_normalized_storage_cli
-from coval_bench.migrations.backfill_wer_breakdown import backfill_wer_breakdown_cli
-from coval_bench.migrations.import_legacy import import_legacy_cli
 from coval_bench.platform_assets import platform_assets
 from coval_bench.runner.capture_cli import capture
 from coval_bench.s2s.fetch_v2v import fetch_s2s
@@ -89,7 +82,14 @@ def cli() -> None:
         "dedicated-inference endpoints, which run in their own scheduled job."
     ),
 )
-def run(kind: str, smoke: bool, source: str) -> None:
+@click.option(
+    "--only",
+    "selectors",
+    multiple=True,
+    help="provider/model to run (repeatable); results persist like a scheduled run. "
+    "Defaults the TTS dataset to the board's set unless TTS_DATASET_ID is set.",
+)
+def run(kind: str, smoke: bool, source: str, selectors: tuple[str, ...]) -> None:
     """Execute one benchmark run — invoked by Cloud Run Job."""
     from coval_bench.config import get_settings
     from coval_bench.db.models import RunStatus
@@ -97,7 +97,13 @@ def run(kind: str, smoke: bool, source: str) -> None:
 
     settings = get_settings()
     summaries: list[RunSummary] = asyncio.run(
-        run_suite(settings=settings, benchmark_kind=kind, smoke=smoke, source=source)  # type: ignore[arg-type]
+        run_suite(
+            settings=settings,
+            benchmark_kind=kind,  # type: ignore[arg-type]
+            smoke=smoke,
+            source=source,  # type: ignore[arg-type]
+            only=frozenset(selectors) or None,
+        )
     )
     for summary in summaries:
         click.echo(summary.model_dump_json())
@@ -113,19 +119,8 @@ def db() -> None:
 db.add_command(db_migrate, name="migrate")
 db.add_command(db_check, name="db-check")
 db.add_command(refresh_dashboard_aggregates)
-db.add_command(repair_dashboard_aggregates)
 db.add_command(capture)
 
-
-@cli.group()
-def migrate() -> None:
-    """One-shot data migrations."""
-
-
-migrate.add_command(backfill_wer_breakdown_cli, name="backfill-wer-breakdown")
-migrate.add_command(backfill_normalized_storage_cli, name="backfill-normalized-storage")
-migrate.add_command(backfill_normalized_s2s_storage_cli, name="backfill-normalized-s2s-storage")
-migrate.add_command(import_legacy_cli, name="import-legacy")
 
 # Coval-backed workflows use standalone commands rather than a `run --kind` value.
 cli.add_command(fetch_s2s, name="fetch-s2s")

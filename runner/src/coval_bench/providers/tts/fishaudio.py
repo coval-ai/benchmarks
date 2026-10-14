@@ -14,18 +14,17 @@ import time
 from typing import Any
 
 import ormsgpack
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 _WS_URL = "wss://api.fish.audio/v1/tts/live"
 _SAMPLE_RATE = 24000
 _MAX_WS_SIZE = 16 * 1024 * 1024
+# Same model on Fish's US East cluster; the row id carries the routing.
+_US_EAST_SUFFIX = "-us-east"
 
 
 class FishAudioTTSProvider(TTSProvider):
@@ -51,10 +50,11 @@ class FishAudioTTSProvider(TTSProvider):
         return self._model
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("fishaudio", self._model, self._voice, _SAMPLE_RATE)
         headers = {"Authorization": f"Bearer {self._api_key}", "model": self._model}
+        if self._model.endswith(_US_EAST_SUFFIX):
+            headers["model"] = self._model.removesuffix(_US_EAST_SUFFIX)
+            headers["x-fish-datacenter"] = "us-east"
 
         try:
             async with ws_client.connect(
@@ -63,7 +63,7 @@ class FishAudioTTSProvider(TTSProvider):
                 max_size=_MAX_WS_SIZE,
             ) as ws:
                 # Clock starts post-handshake so TTFA excludes connect (cohort parity).
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 # latency "balanced" streams chunks as synthesized; the default
                 # "normal" buffers whole segments, folding generation into TTFA.
                 await ws.send(
@@ -90,37 +90,13 @@ class FishAudioTTSProvider(TTSProvider):
                     data: dict[str, Any] = ormsgpack.unpackb(bytes(message))
                     event = data.get("event")
                     if event == "audio":
-                        chunk = data.get("audio")
-                        if chunk:
-                            if first_chunk_at is None:
-                                first_chunk_at = time.monotonic()
-                            audio_chunks.append(chunk)
+                        synthesis.add_chunk(data.get("audio") or b"")
                     elif event == "finish":
                         if data.get("reason") == "error":
                             raise RuntimeError(str(data.get("message", "finish reason=error")))
                         break
 
         except Exception as exc:
-            logger.warning(
-                "fishaudio_tts_error", provider="fishaudio", model=self._model, exc_info=exc
-            )
-            return finalize_tts_result(
-                provider="fishaudio",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=_SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="fishaudio",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=_SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()

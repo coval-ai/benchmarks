@@ -1,15 +1,17 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared finalize step for TTS providers: perceived TTFA + WAV output."""
+"""Shared synthesis state and finalize step for TTS providers."""
 
 from __future__ import annotations
 
 import math
 import os
 import tempfile
+import time
 import wave
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +29,71 @@ _PCM16_FRAME_BYTES = 2
 _SILENT_FAILURE_PREFIX = "provider closed the stream without sending audio or an error"
 _INAUDIBLE_AUDIO_ERROR = "provider audio remained below the audibility threshold"
 _LAST_FRAMES_MAX_CHARS = 400
+_LAST_FRAMES_KEPT = 3
+
+
+@dataclass
+class Synthesis:
+    """State a provider fills while streaming one request, then turns into a TTSResult.
+
+    ``start`` is t0 for TTFA; providers stamp it right before the synthesis
+    trigger so connect and session setup stay out of the measurement.
+    """
+
+    provider: str
+    model: str
+    voice: str
+    sample_rate: int
+    start: float | None = None
+    first_chunk_at: float | None = None
+    error: str | None = None
+    status_code: int | None = None
+    http_version: str | None = None
+    submit_to_headers_ms: float | None = None
+    connection_reused: bool | None = None
+    chunks: list[bytes] = field(default_factory=list)
+    last_frames: list[str] = field(default_factory=list)
+
+    def add_chunk(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        if self.first_chunk_at is None:
+            self.first_chunk_at = time.monotonic()
+        self.chunks.append(chunk)
+
+    def keep_frame(self, frame: str) -> None:
+        """Retain a non-audio frame so an unmatched error schema still surfaces."""
+        self.last_frames.append(frame)
+        del self.last_frames[:-_LAST_FRAMES_KEPT]
+
+    def fail(self, exc: BaseException, *, exc_info: bool = True, **context: object) -> None:
+        """Record *exc* as the outcome and drop partial audio so it is never scored."""
+        logger.warning(
+            "tts_synthesis_failed",
+            provider=self.provider,
+            model=self.model,
+            exc_info=exc if exc_info else None,
+            **context,
+        )
+        self.error = str(exc) or type(exc).__name__
+        self.chunks.clear()
+
+    def result(self) -> TTSResult:
+        return finalize_tts_result(
+            provider=self.provider,
+            model=self.model,
+            voice=self.voice,
+            pcm=b"".join(self.chunks),
+            sample_rate=self.sample_rate,
+            audio_synthesis_start=self.start,
+            first_audio_chunk_at=self.first_chunk_at,
+            error=self.error,
+            status_code=self.status_code,
+            http_version=self.http_version,
+            submit_to_headers_ms=self.submit_to_headers_ms,
+            connection_reused=self.connection_reused,
+            last_frames=self.last_frames,
+        )
 
 
 def finalize_tts_result(

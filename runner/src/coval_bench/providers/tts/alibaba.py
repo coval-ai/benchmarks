@@ -10,14 +10,11 @@ import json
 import time
 from typing import Any
 
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 _DEFAULT_WS_URL = "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime"
 _VALID_VOICES = ("Cherry", "Ethan")
@@ -52,9 +49,7 @@ class AlibabaTTSProvider(TTSProvider):
         return self._model
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("alibaba", self._model, self._voice, _SAMPLE_RATE)
         headers = {"Authorization": f"Bearer {self._api_key}"}
 
         try:
@@ -63,7 +58,7 @@ class AlibabaTTSProvider(TTSProvider):
                 additional_headers=headers,
                 max_size=_MAX_WS_SIZE,
             ) as ws:
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 await ws.send(
                     json.dumps(
                         {
@@ -87,9 +82,7 @@ class AlibabaTTSProvider(TTSProvider):
                     data: dict[str, Any] = json.loads(message)
                     event_type = data.get("type")
                     if event_type == "response.audio.delta":
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(base64.b64decode(data.get("delta", "")))
+                        synthesis.add_chunk(base64.b64decode(data.get("delta", "")))
                     elif event_type == "session.finished":
                         break
                     elif event_type == "error":
@@ -98,24 +91,6 @@ class AlibabaTTSProvider(TTSProvider):
                         raise RuntimeError(str(msg or err))
 
         except Exception as exc:
-            logger.warning("alibaba_tts_error", provider="alibaba", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="alibaba",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=_SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="alibaba",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=_SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()

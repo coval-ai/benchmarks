@@ -10,12 +10,12 @@ import pytest
 from google.api_core.exceptions import PreconditionFailed
 from google.cloud import storage
 
+from coval_bench.db.models import ObservationArtifact
 from coval_bench.observation_artifacts import (
     prepare_provider_transcript,
     prepare_timing_events,
     snapshot_generated_audio,
-    upload_generated_audio,
-    upload_provider_transcript,
+    upload_prepared_observation_artifact,
 )
 
 
@@ -71,6 +71,23 @@ def _client(blob: Blob) -> storage.Client:
     return cast(storage.Client, Client(blob))
 
 
+def upload_provider_transcript(
+    client: storage.Client, bucket: str, transcript: str
+) -> ObservationArtifact:
+    artifact_type, payload, extension, content_type, schema_name = prepare_provider_transcript(
+        transcript
+    )
+    return upload_prepared_observation_artifact(
+        client,
+        bucket,
+        artifact_type,
+        payload,
+        extension=extension,
+        content_type=content_type,
+        schema_name=schema_name,
+    )
+
+
 def test_transcript_upload_is_create_only_private_and_opaque() -> None:
     blob = Blob()
     artifact = upload_provider_transcript(_client(blob), "private", "secret transcript")
@@ -107,9 +124,3 @@ def test_wav_snapshot_keeps_bytes_and_duration(tmp_path: Path) -> None:
     payload, duration_ms = snapshot_generated_audio(path)
     assert payload == path.read_bytes()
     assert duration_ms == 10
-
-    blob = Blob()
-    artifact = upload_generated_audio(_client(blob), "private", payload, duration_ms)
-    assert blob.payload == payload
-    assert blob.content_type == "audio/wav"
-    assert artifact.duration_ms == duration_ms

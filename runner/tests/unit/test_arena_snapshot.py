@@ -382,41 +382,6 @@ def test_snapshot_counts_pre_gender_battles(snap_pg: psycopg.Connection[Any]) ->
     asyncio.run(_run())
 
 
-def _battle_columns(conn: psycopg.Connection[Any]) -> set[str]:
-    conn.rollback()  # see the catalog as alembic left it, not this session's snapshot
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT column_name FROM information_schema.columns"
-            " WHERE table_schema = 'arena' AND table_name = 'battles'"
-        )
-        return {str(row[0]) for row in cur.fetchall()}
-
-
-def test_battle_voice_migration_reverses(snap_pg: psycopg.Connection[Any]) -> None:
-    """0016 adds three columns and takes exactly those three back off.
-
-    A downgrade that leaves debris behind makes the migration unsafe to roll
-    back, which is the only thing standing between a bad deploy and a restore.
-    """
-    _apply_migrations(snap_pg)
-    cfg = _alembic_cfg(_async_dsn(snap_pg))
-    added = {"voice_a", "voice_b", "gender"}
-
-    after_upgrade = _battle_columns(snap_pg)
-    assert added <= after_upgrade
-
-    # Named, not "-1": relative to head this stopped testing 0016 the moment a
-    # later migration landed.
-    alembic_command.downgrade(cfg, "20260807_0015")
-    after_downgrade = _battle_columns(snap_pg)
-    assert added.isdisjoint(after_downgrade)
-    assert after_downgrade == after_upgrade - added
-
-    cfg.attributes["allow_metric_code_cleanup"] = True
-    alembic_command.upgrade(cfg, "head")
-    assert _battle_columns(snap_pg) == after_upgrade
-
-
 def test_gender_check_constraint_rejects_other_values(snap_pg: psycopg.Connection[Any]) -> None:
     """Postgres refuses a bad gender even when the write bypasses Pydantic."""
     _apply_migrations(snap_pg)
@@ -434,52 +399,3 @@ def test_gender_check_constraint_rejects_other_values(snap_pg: psycopg.Connectio
         else:  # pragma: no cover - the constraint is missing
             raise AssertionError("arena.battles accepted a gender outside the CHECK")
     snap_pg.rollback()
-
-
-def test_migration_preserves_existing_rows(snap_pg: psycopg.Connection[Any]) -> None:
-    """0016 adds columns to a populated table without touching a single row.
-
-    Runs the real chain to 0015, writes a battle and a vote, then upgrades. The
-    rows must survive untouched, with the new columns NULL rather than defaulted.
-    """
-    cfg = _alembic_cfg(_async_dsn(snap_pg))
-    alembic_command.upgrade(cfg, "20260807_0015")
-    snap_pg.rollback()
-
-    with snap_pg.cursor() as cur:
-        cur.execute(
-            "INSERT INTO arena.battles"
-            " (provider_a, model_a, provider_b, model_b, domain, prompt_text,"
-            "  audio_a_url, audio_b_url)"
-            " VALUES ('cartesia', 'sonic-3.5', 'openai', 'gpt-4o-mini-tts',"
-            "         'general', 'hello there', 'a.wav', 'b.wav')"
-            " RETURNING id"
-        )
-        inserted = cur.fetchone()
-        assert inserted is not None
-        battle_id = inserted[0]
-        cur.execute(
-            "INSERT INTO arena.votes (battle_id, outcome, voter_type, voter_id)"
-            " VALUES (%s, 'A_WIN', 'labeler', 'ann')",
-            (battle_id,),
-        )
-    snap_pg.commit()
-
-    cfg.attributes["allow_metric_code_cleanup"] = True
-    alembic_command.upgrade(cfg, "head")
-    snap_pg.rollback()
-
-    with snap_pg.cursor() as cur:
-        cur.execute("SELECT count(*) FROM arena.battles")
-        battles = cur.fetchone()
-        cur.execute("SELECT count(*) FROM arena.votes")
-        votes = cur.fetchone()
-        cur.execute("SELECT id, prompt_text, voice_a, voice_b, gender FROM arena.battles")
-        row = cur.fetchone()
-
-    assert battles is not None and battles[0] == 1
-    assert votes is not None and votes[0] == 1
-    assert row is not None
-    assert row[0] == battle_id  # same row, not a replacement
-    assert row[1] == "hello there"
-    assert (row[2], row[3], row[4]) == (None, None, None)

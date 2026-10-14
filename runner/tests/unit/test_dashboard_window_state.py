@@ -1,16 +1,17 @@
-"""Pure readiness checks for normalized dashboard readers."""
+"""Pure readiness checks for dashboard readers."""
 
 from __future__ import annotations
 
 import datetime as dt
 from typing import Any, cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
+import psycopg
 import pytest
 from fastapi import HTTPException
 from psycopg import AsyncConnection
 
-from coval_bench.api import dashboard_snapshots
+from coval_bench.api import dashboard_windows
 from coval_bench.db.dashboard_contracts import DEFINITION_REVISION
 
 
@@ -37,8 +38,8 @@ def _row(
 
 @pytest.mark.asyncio
 async def test_snapshot_accepts_initialized_current_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(dashboard_snapshots, "aggregation_fingerprint", lambda: "fp")
-    snapshot = await dashboard_snapshots.require_snapshot(_connection(_row()))
+    monkeypatch.setattr(dashboard_windows, "aggregation_fingerprint", lambda: "fp")
+    snapshot = await dashboard_windows.require_window_state(_connection(_row()))
     assert snapshot.generation == 3
     assert snapshot.stale is False
 
@@ -52,9 +53,9 @@ async def test_snapshot_accepts_initialized_current_state(monkeypatch: pytest.Mo
 async def test_snapshot_rejects_unusable_state(
     monkeypatch: pytest.MonkeyPatch, row: object
 ) -> None:
-    monkeypatch.setattr(dashboard_snapshots, "aggregation_fingerprint", lambda: "fp")
+    monkeypatch.setattr(dashboard_windows, "aggregation_fingerprint", lambda: "fp")
     with pytest.raises(HTTPException) as error:
-        await dashboard_snapshots.require_snapshot(_connection(row))
+        await dashboard_windows.require_window_state(_connection(row))
     assert error.value.status_code == 503
     assert error.value.detail == "dashboard_snapshot_not_ready"
 
@@ -65,8 +66,28 @@ async def test_snapshot_rejects_unusable_state(
 async def test_snapshot_freshness_allows_hourly_maintenance(
     monkeypatch: pytest.MonkeyPatch, field: str, age_minutes: int, stale: bool
 ) -> None:
-    monkeypatch.setattr(dashboard_snapshots, "aggregation_fingerprint", lambda: "fp")
+    monkeypatch.setattr(dashboard_windows, "aggregation_fingerprint", lambda: "fp")
     row = _row()
     row[field] = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=age_minutes)
-    snapshot = await dashboard_snapshots.require_snapshot(_connection(row))
+    snapshot = await dashboard_windows.require_window_state(_connection(row))
     assert snapshot.stale is stale
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        psycopg.errors.UndefinedTable,
+        psycopg.errors.UndefinedColumn,
+        psycopg.errors.ObjectNotInPrerequisiteState,
+    ],
+)
+async def test_unready_schema_is_a_503(error: type[Exception]) -> None:
+    connection = MagicMock()
+    connection.execute = AsyncMock()
+    pool = MagicMock()
+    pool.connection.return_value.__aenter__.return_value = connection
+    with pytest.raises(HTTPException) as raised:
+        async with dashboard_windows.dashboard_read(pool):
+            raise error()
+    assert raised.value.status_code == 503

@@ -17,7 +17,7 @@ from coval_bench.providers._http_session import (
     submit_to_headers_ms,
 )
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
+from coval_bench.providers.tts._common import Synthesis
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -108,54 +108,25 @@ class OpenAITTSProvider(TTSProvider):
         )
 
     async def _synthesize_http(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        http_version: str | None = None
-        setup_ms: float | None = None
-        reused: bool | None = None
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("openai", self._model, self._voice, SAMPLE_RATE)
 
         try:
-            start = time.monotonic()
+            synthesis.start = time.monotonic()
             async with self._client.audio.speech.with_streaming_response.create(
                 model=self._model,
                 voice=self._voice,
                 input=text,
                 response_format="pcm",
             ) as response:
-                http_version = response.http_version
-                setup_ms = submit_to_headers_ms(response.http_response.request)
-                reused = connection_reused(response.http_response.request)
+                synthesis.http_version = response.http_version
+                synthesis.submit_to_headers_ms = submit_to_headers_ms(
+                    response.http_response.request
+                )
+                synthesis.connection_reused = connection_reused(response.http_response.request)
                 async for chunk in response.iter_bytes():
-                    if isinstance(chunk, bytes) and len(chunk) > 0:
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(chunk)
+                    if isinstance(chunk, bytes):
+                        synthesis.add_chunk(chunk)
         except Exception as exc:
-            logger.warning("openai_http_error", provider="openai", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="openai",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-                http_version=http_version,
-                submit_to_headers_ms=setup_ms,
-                connection_reused=reused,
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="openai",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-            http_version=http_version,
-            submit_to_headers_ms=setup_ms,
-            connection_reused=reused,
-        )
+        return synthesis.result()

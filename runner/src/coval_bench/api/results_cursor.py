@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Authenticated opaque cursors for the public normalized-results reader."""
+"""Authenticated opaque cursors for the public results reader."""
 
 from __future__ import annotations
 

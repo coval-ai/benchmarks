@@ -16,21 +16,17 @@ import json
 import time
 from typing import Any
 
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 SAMPLE_RATE = 24000
 
 _DIALOGUE_WS_URL = "wss://api.elevenlabs.io/v1/text-to-dialogue/stream-input"
 _STREAM_WS_URL = "wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input"
 _OUTPUT_FORMAT = "pcm_24000"
-_LAST_FRAMES_KEPT = 3
 
 
 class ElevenLabsTTSProvider(TTSProvider):
@@ -76,10 +72,7 @@ class ElevenLabsTTSProvider(TTSProvider):
         return url, setup, inputs
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        last_frames: list[str] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("elevenlabs", self._model, self._voice, SAMPLE_RATE)
 
         url, setup_frames, text_frames = self._session_frames(text)
 
@@ -90,7 +83,7 @@ class ElevenLabsTTSProvider(TTSProvider):
                 for frame in setup_frames:
                     await ws.send(frame)
 
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 for frame in text_frames:
                     await ws.send(frame)
 
@@ -100,8 +93,7 @@ class ElevenLabsTTSProvider(TTSProvider):
                     try:
                         event: dict[str, Any] = json.loads(raw)
                     except json.JSONDecodeError:
-                        last_frames.append(raw)
-                        del last_frames[:-_LAST_FRAMES_KEPT]
+                        synthesis.keep_frame(raw)
                         continue
 
                     if event.get("error"):
@@ -109,14 +101,9 @@ class ElevenLabsTTSProvider(TTSProvider):
 
                     audio_b64 = event.get("audio")
                     if audio_b64:
-                        chunk = base64.b64decode(audio_b64)
-                        if chunk:
-                            if first_chunk_at is None:
-                                first_chunk_at = time.monotonic()
-                            audio_chunks.append(chunk)
+                        synthesis.add_chunk(base64.b64decode(audio_b64))
                     else:
-                        last_frames.append(raw)
-                        del last_frames[:-_LAST_FRAMES_KEPT]
+                        synthesis.keep_frame(raw)
 
                     # Dialogue closes with snake_case is_final; stream-input
                     # with camelCase isFinal.
@@ -124,28 +111,6 @@ class ElevenLabsTTSProvider(TTSProvider):
                         break
 
         except Exception as exc:
-            logger.warning(
-                "elevenlabs_error", provider="elevenlabs", model=self._model, exc_info=exc
-            )
-            return finalize_tts_result(
-                provider="elevenlabs",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                last_frames=last_frames,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="elevenlabs",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-            last_frames=last_frames,
-        )
+        return synthesis.result()

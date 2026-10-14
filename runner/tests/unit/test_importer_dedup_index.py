@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Standalone PostgreSQL checks for the normalized importer dedup index."""
+"""Standalone PostgreSQL checks for the importer dedup index."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
 
-from tests.unit.test_normalized_metric_id_migration import _dsn, _migrate
+from tests.unit.test_metric_id_migration import _dsn, _migrate
 
 pg_conn = postgresql("pg_proc")
 _INDEX_NAME = "benchmark_observations_coval_ingest_idx"

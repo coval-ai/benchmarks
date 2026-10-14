@@ -12,6 +12,7 @@ lifespan tests stub the DB pool, so they do not spin up Postgres.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 from unittest.mock import MagicMock, create_autospec
 
 import pytest
@@ -21,6 +22,7 @@ from httpx import ASGITransport, AsyncClient
 from posthog import Posthog
 
 from coval_bench.api.deps import get_posthog
+from tests.api.conftest import _publish
 
 AppFactory = Callable[[dict[str, str] | None], Awaitable[FastAPI]]
 
@@ -75,6 +77,7 @@ async def test_disabled_builds_no_client(
 async def test_router_emits_event_with_payload(
     app: FastAPI,
     client: AsyncClient,
+    postgresql: Any,
     path: str,
     params: dict[str, str],
     event: str,
@@ -82,6 +85,7 @@ async def test_router_emits_event_with_payload(
 ) -> None:
     """Each router emits its named event with the expected property keys and the
     $process_person_profile guard set to False."""
+    await _publish(postgresql)
     fake = create_autospec(Posthog, instance=True)
     app.dependency_overrides[get_posthog] = lambda: fake
     try:

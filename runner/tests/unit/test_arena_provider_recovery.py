@@ -41,7 +41,7 @@ async def _record_run(
     metric_version: str = "v1",
     variant: str = "default",
 ) -> int:
-    """One normalized benchmark run, with one terminal evaluation per entry."""
+    """One benchmark run, with one terminal evaluation per entry."""
     async with pool.connection() as conn, conn.transaction():
         conn.row_factory = psycopg.rows.dict_row
         cursor = await conn.execute(
@@ -399,52 +399,3 @@ def test_newer_ineligible_runs_fall_back_to_the_terminal_ttfa_run(
             await pool.close()
 
     asyncio.run(exercise())
-
-
-def test_parity_sql_covers_failures_and_detects_newer_normalized_run(
-    recovery_pg: psycopg.Connection[Any],
-) -> None:
-    from coval_bench.arena.provider_health_parity import audit_provider_health_parity
-
-    apply_migrations(recovery_pg)
-
-    async def seed(*, recovery: bool = False) -> None:
-        pool = await open_pool(recovery_pg)
-        try:
-            now = datetime.now(UTC)
-            if recovery:
-                await _record_run(pool, provider="dead", started_at=now, rows=[("success", None)])
-                return
-            await _record_run(
-                pool, provider="dead", started_at=now, rows=[("failed", DEAD_KEY_ERROR)]
-            )
-            await _record_run(
-                pool,
-                provider="mixed",
-                started_at=now,
-                rows=[("failed", DEAD_KEY_ERROR), ("success", None)],
-            )
-        finally:
-            await pool.close()
-
-    asyncio.run(seed())
-    recovery_pg.execute("""
-        INSERT INTO benchmarks_v2.results
-          (run_id, provider, model, benchmark, metric_type, status, error, audio_filename)
-        SELECT o.run_id, o.provider, o.model, o.benchmark, m.code,
-               CASE WHEN e.status='succeeded' THEN 'success' ELSE 'failed' END,
-               e.error, o.sample_id
-        FROM benchmarks_v2.benchmark_observations o
-        JOIN benchmarks_v2.metric_evaluations e ON e.observation_id=o.id
-        JOIN benchmarks_v2.metrics m ON m.id=e.metric_id
-    """)
-    recovery_pg.commit()
-    report = audit_provider_health_parity(recovery_pg)
-    assert report["complete"] and report["mismatch_count"] == 0
-    assert report["legacy"]["dead"]["failed"] == 1
-    assert report["normalized"]["mixed"]["succeeded"] == 1
-    assert report["legacy"]["dead"]["benched"] is True
-    asyncio.run(seed(recovery=True))
-    changed = audit_provider_health_parity(recovery_pg)
-    assert changed["mismatch_counts"] == {"selected_run_id": 1}
-    assert changed["excluded_sets"]["legacy_only"] == ["dead"]
