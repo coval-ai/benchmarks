@@ -30,6 +30,11 @@ EA_STATUS_HEADER = "X-EA-Token-Status"
 # The one proof header a response's content may depend on.
 VARY_HEADERS = "Authorization"
 
+# The public view is the same for every anonymous caller, so a shared cache may
+# hold it. s-maxage matches the API's own TTL (results land every ~30 min);
+# stale-while-revalidate keeps the 5s timeline recompute off the request path.
+PUBLIC_CACHE_CONTROL = "public, max-age=60, s-maxage=900, stale-while-revalidate=3600"
+
 
 def never_shared(response: Response) -> None:
     """Mark a response as belonging to this caller alone.
@@ -100,6 +105,8 @@ def hidden_early_access(
     embargoed = embargoed_pairs(models)
     if authorization is None or settings.clerk_issuer is None:
         response.headers[EA_STATUS_HEADER] = "absent"
+        if authorization is None:
+            response.headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
         return embargoed
 
     # Exclusive orgs are resolved first and never widened: nothing may add to a

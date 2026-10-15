@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from httpx import AsyncClient
 
-from coval_bench.api.internal import VARY_HEADERS
+from coval_bench.api.internal import PUBLIC_CACHE_CONTROL, VARY_HEADERS
 from coval_bench.registries import Benchmark, RegisteredModel
 from tests.api.conftest import (
     COVAL_ORG,
@@ -228,7 +228,10 @@ async def test_public_responses_are_cacheable_privileged_ones_are_not(
 ) -> None:
     """The embargo gate must mark a privileged response no-store."""
     public = await client.get("/v1/providers")
-    assert public.headers.get("Cache-Control") is None
+    assert public.headers["Cache-Control"] == PUBLIC_CACHE_CONTROL
+
+    unknown = await client.get("/v1/providers", headers={"Authorization": "Bearer nope"})
+    assert unknown.headers.get("Cache-Control") is None
 
     internal = await client.get("/v1/providers", headers=_internal_headers())
     assert internal.headers["Cache-Control"] == "private, no-store"
