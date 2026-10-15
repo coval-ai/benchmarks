@@ -97,6 +97,8 @@ class AgentSpec:
     # global one.
     instruction_metric_id_attr: str | None = None
     metric_ids: Mapping[Metric, str] = field(default_factory=dict)
+    # Scenario slug for agents wired through ``coval_s2s_scenarios``.
+    scenario: str | None = None
 
 
 @dataclass(frozen=True)
@@ -226,6 +228,7 @@ def _scenario_specs(settings: Settings) -> tuple[AgentSpec, ...]:
                         else scenarios.ACTIVE.instruction_metric_id_attr
                     ),
                     metric_ids=metric_ids,
+                    scenario=scenario.slug,
                 )
             )
     return tuple(specs)
@@ -315,6 +318,28 @@ def _condition_for_persona(
     if noisy_persona_id and persona_id == noisy_persona_id:
         return Condition.NOISY
     return Condition.CLEAN
+
+
+def _run_asset_versions(
+    spec: AgentSpec,
+    coval_run: CovalRun,
+    persona_conditions: Mapping[str, Condition] | None,
+    asset_versions: Mapping[str, Mapping[str, str]] | None,
+) -> Mapping[str, str] | None:
+    """The version labels for *coval_run*'s condition, or None when none are published."""
+    if not asset_versions:
+        return None
+    condition = (persona_conditions or {}).get(coval_run.persona_id)
+    labels = asset_versions.get(condition.value) if condition is not None else None
+    if labels is None:
+        logger.warning(
+            "asset_versions_missing",
+            provider=spec.provider,
+            model=spec.model,
+            coval_run_id=coval_run.run_id,
+            persona_id=coval_run.persona_id,
+        )
+    return labels
 
 
 def _dataset_identity(
@@ -798,6 +823,7 @@ async def _ingest_run(
     import_identity: ImportRunIdentity,
     import_generation: int,
     import_claim: ImportRunClaim | None = None,
+    asset_versions: Mapping[str, str] | None = None,
 ) -> RunStatus | None:
     """Ingest one Coval run into its own run row; None = skipped, nothing written.
 
@@ -1066,7 +1092,10 @@ async def _ingest_run(
                     captured_at=sample_captured_at,
                     executor=MetricExecutor.COVAL_API,
                     capture_id=f"{coval_run.run_id}:{sample_id}",
-                    provider_extras={"coval_run_id": coval_run.run_id},
+                    provider_extras={
+                        "coval_run_id": coval_run.run_id,
+                        **({"asset_versions": dict(asset_versions)} if asset_versions else {}),
+                    },
                 )
                 capture_outcomes.append(
                     await persist_capture(
@@ -1202,6 +1231,7 @@ async def _fetch_one_provider(
     artifact_bucket: str = "",
     workspace_id: str | None = None,
     unmapped_personas: dict[str, int] | None = None,
+    asset_versions: Mapping[str, Mapping[str, str]] | None = None,
 ) -> tuple[RunStatus, int]:
     """Scan the window and ingest every clean, not-yet-ingested run.
 
@@ -1362,6 +1392,9 @@ async def _fetch_one_provider(
                 import_identity=import_identity_value,
                 import_generation=import_generation,
                 import_claim=import_claim,
+                asset_versions=_run_asset_versions(
+                    spec, coval_run, persona_conditions, asset_versions
+                ),
             )
             if status is None:
                 continue
@@ -1620,6 +1653,9 @@ async def fetch_and_write_v2v(
                 artifact_bucket=artifact_bucket,
                 workspace_id=spec_workspace_id,
                 unmapped_personas=unmapped_personas,
+                asset_versions=settings.coval_s2s_asset_versions.get(spec.scenario or "", {}).get(
+                    spec.model
+                ),
             )
             total_ingested += ingested
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -3012,3 +3013,94 @@ async def test_persisted_import_rejects_disabled_capture_before_client(
     with pytest.raises(RuntimeError, match="benchmark_artifact_bucket"):
         await fetch_v2v.fetch_and_write_v2v(configured, benchmark=benchmark)
     client.assert_not_called()
+
+
+def test_asset_versions_load_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    labels = {"scenario": "v1", "agent": "v2", "persona": "v1", "test_set": "v1", "judge": "v3"}
+    monkeypatch.setenv(
+        "COVAL_S2S_ASSET_VERSIONS", json.dumps({"bank": {"gpt-realtime": {"clean": labels}}})
+    )
+    assert _settings().coval_s2s_asset_versions == {"bank": {"gpt-realtime": {"clean": labels}}}
+
+
+def test_asset_versions_default_to_none() -> None:
+    assert _settings().coval_s2s_asset_versions == {}
+
+
+def _bank_run_settings(**kwargs: Any) -> Settings:
+    return _settings(
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_scenarios={
+            "bank": ScenarioCovalIds(
+                test_set_id="TSB", agents={"gpt-realtime": "b1"}, personas={"clean": "PID"}
+            )
+        },
+        coval_s2s_bank_test_set_id="TSB",
+        coval_s2s_bank_instruction_metric_id="BIM",
+        **kwargs,
+    )
+
+
+async def _provider_extras_for_one_bank_run(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> list[dict[str, Any]]:
+    monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
+    extras: list[dict[str, Any]] = []
+
+    def _record(**kwargs: Any) -> Any:
+        extras.append(kwargs["provider_extras"])
+        return _prepare_and_keep_results(**kwargs)
+
+    monkeypatch.setattr("coval_bench.runner.persistence.prepare_capture_envelope", _record)
+    list_json = _list_json(
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "persona_id": "PID"}
+    )
+    run_json = {
+        "run": {
+            "error_status": "SUCCESS",
+            "results": {
+                "metrics": {
+                    "MID": {"values": [{"simulation_output_id": "s1", "value": 0.5}]},
+                    "BIM": {"values": [{"simulation_output_id": "s1", "value": 0.75}]},
+                }
+            },
+        }
+    }
+    client = _fake_client(list_json, run_json)
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    monkeypatch.setattr(fetch_v2v, "_client", lambda _s: client)
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: _stub_writer())
+    await fetch_v2v.fetch_and_write_v2v(settings)
+    return extras
+
+
+@pytest.mark.asyncio
+async def test_each_row_carries_its_conditions_asset_versions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    labels = {"scenario": "v1", "agent": "v2", "persona": "v1", "test_set": "v1", "judge": "v3"}
+    settings = _bank_run_settings(
+        coval_s2s_asset_versions={"bank": {"gpt-realtime": {"clean": labels}}}
+    )
+
+    extras = await _provider_extras_for_one_bank_run(monkeypatch, settings)
+
+    assert extras == [{"coval_run_id": "R1", "asset_versions": labels}]
+
+
+@pytest.mark.asyncio
+async def test_rows_without_published_versions_carry_only_the_run_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _bank_run_settings(
+        coval_s2s_asset_versions={"bank": {"gpt-realtime": {"low": {"agent": "v1"}}}}
+    )
+
+    extras = await _provider_extras_for_one_bank_run(monkeypatch, settings)
+
+    assert extras == [{"coval_run_id": "R1"}]

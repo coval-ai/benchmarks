@@ -336,6 +336,12 @@ class Settings(BaseSettings):
     # scenario shares the bank judge above; instruction-bank and workflow-bank each
     # name their own. Opaque ids, not secrets.
     coval_s2s_scenarios: dict[str, ScenarioCovalIds] = Field(default_factory=dict)
+    # Scenario slug -> registry model -> condition -> the asset version labels the
+    # coval-benchmarking Terraform publishes. Copied as is onto each result row in
+    # provider_extras["asset_versions"]; a missing entry writes no labels.
+    coval_s2s_asset_versions: dict[str, dict[str, dict[str, dict[str, str]]]] = Field(
+        default_factory=dict
+    )
     # Shared across all three industries (it reads test_case.expected_behaviors
     # generically, unlike the domain judges), so one field rather than three.
     # A separate metric from coval_s2s_*_instruction_metric_id above, not a
