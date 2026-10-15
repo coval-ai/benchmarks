@@ -20,6 +20,7 @@ from pydantic import SecretStr
 from sqlalchemy import create_engine
 
 from coval_bench.api.app import create_app
+from coval_bench.api.internal import PUBLIC_CACHE_CONTROL
 from coval_bench.api.results_cursor import decode as decode_cursor
 from coval_bench.api.results_cursor import encode as encode_cursor
 from coval_bench.config import Settings
@@ -830,7 +831,7 @@ async def test_v2_visibility_is_before_limit_and_cursor_scope_changes_are_reject
     assert partner.json()["results"][0]["provider"] == EA_PROVIDER
     assert internal.json()["results"][0]["provider"] == EA_PROVIDER
     assert "Authorization" in public.headers["Vary"]
-    assert public.headers.get("Cache-Control") is None
+    assert public.headers["Cache-Control"] == PUBLIC_CACHE_CONTROL
     assert partner.headers["Cache-Control"] == "private, no-store"
 
     invalid_proof = await client.get(
