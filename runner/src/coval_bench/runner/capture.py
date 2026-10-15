@@ -125,6 +125,9 @@ class ImportRunClaim(BaseModel):
     scheduled_at: datetime
     captured_at: datetime
     metric_types: list[str] = Field(min_length=1)
+    # Asset version labels frozen at the first import, so a retried capture
+    # resends exactly what the first attempt wrote.
+    asset_versions: dict[str, str] | None = None
 
     @field_validator("metric_types")
     @classmethod
@@ -473,7 +476,8 @@ def upload_import_run_claim(
     client: storage.Client, bucket_name: str, claim: ImportRunClaim
 ) -> ImportRunClaim:
     """Elect one run allocation for a stable external import generation."""
-    payload = canonical_bytes(claim.model_dump(mode="json"))
+    exclude = {"asset_versions"} if claim.asset_versions is None else None
+    payload = canonical_bytes(claim.model_dump(mode="json", exclude=exclude))
     key = _import_claim_key(claim.identity, claim.generation)
     try:
         upload_immutable_object(client, bucket_name, key, payload, content_type="application/json")

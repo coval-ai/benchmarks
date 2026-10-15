@@ -24,9 +24,11 @@ from coval_bench.db.models import Result, ResultStatus, Run, RunStatus
 from coval_bench.logging import log_run_failed, log_run_partial, log_run_unmapped_persona
 from coval_bench.registries import Benchmark, Metric
 from coval_bench.registries.models import RegisteredModel
+from coval_bench.runner import capture as capture_module
 from coval_bench.runner import persistence
 from coval_bench.runner.capture import (
     ImportRunClaim,
+    ImportRunIdentity,
     RunSeal,
     build_capture_identity,
     identity_digest,
@@ -3023,8 +3025,19 @@ def test_asset_versions_load_from_the_environment(monkeypatch: pytest.MonkeyPatc
     assert _settings().coval_s2s_asset_versions == {"bank": {"gpt-realtime": {"clean": labels}}}
 
 
-def test_asset_versions_default_to_none() -> None:
-    assert _settings().coval_s2s_asset_versions == {}
+def test_asset_versions_default_to_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("COVAL_S2S_ASSET_VERSIONS", raising=False)
+    assert _settings(_env_file=None).coval_s2s_asset_versions == {}
+
+
+def test_malformed_asset_versions_do_not_stop_settings_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "COVAL_S2S_ASSET_VERSIONS",
+        json.dumps({"bank": {"gpt-realtime": {"clean": {"judge": None}}}}),
+    )
+    assert _settings().coval_s2s_asset_versions["bank"]["gpt-realtime"]["clean"] == {"judge": None}
 
 
 def _bank_run_settings(**kwargs: Any) -> Settings:
@@ -3101,6 +3114,106 @@ async def test_rows_without_published_versions_carry_only_the_run_id(
         coval_s2s_asset_versions={"bank": {"gpt-realtime": {"low": {"agent": "v1"}}}}
     )
 
+    with capture_logs() as logs:
+        extras = await _provider_extras_for_one_bank_run(monkeypatch, settings)
+
+    assert extras == [{"coval_run_id": "R1"}]
+    assert [log["condition"] for log in logs if log["event"] == "asset_versions_missing"] == [
+        "clean"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_model_missing_from_the_versions_warns_and_writes_no_labels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _bank_run_settings(
+        coval_s2s_asset_versions={"bank": {"gpt-live-1": {"clean": {"agent": "v1"}}}}
+    )
+
+    with capture_logs() as logs:
+        extras = await _provider_extras_for_one_bank_run(monkeypatch, settings)
+
+    assert extras == [{"coval_run_id": "R1"}]
+    assert [log["model"] for log in logs if log["event"] == "asset_versions_missing"] == [
+        "gpt-realtime"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_non_string_labels_are_skipped_not_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _bank_run_settings(
+        coval_s2s_asset_versions={"bank": {"gpt-realtime": {"clean": {"judge": None}}}}
+    )
+
     extras = await _provider_extras_for_one_bank_run(monkeypatch, settings)
 
     assert extras == [{"coval_run_id": "R1"}]
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_import_resends_the_labels_frozen_in_its_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frozen = {"scenario": "v1", "agent": "v1", "persona": "v1", "test_set": "v1", "judge": "v2"}
+    now = datetime.now(UTC)
+
+    def _existing_claim(
+        _client: Any, _bucket: str, identity: Any, generation: int
+    ) -> ImportRunClaim | None:
+        if generation:
+            return None
+        return ImportRunClaim(
+            identity=identity,
+            generation=0,
+            run_id=7,
+            started_at=now,
+            scheduled_at=now,
+            captured_at=now,
+            metric_types=sorted([str(Metric.V2V), str(Metric.INSTRUCTION_FOLLOWING)]),
+            asset_versions=frozen,
+        )
+
+    monkeypatch.setattr(fetch_v2v, "read_import_run_claim", _existing_claim)
+    settings = _bank_run_settings(
+        coval_s2s_asset_versions={"bank": {"gpt-realtime": {"clean": {**frozen, "judge": "v3"}}}}
+    )
+
+    extras = await _provider_extras_for_one_bank_run(monkeypatch, settings)
+
+    assert extras == [{"coval_run_id": "R1", "asset_versions": frozen}]
+
+
+def test_a_claim_without_labels_uploads_the_same_bytes_as_before(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uploaded: list[bytes] = []
+    monkeypatch.setattr(
+        capture_module,
+        "upload_immutable_object",
+        lambda _client, _bucket, _key, payload, content_type: uploaded.append(payload),
+    )
+    now = datetime.now(UTC)
+    identity = ImportRunIdentity(
+        external_run_id="R1",
+        benchmark="s2s",
+        provider="openai",
+        model="gpt-realtime",
+        dataset_id="d",
+        dataset_sha256="a" * 64,
+    )
+    claim = ImportRunClaim(
+        identity=identity,
+        generation=0,
+        run_id=1,
+        started_at=now,
+        scheduled_at=now,
+        captured_at=now,
+        metric_types=["V2V"],
+    )
+    capture_module.upload_import_run_claim(MagicMock(), "bucket", claim)
+    capture_module.upload_import_run_claim(
+        MagicMock(), "bucket", claim.model_copy(update={"asset_versions": {"agent": "v1"}})
+    )
+    assert b"asset_versions" not in uploaded[0]
+    assert b"asset_versions" in uploaded[1]
