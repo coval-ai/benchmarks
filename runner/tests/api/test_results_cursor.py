@@ -38,12 +38,17 @@ def test_roundtrip_is_opaque_and_cross_instance() -> None:
     assert decode(token, SecretStr(KEY.get_secret_value())) == PAYLOAD
 
 
+def _tampered(token: str) -> str:
+    """Swap the last character for a different one, so the token always changes."""
+    return token[:-1] + ("A" if token[-1] != "A" else "B")
+
+
 @pytest.mark.parametrize(
     "token,key",
     [
         ("legacy-plaintext", KEY),
         (encode(PAYLOAD, KEY), OTHER_KEY),
-        (encode(PAYLOAD, KEY)[:-1] + "x", KEY),
+        (_tampered(encode(PAYLOAD, KEY)), KEY),
         ("v1.not-a-fernet-token", KEY),
     ],
 )
