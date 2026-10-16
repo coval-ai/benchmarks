@@ -14,6 +14,7 @@ import click
 import httpx
 
 from coval_bench.config import Settings
+from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.s2s.fetch_v2v import (
     UnmappedPersona,
     _all_persona_conditions,
@@ -22,6 +23,8 @@ from coval_bench.s2s.fetch_v2v import (
     _persona_conditions,
     _scenario_specs,
     recent_completed_runs,
+    s2s_specs,
+    validate_fetch_settings,
 )
 
 
@@ -36,6 +39,7 @@ async def check_scenarios(
     settings: Settings, client: httpx.AsyncClient, *, window_seconds: int | None = None
 ) -> tuple[list[ModelRuns], list[str]]:
     """Count each scenario model's recent runs per condition and flag what the fetch would miss."""
+    validate_fetch_settings(settings, s2s_specs(settings), Benchmark.S2S)
     persona_conditions = _persona_conditions(_all_persona_conditions(settings))
     found: list[ModelRuns] = []
     flags: list[str] = []

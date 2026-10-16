@@ -25,6 +25,7 @@ def _settings(**kwargs: Any) -> Settings:
     values: dict[str, Any] = {
         "benchmark_artifact_bucket": "test-artifacts",
         "coval_s2s_bank_instruction_metric_id": "JUDGE",
+        "coval_s2s_latency_metric_id": "V2V",
         "coval_s2s_scenarios": {
             "bank": ScenarioCovalIds(
                 test_set_id="TSB",
@@ -109,6 +110,13 @@ async def test_unset_judge_is_flagged_as_skipped_by_the_fetch() -> None:
         "bank/gpt-realtime: the fetch skips it, coval_s2s_bank_instruction_metric_id is unset",
         "bank/gemini-live: the fetch skips it, coval_s2s_bank_instruction_metric_id is unset",
     ]
+
+
+@pytest.mark.asyncio
+async def test_settings_the_fetch_rejects_raise_before_reading_coval() -> None:
+    async with _client({}) as client:
+        with pytest.raises(RuntimeError, match="coval_s2s_latency_metric_id is not set"):
+            await check_scenarios(_settings(coval_s2s_latency_metric_id=None), client)
 
 
 def test_settings_file_the_fetch_would_reject_exits_non_zero(tmp_path: Path) -> None:

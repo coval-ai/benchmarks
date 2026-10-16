@@ -1426,28 +1426,11 @@ def _require_family_test_sets(settings: Settings, specs: Sequence[AgentSpec]) ->
             )
 
 
-async def fetch_and_write_v2v(
-    settings: Settings | None = None,
-    *,
-    benchmark: Benchmark = Benchmark.S2S,
-    only_run_ids: frozenset[str] | None = None,
-    window_seconds: int | None = None,
-    page_size: int = WINDOW_PAGE_SIZE,
-    llm_agent_ids: Mapping[str, str] | None = None,
-) -> dict[str, RunStatus]:
-    """Ingest the selected benchmark's providers; return per-provider status.
-
-    Each ingested Coval run gets its own run row slotted by its create_time,
-    and metric-aware, benchmark-specific dedup makes re-scans no-ops, so ticks
-    are idempotent and the fetch cadence only affects how soon data appears —
-    the cron may run more often than the sims.
-    """
-    settings = settings or get_settings()
-    require_capture_bucket(settings)
-    specs = s2s_specs(settings) if benchmark is Benchmark.S2S else ()
-
-    metric_id = settings.coval_s2s_latency_metric_id
-    if benchmark is Benchmark.S2S and not metric_id:
+def validate_fetch_settings(
+    settings: Settings, specs: Sequence[AgentSpec], benchmark: Benchmark
+) -> None:
+    """Reject settings the fetch would fail on, before it reads Coval or the database."""
+    if benchmark is Benchmark.S2S and not settings.coval_s2s_latency_metric_id:
         # Only a configured spec whose clean condition fetches V2V (see
         # conditions.py) makes the latency metric required.
         v2v_spec_configured = any(spec.agent_id and _fetches_v2v(spec.family) for spec in specs)
@@ -1492,9 +1475,7 @@ async def fetch_and_write_v2v(
     noisy_persona_id = raw_noisy or None
     if benchmark is Benchmark.S2S and noisy_persona_id and not test_set_id:
         raise RuntimeError("coval_s2s_noisy_persona_id requires coval_s2s_test_set_id")
-    # Supersedes coval_s2s_noisy_persona_id once set, so the two can deploy in
-    # either order.
-    persona_conditions = _persona_conditions(_all_persona_conditions(settings))
+    _persona_conditions(_all_persona_conditions(settings))
     # Scenario personas travel with their scenario's own test set, so only the
     # legacy map needs the shared one.
     if benchmark is Benchmark.S2S and settings.coval_s2s_condition_personas and not test_set_id:
@@ -1508,13 +1489,45 @@ async def fetch_and_write_v2v(
             f"coval_s2s_scenarios['bank'].test_set_id {bank_ids.test_set_id!r} differs from "
             f"coval_s2s_bank_test_set_id {text_test_set!r}"
         )
-    persona_labels = _all_persona_labels(settings)
     raw_interruption = settings.coval_s2s_interruption_metric_id
     if raw_interruption is not None and not raw_interruption.strip():
         raise RuntimeError("coval_s2s_interruption_metric_id must not be blank")
     raw_call_length = settings.coval_s2s_call_length_metric_id
     if raw_call_length is not None and not raw_call_length.strip():
         raise RuntimeError("coval_s2s_call_length_metric_id must not be blank")
+
+
+async def fetch_and_write_v2v(
+    settings: Settings | None = None,
+    *,
+    benchmark: Benchmark = Benchmark.S2S,
+    only_run_ids: frozenset[str] | None = None,
+    window_seconds: int | None = None,
+    page_size: int = WINDOW_PAGE_SIZE,
+    llm_agent_ids: Mapping[str, str] | None = None,
+) -> dict[str, RunStatus]:
+    """Ingest the selected benchmark's providers; return per-provider status.
+
+    Each ingested Coval run gets its own run row slotted by its create_time,
+    and metric-aware, benchmark-specific dedup makes re-scans no-ops, so ticks
+    are idempotent and the fetch cadence only affects how soon data appears —
+    the cron may run more often than the sims.
+    """
+    settings = settings or get_settings()
+    require_capture_bucket(settings)
+    specs = s2s_specs(settings) if benchmark is Benchmark.S2S else ()
+
+    validate_fetch_settings(settings, specs, benchmark)
+    metric_id = settings.coval_s2s_latency_metric_id
+    instruction_metric_id = settings.coval_s2s_instruction_metric_id or None
+    test_set_id = settings.coval_s2s_test_set_id or None
+    noisy_persona_id = settings.coval_s2s_noisy_persona_id or None
+    # Supersedes coval_s2s_noisy_persona_id once set, so the two can deploy in
+    # either order.
+    persona_conditions = _persona_conditions(_all_persona_conditions(settings))
+    persona_labels = _all_persona_labels(settings)
+    raw_interruption = settings.coval_s2s_interruption_metric_id
+    raw_call_length = settings.coval_s2s_call_length_metric_id
     # Only configured metrics are ever asked for, so an unset id simply means that
     # metric is not ingested yet.
     metric_ids: dict[Metric, str] = {}
