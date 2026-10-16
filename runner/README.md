@@ -141,13 +141,15 @@ The cleanup revision is applied separately after the deployed-consumer and
 rollback-period gates pass:
 
 ```bash
-uv run coval-bench db migrate --revision 20261007_0044
-uv run alembic -x allow_metric_code_cleanup=true upgrade 20261007_0044
+uv run coval-bench db migrate --revision 20261014_0046
+uv run alembic -x allow_metric_code_cleanup=true upgrade 20261014_0046
 ```
 
-Deploy the artifact containing revision `20261007_0044` to every consumer
+Deploy the artifact containing revision `20261014_0046` to every consumer
 before applying it, so later restarts recognize the installed Alembic revision.
 Never use an implicit head upgrade for this cutover. To roll back the
 application, restore the previous interface first, then run
-`uv run alembic downgrade 20261005_0043` before deploying an older application
-binary. Record the deployed runner, API, dashboard, and maintenance-job versions.
+`uv run alembic downgrade 20261010_0045` before deploying a 0045-compatible
+application binary. This restores metric-code compatibility without recreating
+storage retired by 0044/0045. Record the deployed runner, API, dashboard, and
+maintenance-job versions.
