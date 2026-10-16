@@ -39,9 +39,8 @@ def test_roundtrip_is_opaque_and_cross_instance() -> None:
 
 
 def _tampered(token: str) -> str:
-    """Change one character in the middle, where every base64 bit is significant."""
-    index = len(token) // 2
-    return token[:index] + ("A" if token[index] != "A" else "B") + token[index + 1 :]
+    """Swap the last character for a different one, so the token always changes."""
+    return token[:-1] + ("A" if token[-1] != "A" else "B")
 
 
 @pytest.mark.parametrize(
