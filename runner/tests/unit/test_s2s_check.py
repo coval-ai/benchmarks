@@ -21,17 +21,20 @@ from coval_bench.config import ScenarioCovalIds, Settings
 from coval_bench.s2s.check import check_s2s, check_scenarios
 
 
-def _settings() -> Settings:
-    return Settings(
-        benchmark_artifact_bucket="test-artifacts",
-        coval_s2s_scenarios={
+def _settings(**kwargs: Any) -> Settings:
+    values: dict[str, Any] = {
+        "benchmark_artifact_bucket": "test-artifacts",
+        "coval_s2s_bank_instruction_metric_id": "JUDGE",
+        "coval_s2s_scenarios": {
             "bank": ScenarioCovalIds(
                 test_set_id="TSB",
                 agents={"gpt-realtime": "A1", "gemini-live": "A2"},
                 personas={"clean": "P0", "low": "P1"},
             )
         },
-    )
+    }
+    values.update(kwargs)
+    return Settings(**values)
 
 
 def _client(runs_by_agent: dict[str, list[dict[str, Any]]]) -> httpx.AsyncClient:
@@ -86,11 +89,26 @@ async def test_unmapped_persona_is_flagged() -> None:
         ]
         for agent in ("A1", "A2")
     }
-    runs["A1"].append({"run_id": "stray", "persona_id": "PX"})
+    runs["A1"].append({"run_id": "stray-1", "persona_id": "PX"})
+    runs["A1"].append({"run_id": "stray-2", "persona_id": "PX"})
     async with _client(runs) as client:
         _found, flags = await check_scenarios(_settings(), client, window_seconds=86_400)
 
-    assert flags == ["bank/gpt-realtime: run stray has unmapped persona 'PX'"]
+    assert flags == ["unmapped persona 'PX' in bank/gpt-realtime"]
+
+
+@pytest.mark.asyncio
+async def test_unset_judge_is_flagged_as_skipped_by_the_fetch() -> None:
+    async with _client({}) as client:
+        found, flags = await check_scenarios(
+            _settings(coval_s2s_bank_instruction_metric_id=None), client
+        )
+
+    assert found == []
+    assert flags == [
+        "bank/gpt-realtime: the fetch skips it, coval_s2s_bank_instruction_metric_id is unset",
+        "bank/gemini-live: the fetch skips it, coval_s2s_bank_instruction_metric_id is unset",
+    ]
 
 
 def test_settings_file_the_fetch_would_reject_exits_non_zero(tmp_path: Path) -> None:

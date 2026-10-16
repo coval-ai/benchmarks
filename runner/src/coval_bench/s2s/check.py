@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import click
 import httpx
 
-from coval_bench.config import Settings, get_settings
+from coval_bench.config import Settings
 from coval_bench.s2s.fetch_v2v import (
     UnmappedPersona,
     _all_persona_conditions,
@@ -33,20 +33,25 @@ class ModelRuns:
 
 
 async def check_scenarios(
-    settings: Settings, client: httpx.AsyncClient, *, window_seconds: int
+    settings: Settings, client: httpx.AsyncClient, *, window_seconds: int | None = None
 ) -> tuple[list[ModelRuns], list[str]]:
     """Count each scenario model's recent runs per condition and flag what the fetch would miss."""
     persona_conditions = _persona_conditions(_all_persona_conditions(settings))
-    specs = _scenario_specs(settings)
     found: list[ModelRuns] = []
     flags: list[str] = []
+    unmapped: dict[str, set[str]] = {}
     for slug, ids in settings.coval_s2s_scenarios.items():
-        scenario_specs = [s for s in specs if s.test_set_id == ids.test_set_id and s.agent_id]
-        if not scenario_specs:
+        only_this = settings.model_copy(update={"coval_s2s_scenarios": {slug: ids}})
+        specs = [s for s in _scenario_specs(only_this) if s.agent_id]
+        if not specs:
             flags.append(f"{slug}: the fetch skips this scenario (no agents or no judge)")
             continue
-        for spec in scenario_specs:
+        for spec in specs:
             if spec.agent_id is None:
+                continue
+            attr = spec.instruction_metric_id_attr
+            if attr and not (getattr(settings, attr) or "").strip():
+                flags.append(f"{slug}/{spec.model}: the fetch skips it, {attr} is unset")
                 continue
             runs = await recent_completed_runs(
                 client,
@@ -58,12 +63,11 @@ async def check_scenarios(
             counts = dict.fromkeys(ids.personas, 0)
             for run in runs:
                 try:
-                    condition = _condition_for_persona(run.persona_id, persona_conditions, None)
-                except UnmappedPersona:
-                    flags.append(
-                        f"{slug}/{spec.model}: run {run.run_id} has unmapped persona "
-                        f"{run.persona_id!r}"
+                    condition = _condition_for_persona(
+                        run.persona_id, persona_conditions, settings.coval_s2s_noisy_persona_id
                     )
+                except UnmappedPersona:
+                    unmapped.setdefault(run.persona_id, set()).add(f"{slug}/{spec.model}")
                     continue
                 counts[condition.value] = counts.get(condition.value, 0) + 1
             flags.extend(
@@ -72,10 +76,16 @@ async def check_scenarios(
                 if count == 0
             )
             found.append(ModelRuns(slug, spec.model, counts))
+    flags.extend(
+        f"unmapped persona {persona!r} in {', '.join(sorted(models))}"
+        for persona, models in unmapped.items()
+    )
     return found, flags
 
 
-async def _check(settings: Settings, window_seconds: int) -> tuple[list[ModelRuns], list[str]]:
+async def _check(
+    settings: Settings, window_seconds: int | None
+) -> tuple[list[ModelRuns], list[str]]:
     async with _client(settings) as client:
         return await check_scenarios(settings, client, window_seconds=window_seconds)
 
@@ -86,17 +96,28 @@ async def _check(settings: Settings, window_seconds: int) -> tuple[list[ModelRun
     type=click.Path(exists=True, dir_okay=False),
     help="JSON of env var names to values, e.g. the fetch job's env from an infra plan.",
 )
-@click.option("--window-hours", default=36, show_default=True, type=click.IntRange(min=1))
-def check_s2s(settings_file: str | None, window_hours: int) -> None:
+@click.option(
+    "--window-hours",
+    type=click.IntRange(min=1),
+    help="How far back to look for runs. Defaults to the scheduled fetch's own window.",
+)
+def check_s2s(settings_file: str | None, window_hours: int | None) -> None:
     """Check the S2S fetch settings against Coval; exits non-zero on any flag."""
     if settings_file:
         with open(settings_file, encoding="utf-8") as f:
             values = json.load(f)
         os.environ.update(
-            {name: v if isinstance(v, str) else json.dumps(v) for name, v in values.items()}
+            {
+                name: v if isinstance(v, str) else json.dumps(v)
+                for name, v in values.items()
+                if v is not None
+            }
         )
+    window_seconds = window_hours * 3600 if window_hours else None
     try:
-        found, flags = asyncio.run(_check(get_settings(), window_hours * 3600))
+        found, flags = asyncio.run(_check(Settings(), window_seconds))
+    except httpx.HTTPError as exc:
+        raise click.ClickException(f"the Coval request failed: {exc}") from exc
     except (RuntimeError, ValueError) as exc:
         raise click.ClickException(f"the fetch would reject these settings: {exc}") from exc
     for row in found:
