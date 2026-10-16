@@ -13,7 +13,7 @@ from __future__ import annotations
 import functools
 import json
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
 import structlog
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
@@ -336,6 +336,11 @@ class Settings(BaseSettings):
     # scenario shares the bank judge above; instruction-bank and workflow-bank each
     # name their own. Opaque ids, not secrets.
     coval_s2s_scenarios: dict[str, ScenarioCovalIds] = Field(default_factory=dict)
+    # Scenario slug -> registry model -> condition -> the asset version labels the
+    # coval-benchmarking Terraform publishes. Copied onto each result row in
+    # provider_extras["asset_versions"]; a missing or malformed entry writes no
+    # labels and logs a warning, so this metadata can never stop the fetch.
+    coval_s2s_asset_versions: dict[str, Any] = Field(default_factory=dict)
     # Shared across all three industries (it reads test_case.expected_behaviors
     # generically, unlike the domain judges), so one field rather than three.
     # A separate metric from coval_s2s_*_instruction_metric_id above, not a
