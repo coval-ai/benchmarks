@@ -175,6 +175,7 @@ SCENARIO_MODELS: tuple[tuple[str, str], ...] = (
     ("xai", "grok-voice-3.0"),
     ("stepfun", "stepaudio-3-realtime-preview"),
     ("alibaba", "qwen3.8-omni-flash-realtime"),
+    ("polyai", "dialog-rsn-1"),
 )
 
 
