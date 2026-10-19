@@ -491,6 +491,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
                     "qwen3.8-omni-flash-realtime": "b6",
                     "gemini-3.8-live": "b7",
                     "grok-voice-3.0": "b8",
+                    "dialog-rsn-1": "b9",
                 },
             )
         },
@@ -508,6 +509,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
         ("alibaba", "qwen3.8-omni-flash-realtime"),
         ("google", "gemini-3.8-live"),
         ("xai", "grok-voice-3.0"),
+        ("polyai", "dialog-rsn-1"),
     }
 
 
