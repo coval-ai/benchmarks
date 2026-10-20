@@ -138,6 +138,39 @@ async def test_mistral_empty_deltas_ignored_for_ttft(
 
 
 @pytest.mark.asyncio
+async def test_mistral_space_deltas_reach_fallback_transcript(
+    fake_api_key: SecretStr,
+    audio_pcm_bytes: bytes,
+) -> None:
+    """A standalone " " delta is a word boundary in the joined fallback transcript."""
+    events: list[Any] = [
+        {
+            "type": "session.created",
+            "session": {"request_id": "r3", "audio_format": None},
+        },
+        {"type": "transcription.text.delta", "text": "hello"},
+        {"type": "transcription.text.delta", "text": " "},
+        {"type": "transcription.text.delta", "text": "world"},
+    ]
+    provider = MistralSTTProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.mistral.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.complete_transcript == "hello world"
+    assert result.partial_transcripts == ["hello", "world"]
+
+
+@pytest.mark.asyncio
 async def test_mistral_partial_transcripts_accumulate(
     fake_api_key: SecretStr,
     audio_pcm_bytes: bytes,

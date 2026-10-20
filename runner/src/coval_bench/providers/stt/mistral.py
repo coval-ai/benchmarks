@@ -192,6 +192,10 @@ class MistralSTTProvider(STTProvider):
 
                 if msg_type == "transcription.text.delta":
                     text = str(msg.get("text", ""))
+                    if text:
+                        # A standalone " " delta is a word separator and must reach the
+                        # joined fallback transcript; it never stamps TTFT or a partial.
+                        delta_texts.append(text)
                     if text.strip():
                         if result.ttft_seconds is None and result.audio_start_time is not None:
                             result.ttft_seconds = now - result.audio_start_time
@@ -199,7 +203,6 @@ class MistralSTTProvider(STTProvider):
                             result.first_token_content = (
                                 stripped[:30] + "..." if len(stripped) > 30 else stripped
                             )
-                        delta_texts.append(text)
                         result.partial_transcripts.append(text)
                 elif msg_type == "transcription.done":
                     text = str(msg.get("text", "")).strip()
