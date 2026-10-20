@@ -987,7 +987,9 @@ async def _ingest_run(
             by_metric[metric] = _local_rows(
                 local_values, metric=metric, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec
             )
-        if condition.required is Metric.V2V and Metric.V2V in writable:
+        # Optional V2V (the workflow sets) gets the same FAILED rows as anchored V2V,
+        # or its latency would cover only the calls a model survived.
+        if Metric.V2V in writable:
             output_ids = [
                 s
                 for s in cast("list[Any]", (run.get("results") or {}).get("output_ids") or [])
@@ -996,7 +998,7 @@ async def _ingest_run(
             by_metric[Metric.V2V].extend(
                 _failed_conversation_rows(
                     output_ids,
-                    anchor_values,
+                    writable[Metric.V2V],
                     run_pk=run_pk,
                     coval_run_id=coval_run.run_id,
                     spec=spec,

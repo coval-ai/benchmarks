@@ -730,6 +730,47 @@ async def test_ingest_run_failed_conversations_become_failed_rows() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ingest_run_workflow_latency_keeps_failed_conversations() -> None:
+    # Workflow adherence anchors the run and V2V is optional: s2 has a verdict but
+    # no latency and s3 failed outright, so both land as FAILED latency rows.
+    writer = _stub_writer()
+    run_json = {
+        "run": {
+            "error_status": "SUCCESS",
+            "results": {
+                "output_ids": ["s1", "s2", "s3"],
+                "metrics": {
+                    "WAM": {
+                        "values": [
+                            {"simulation_output_id": "s1", "value": 1.0},
+                            {"simulation_output_id": "s2", "value": 0.5},
+                        ]
+                    },
+                    "MID": {"values": [{"simulation_output_id": "s1", "value": 0.8}]},
+                },
+            },
+        }
+    }
+    async with _fake_client({}, run_json) as client:
+        await _ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids={Metric.WORKFLOW_ADHERENCE: "WAM", Metric.V2V: "MID"},
+            condition=condition_for("s2s-workflow-bank-v1"),
+            period_seconds=10_800,
+        )
+    rows = _captured_rows(writer)
+    latency = [r for r in rows if r.metric_type == Metric.V2V]
+    assert [(r.audio_filename, r.status) for r in latency] == [
+        ("R1/s1", ResultStatus.SUCCESS),
+        ("R1/s2", ResultStatus.FAILED),
+        ("R1/s3", ResultStatus.FAILED),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_ingest_run_anchor_without_id_synthesizes_no_failures() -> None:
     # One anchor value has no simulation_output_id (kept under the index
     # fallback), so its output_id can't be matched: no output_id may be treated
