@@ -61,6 +61,35 @@ async def test_cartesia_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes)
     assert result.complete_transcript == "hello world how are you"
 
 
+@pytest.mark.asyncio
+async def test_cartesia_keeps_space_deltas(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+    """A standalone " " delta is a word boundary, not an empty delta to skip."""
+    events: list[Any] = [
+        {"type": "transcript", "text": "hello", "is_final": True},
+        {"type": "transcript", "text": " ", "is_final": True},
+        {"type": "transcript", "text": "world", "is_final": True},
+        {"type": "done"},
+    ]
+    provider = CartesiaSTTProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.cartesia.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+            audio_duration=3.0,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world"
+    assert result.partial_transcripts == ["hello", "world"]
+
+
 # ---------------------------------------------------------------------------
 # Provider name and model
 # ---------------------------------------------------------------------------

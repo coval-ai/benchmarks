@@ -146,16 +146,19 @@ class CartesiaSTTProvider(STTProvider):
                 # Keep the raw text: Cartesia deltas carry their own leading spaces,
                 # which are the word separators. Strip only for the empty check + display.
                 text = str(msg.get("text", ""))
-                token = text.strip()
-                if not token:
+                if not text:
                     continue
+                # A standalone " " delta is a word separator: no TTFT or partial, but
+                # it must reach the transcript or neighbouring words are glued.
+                token = text.strip()
 
                 # TTFT — first non-empty transcript (partial or final).
-                if result.ttft_seconds is None and result.audio_start_time is not None:
+                if token and result.ttft_seconds is None and result.audio_start_time is not None:
                     result.ttft_seconds = now - result.audio_start_time
                     result.first_token_content = token[:30] + "..." if len(token) > 30 else token
 
-                result.partial_transcripts.append(token)
+                if token:
+                    result.partial_transcripts.append(token)
 
                 if msg.get("is_final"):
                     final_segments.append(text)

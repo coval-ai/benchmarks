@@ -135,11 +135,17 @@ class SonioxSTTProvider(STTProvider):
                 tokens: list[dict[str, Any]] = msg.get("tokens") or []
                 for token in tokens:
                     text = str(token.get("text", ""))
-                    if not text.strip():
+                    if not text:
                         continue
-                    if result.ttft_seconds is None and result.audio_start_time is not None:
+                    # Soniox emits standalone " " tokens between words; they carry
+                    # no content for TTFT or partials but must reach the transcript.
+                    snippet = text.strip()
+                    if (
+                        snippet
+                        and result.ttft_seconds is None
+                        and result.audio_start_time is not None
+                    ):
                         result.ttft_seconds = now - result.audio_start_time
-                        snippet = text.strip()
                         result.first_token_content = (
                             snippet[:30] + "..." if len(snippet) > 30 else snippet
                         )
@@ -147,8 +153,8 @@ class SonioxSTTProvider(STTProvider):
                         final_parts.append(text)
                         if result.audio_start_time is not None:
                             result.audio_to_final_seconds = now - result.audio_start_time
-                    else:
-                        result.partial_transcripts.append(text.strip())
+                    elif snippet:
+                        result.partial_transcripts.append(snippet)
 
                 if msg.get("finished"):
                     break
