@@ -128,6 +128,35 @@ async def test_soniox_excludes_interim_tokens(
     assert result.word_count == 2
 
 
+@pytest.mark.asyncio
+async def test_soniox_keeps_space_tokens(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+    """A standalone " " token is a word boundary, not an empty token to skip."""
+    events: list[Any] = [
+        {"tokens": [{"text": "hello", "is_final": True}]},
+        {"tokens": [{"text": " ", "is_final": True}]},
+        {"tokens": [{"text": "world", "is_final": True}]},
+        {"finished": True},
+    ]
+    provider = SonioxSTTProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.soniox.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world"
+    assert result.word_count == 2
+    assert result.partial_transcripts == []
+
+
 # ---------------------------------------------------------------------------
 # Provider name and model
 # ---------------------------------------------------------------------------
