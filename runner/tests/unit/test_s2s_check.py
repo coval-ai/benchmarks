@@ -45,7 +45,7 @@ def _client(runs_by_agent: dict[str, list[dict[str, Any]]]) -> httpx.AsyncClient
         match = re.search(r'agent_id="([^"]+)"', request.url.params["filter"])
         assert match is not None
         runs = [
-            {"run_id": r["run_id"], "persona_id": r["persona_id"], "create_time": now.isoformat()}
+            {**r, "create_time": now.isoformat(), "status": "COMPLETED", "test_set_id": "TSB"}
             for r in runs_by_agent.get(match.group(1), [])
         ]
         return httpx.Response(200, json={"runs": runs})
