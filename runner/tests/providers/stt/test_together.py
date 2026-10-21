@@ -16,11 +16,11 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.together import TogetherSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events, make_settings
 
 _CHUNK_BYTES = int(16000 * 2 * 0.1)
 
@@ -38,7 +38,7 @@ def _frames(sent: list[Any]) -> list[dict[str, Any]]:
 
 async def _run(provider: TogetherSTTProvider, ws: FakeWebSocket, audio: bytes) -> Any:
     with patch(
-        "coval_bench.providers.stt.together.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_ws_connect(ws),
     ):
         return await provider.measure_ttft(
@@ -47,9 +47,9 @@ async def _run(provider: TogetherSTTProvider, ws: FakeWebSocket, audio: bytes) -
 
 
 @pytest.mark.asyncio
-async def test_together_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_together_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     ws = FakeWebSocket(load_fixture_events("together"), server_closes=False)
-    provider = TogetherSTTProvider(api_key=fake_api_key)
+    provider = TogetherSTTProvider(stt_settings)
 
     result = await _run(provider, ws, audio_pcm_bytes)
 
@@ -66,11 +66,11 @@ async def test_together_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes)
 
 @pytest.mark.asyncio
 async def test_together_commit_is_last_frame(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     sent: list[Any] = []
     ws = FakeWebSocket(load_fixture_events("together"), on_send=sent.append, server_closes=False)
-    provider = TogetherSTTProvider(api_key=fake_api_key)
+    provider = TogetherSTTProvider(stt_settings)
 
     await _run(provider, ws, audio_pcm_bytes)
 
@@ -82,12 +82,12 @@ async def test_together_commit_is_last_frame(
 
 @pytest.mark.asyncio
 async def test_together_nemotron_pads_tail_silence(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """Nemotron models get trailing silence appended before the commit."""
     sent: list[Any] = []
     ws = FakeWebSocket(load_fixture_events("together"), on_send=sent.append, server_closes=False)
-    provider = TogetherSTTProvider(api_key=fake_api_key, model="nemotron-3.5-asr-streaming-0.6b")
+    provider = TogetherSTTProvider(stt_settings, model="nemotron-3.5-asr-streaming-0.6b")
 
     await _run(provider, ws, audio_pcm_bytes)
 
@@ -99,7 +99,7 @@ async def test_together_nemotron_pads_tail_silence(
 
 @pytest.mark.asyncio
 async def test_together_deltas_only_falls_back_to_latest_per_item(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """With no final, each item's latest cumulative delta is salvaged."""
     events: list[Any] = [
@@ -120,7 +120,7 @@ async def test_together_deltas_only_falls_back_to_latest_per_item(
         },
     ]
     ws = FakeWebSocket(events, server_closes=False)
-    provider = TogetherSTTProvider(api_key=fake_api_key)
+    provider = TogetherSTTProvider(stt_settings)
 
     result = await _run(provider, ws, audio_pcm_bytes)
 
@@ -132,7 +132,7 @@ async def test_together_deltas_only_falls_back_to_latest_per_item(
 
 @pytest.mark.asyncio
 async def test_together_empty_final_salvages_item_deltas(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """An empty final counts as a finalization, using the item's latest delta as its text."""
     events: list[Any] = [
@@ -163,7 +163,7 @@ async def test_together_empty_final_salvages_item_deltas(
         },
     ]
     ws = FakeWebSocket(events, server_closes=False)
-    provider = TogetherSTTProvider(api_key=fake_api_key, model="parakeet-tdt-0.6b-v3")
+    provider = TogetherSTTProvider(stt_settings, model="parakeet-tdt-0.6b-v3")
 
     result = await _run(provider, ws, audio_pcm_bytes)
 
@@ -174,7 +174,7 @@ async def test_together_empty_final_salvages_item_deltas(
 
 @pytest.mark.asyncio
 async def test_together_punctuation_only_final_not_salvaged(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """A final whose item deltas hold no words stays dropped."""
     events: list[Any] = [
@@ -200,7 +200,7 @@ async def test_together_punctuation_only_final_not_salvaged(
         },
     ]
     ws = FakeWebSocket(events, server_closes=False)
-    provider = TogetherSTTProvider(api_key=fake_api_key, model="parakeet-tdt-0.6b-v3")
+    provider = TogetherSTTProvider(stt_settings, model="parakeet-tdt-0.6b-v3")
 
     result = await _run(provider, ws, audio_pcm_bytes)
 
@@ -210,29 +210,29 @@ async def test_together_punctuation_only_final_not_salvaged(
 
 
 def test_provider_name() -> None:
-    provider = TogetherSTTProvider(api_key=SecretStr("k"), model="parakeet-tdt-0.6b-v3")
+    provider = TogetherSTTProvider(make_settings(), model="parakeet-tdt-0.6b-v3")
     assert provider.name == "together-parakeet-tdt-0.6b-v3"
 
 
 def test_provider_model() -> None:
-    provider = TogetherSTTProvider(api_key=SecretStr("k"))
+    provider = TogetherSTTProvider(make_settings())
     assert provider.model == "whisper-large-v3"
 
 
 def test_invalid_model_raises() -> None:
     with pytest.raises(ValueError, match="Invalid Together STT model"):
-        TogetherSTTProvider(api_key=SecretStr("k"), model="whisper-large-v2")
+        TogetherSTTProvider(make_settings(), model="whisper-large-v2")
 
 
 def test_missing_api_key_raises() -> None:
     with pytest.raises(ValueError, match="together_api_key is required"):
-        TogetherSTTProvider(api_key=None)
+        TogetherSTTProvider(make_settings(together_api_key=None))
 
 
 @pytest.mark.asyncio
-async def test_together_error_event(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_together_error_event(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     ws = FakeWebSocket(load_fixture_events("together", "events-error"), server_closes=False)
-    provider = TogetherSTTProvider(api_key=fake_api_key)
+    provider = TogetherSTTProvider(stt_settings)
 
     result = await _run(provider, ws, audio_pcm_bytes)
 
@@ -242,19 +242,19 @@ async def test_together_error_event(fake_api_key: SecretStr, audio_pcm_bytes: by
 
 
 @pytest.mark.asyncio
-async def test_together_unsupported_audio_format(fake_api_key: SecretStr) -> None:
-    provider = TogetherSTTProvider(api_key=fake_api_key)
+async def test_together_unsupported_audio_format(stt_settings: Settings) -> None:
+    provider = TogetherSTTProvider(stt_settings)
     result = await provider.measure_ttft(
         audio_data=b"\x00\x00", channels=2, sample_width=2, sample_rate=44100
     )
     assert result.error is not None
-    assert "16 kHz mono" in result.error
+    assert "mono 16-bit" in result.error
 
 
 @pytest.mark.asyncio
-async def test_together_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_together_empty_stream(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     ws = FakeWebSocket([], server_closes=False)
-    provider = TogetherSTTProvider(api_key=fake_api_key)
+    provider = TogetherSTTProvider(stt_settings)
 
     result = await _run(provider, ws, audio_pcm_bytes)
 

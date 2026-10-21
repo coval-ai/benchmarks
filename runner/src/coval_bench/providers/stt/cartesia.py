@@ -10,40 +10,34 @@ provider here is benchmarked (single stream, progressive finals, finalize-on-clo
 
 from __future__ import annotations
 
-import json
-import time
 from typing import Any
 
-import structlog
-import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
-
-from coval_bench.providers.base import STTProvider, TranscriptionResult
-from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-
-logger = structlog.get_logger(__name__)
+from coval_bench.config import Settings
+from coval_bench.providers.base import TranscriptionResult
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 _WS_BASE_URL = "wss://api.cartesia.ai/stt/websocket"
 _CARTESIA_VERSION = "2025-11-04"
 
 
-class CartesiaSTTProvider(STTProvider):
+class CartesiaSTTProvider(WebSocketSTTProvider):
     """Cartesia Ink streaming STT provider."""
 
-    def __init__(self, api_key: SecretStr, model: str = "ink-2") -> None:
-        self._api_key = api_key
-        self._model = model
+    # Deltas carry their own leading spaces; joining with " " would double them.
+    _FINAL_JOIN = ""
+
+    def __init__(self, settings: Settings, model: str = "ink-2") -> None:
+        super().__init__(settings, model)
+        self._api_key = self._require_secret("cartesia_api_key")
 
     @property
     def name(self) -> str:
         return f"cartesia-{self._model}"
 
-    @property
-    def model(self) -> str:
-        return self._model
+    def _new_result(self) -> TranscriptionResult:
+        return TranscriptionResult(provider=self.name, vad_events_count=0)
 
-    def _build_websocket_url(self, sample_rate: int) -> str:
+    def _ws_url(self, sample_rate: int) -> str:
         return (
             f"{_WS_BASE_URL}"
             f"?model={self._model}"
@@ -52,136 +46,35 @@ class CartesiaSTTProvider(STTProvider):
             f"&language=en"
         )
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-        audio_duration: float | None = None,
-    ) -> TranscriptionResult:
-        if channels != 1:
-            raise ValueError(
-                f"Cartesia Ink only supports mono audio (channels=1), got channels={channels}"
-            )
-        if sample_width != 2:
-            raise ValueError(
-                f"Cartesia Ink expects 16-bit PCM (sample_width=2), got sample_width={sample_width}"
-            )
-        result = TranscriptionResult(provider=self.name, vad_events_count=0)
-        total_start = time.monotonic()
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._api_key.get_secret_value()}",
+            "cartesia-version": _CARTESIA_VERSION,
+        }
 
-        try:
-            url = self._build_websocket_url(sample_rate)
-            headers = {
-                "Authorization": f"Bearer {self._api_key.get_secret_value()}",
-                "cartesia-version": _CARTESIA_VERSION,
-            }
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        # Two-phase end: finalize flushes buffered audio; close ends the session.
+        await ws.send("finalize")
+        await ws.send("close")
 
-            async with ws_client.connect(url, additional_headers=headers) as ws:
-                await run_stream(
-                    result,
-                    self._send_audio(ws, audio_data, sample_rate, result, realtime_resolution),
-                    self._receive(ws, result),
-                )
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        msg_type: str = msg.get("type", "")
+        if msg_type == "error":
+            tx.fail(str(msg.get("message") or msg))
+            return True
+        # flush_done acks a finalize; done is the terminal marker. Break on
+        # done explicitly rather than relying on the socket closing.
+        if msg_type == "done":
+            return True
+        if msg_type != "transcript":
+            return False
 
-        except Exception as exc:
-            logger.warning(
-                "cartesia_stt_measure_ttft_failed",
-                provider="cartesia",
-                model=self._model,
-                exc_info=exc,
-            )
-            result.error = str(exc)
-
-        result.total_time = time.monotonic() - total_start
-        return result
-
-    async def _send_audio(
-        self,
-        ws: Any,
-        audio_data: bytes,
-        sample_rate: int,
-        result: TranscriptionResult,
-        realtime_resolution: float,
-    ) -> None:
-        byte_rate = sample_rate * 2  # 16-bit mono
-        chunk_size = int(byte_rate * realtime_resolution)
-        try:
-            async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
-                result.audio_start_time = start
-                await ws.send(chunk)
-            # Two-phase end: finalize flushes buffered audio; close ends the session.
-            await ws.send("finalize")
-            await ws.send("close")
-        except Exception as exc:
-            logger.warning(
-                "cartesia_stt_send_error", provider="cartesia", model=self._model, exc_info=exc
-            )
-            raise
-
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
-        final_segments: list[str] = []
-
-        try:
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    continue
-
-                msg: dict[str, Any] = json.loads(raw)
-                now = time.monotonic()
-                msg_type: str = msg.get("type", "")
-
-                if msg_type == "error":
-                    result.error = str(msg.get("message") or msg)
-                    break
-                # flush_done acks a finalize; done is the terminal marker. Break on
-                # done explicitly rather than relying on the socket closing.
-                if msg_type == "done":
-                    break
-                if msg_type != "transcript":
-                    continue
-
-                # Keep the raw text: Cartesia deltas carry their own leading spaces,
-                # which are the word separators. Strip only for the empty check + display.
-                text = str(msg.get("text", ""))
-                if not text:
-                    continue
-                # A standalone " " delta is a word separator: no TTFT or partial, but
-                # it must reach the transcript or neighbouring words are glued.
-                token = text.strip()
-
-                # TTFT — first non-empty transcript (partial or final).
-                if token and result.ttft_seconds is None and result.audio_start_time is not None:
-                    result.ttft_seconds = now - result.audio_start_time
-                    result.first_token_content = token[:30] + "..." if len(token) > 30 else token
-
-                if token:
-                    result.partial_transcripts.append(token)
-
-                if msg.get("is_final"):
-                    final_segments.append(text)
-                    if result.audio_start_time is not None:
-                        result.audio_to_final_seconds = now - result.audio_start_time
-
-        except Exception as exc:
-            logger.warning(
-                "cartesia_stt_receive_error",
-                provider="cartesia",
-                model=self._model,
-                exc_info=exc,
-            )
-            if result.error is None and result.audio_to_final_seconds is None:
-                result.error = str(exc)
-
-        # Per Cartesia docs, join is_final deltas verbatim — they carry their own
-        # spacing; do NOT inject separators between them. Outer strip only, for display.
-        # If no is_final arrived, leave complete_transcript None so the orchestrator
-        # scores WER as failed rather than from a partial fragment.
-        if final_segments:
-            result.complete_transcript = "".join(final_segments).strip() or None
-
-        if result.complete_transcript:
-            result.transcript_length = len(result.complete_transcript)
-            result.word_count = len(result.complete_transcript.split())
+        text = str(msg.get("text", ""))
+        if not text:
+            return False
+        # A standalone " " delta is a word separator: no TTFT or partial, but
+        # it must reach the transcript or neighbouring words are glued.
+        tx.partial(text, now)
+        if msg.get("is_final"):
+            tx.final(text, now)
+        return False

@@ -26,22 +26,15 @@ finalizations, with the item's latest delta salvaged as the segment text
 
 from __future__ import annotations
 
-import asyncio
 import base64
-import contextlib
 import json
-import time
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, cast
 
-import structlog
-import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
-
-from coval_bench.providers.base import STTProvider, TranscriptionResult
-from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-
-logger = structlog.get_logger(__name__)
+from coval_bench.config import Settings
+from coval_bench.providers.base import TranscriptionResult
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
+from coval_bench.providers.stt._transcript_utils import finalize_transcript
 
 _MODEL_IDS = {
     "nemotron-3-asr-streaming-0.6b": "nvidia/nemotron-3-asr-streaming-0.6b",
@@ -59,119 +52,58 @@ _LOOKAHEAD_FLUSH_MODELS = frozenset(
 # Nemotron's deepest lookahead config is 1.12 s; pad past it.
 _TAIL_SILENCE_S = 1.6
 
-# After commit, wait this long for the forced final before closing, so the
-# close can't race the final.
-_FINAL_WAIT_S = 15.0
+
+@dataclass
+class _TogetherTranscription(Transcription):
+    # Deltas are cumulative running transcripts revised in place, keyed by
+    # conversation item — keep only each item's latest.
+    item_deltas: dict[str, str] = field(default_factory=dict)
 
 
-class TogetherSTTProvider(STTProvider):
+class TogetherSTTProvider(WebSocketSTTProvider):
     """Together AI streaming STT provider."""
 
-    _VALID_MODELS = frozenset(_MODEL_IDS)
+    # Nemotron's forced final can take a while after commit.
+    _FINAL_WAIT_S = 15.0
 
-    def __init__(self, api_key: SecretStr | None, model: str = "whisper-large-v3") -> None:
+    _VALID_MODELS = frozenset(_MODEL_IDS)
+    _SAMPLE_RATE = 16000
+
+    def __init__(self, settings: Settings, model: str = "whisper-large-v3") -> None:
         if not self._model_supported(model):
             raise ValueError(
                 f"Invalid Together STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
             )
-        if api_key is None:
-            raise ValueError("together_api_key is required for the Together STT provider")
-        self._api_key = api_key
-        self._model = model
+        super().__init__(settings, model)
+        self._api_key = self._require_secret("together_api_key")
 
     @property
     def name(self) -> str:
         return f"together-{self._model}"
 
-    @property
-    def model(self) -> str:
-        return self._model
+    def _new_transcription(self, result: TranscriptionResult) -> Transcription:
+        return _TogetherTranscription(result)
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name)
-        if sample_rate != 16000 or channels != 1 or sample_width != 2:
-            result.error = (
-                "Together requires 16 kHz mono 16-bit PCM input; got "
-                f"sample_rate={sample_rate}, channels={channels}, sample_width={sample_width}"
-            )
-            return result
+    def _ws_url(self, sample_rate: int) -> str:
+        return (
+            "wss://api.together.ai/v1/realtime"
+            f"?model={_MODEL_IDS[self._model]}"
+            "&input_audio_format=pcm_s16le_16000"
+        )
 
-        total_start = time.monotonic()
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._api_key.get_secret_value()}",
+            "OpenAI-Beta": "realtime=v1",
+        }
 
-        try:
-            url = (
-                "wss://api.together.ai/v1/realtime"
-                f"?model={_MODEL_IDS[self._model]}"
-                "&input_audio_format=pcm_s16le_16000"
-            )
-            headers = {
-                "Authorization": f"Bearer {self._api_key.get_secret_value()}",
-                "OpenAI-Beta": "realtime=v1",
-            }
-            final_event = asyncio.Event()
-            async with ws_client.connect(url, additional_headers=headers) as ws:
-                await run_stream(
-                    result,
-                    self._send_audio(
-                        ws, audio_data, sample_rate, result, realtime_resolution, final_event
-                    ),
-                    self._receive(ws, result, final_event),
-                )
-
-        except Exception as exc:
-            logger.warning(
-                "together_measure_ttft_failed",
-                provider="together",
-                model=self._model,
-                exc_info=exc,
-            )
-            result.error = str(exc)
-
-        result.total_time = time.monotonic() - total_start
-        return result
-
-    async def _send_audio(
-        self,
-        ws: Any,
-        audio_data: bytes,
-        sample_rate: int,
-        result: TranscriptionResult,
-        realtime_resolution: float,
-        final_event: asyncio.Event,
-    ) -> None:
+    def _prepare_audio(self, audio_data: bytes, sample_rate: int) -> tuple[bytes, int]:
         byte_rate = sample_rate * 2
-        chunk_size = int(byte_rate * realtime_resolution)
-        try:
-            async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
-                result.audio_start_time = start
-                await self._append(ws, chunk)
-            if self._model in _LOOKAHEAD_FLUSH_MODELS:
-                silence = bytes(int(byte_rate * _TAIL_SILENCE_S))
-                async for chunk, _ in paced_chunks(silence, chunk_size, byte_rate):
-                    await self._append(ws, chunk)
-            # Clear first: a mid-stream turn final would leave the latch set
-            # and make the wait a no-op.
-            final_event.clear()
-            await ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
-            # The server holds the socket open; close so the receive loop ends.
-            await ws.close()
-        except Exception as exc:
-            logger.warning(
-                "together_send_error", provider="together", model=self._model, exc_info=exc
-            )
-            raise
+        if self._model in _LOOKAHEAD_FLUSH_MODELS:
+            audio_data += bytes(int(byte_rate * _TAIL_SILENCE_S))
+        return audio_data, byte_rate
 
-    @staticmethod
-    async def _append(ws: Any, chunk: bytes) -> None:
+    async def _send_chunk(self, ws: Any, chunk: bytes) -> None:
         await ws.send(
             json.dumps(
                 {
@@ -181,78 +113,44 @@ class TogetherSTTProvider(STTProvider):
             )
         )
 
-    async def _receive(
-        self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
-    ) -> None:
-        final_segments: list[str] = []
-        # Deltas are cumulative running transcripts revised in place, keyed by
-        # conversation item — keep only each item's latest.
-        item_deltas: dict[str, str] = {}
-        last_final_time: float | None = None
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        await self._send_and_wait(ws, json.dumps({"type": "input_audio_buffer.commit"}), tx)
+        # The server holds the socket open; close so the receive loop ends.
+        await ws.close()
 
-        try:
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    continue
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        tx = cast(_TogetherTranscription, tx)
+        msg_type: str = msg.get("type", "")
 
-                msg: dict[str, Any] = json.loads(raw)
-                now = time.monotonic()
-                msg_type: str = msg.get("type", "")
-
-                if msg_type == "error":
-                    error_obj = msg.get("error")
-                    detail = (
-                        error_obj.get("message") if isinstance(error_obj, dict) else None
-                    ) or msg.get("message")
-                    result.error = str(detail or msg)
-                    logger.warning(
-                        "together_stt_error", provider="together", model=self._model, msg=msg
-                    )
-                    final_event.set()
-                    break
-
-                if msg_type.endswith("input_audio_transcription.delta"):
-                    delta = str(msg.get("delta", ""))
-                    if not delta.strip():
-                        continue
-                    if result.ttft_seconds is None and result.audio_start_time is not None:
-                        result.ttft_seconds = now - result.audio_start_time
-                        snippet = delta.strip()
-                        result.first_token_content = (
-                            snippet[:30] + "..." if len(snippet) > 30 else snippet
-                        )
-                    result.partial_transcripts.append(delta.strip())
-                    item_deltas[str(msg.get("item_id", ""))] = delta
-                    continue
-
-                if msg_type.endswith("input_audio_transcription.completed"):
-                    transcript = str(msg.get("transcript", "")).strip()
-                    if not transcript:
-                        salvaged = item_deltas.get(str(msg.get("item_id", "")), "").strip()
-                        if any(ch.isalnum() for ch in salvaged):
-                            transcript = salvaged
-                    if transcript:
-                        final_segments.append(transcript)
-                        last_final_time = now
-                    final_event.set()
-
-        except Exception as exc:
-            logger.warning(
-                "together_receive_error", provider="together", model=self._model, exc_info=exc
+        if msg_type == "error":
+            error_obj = msg.get("error")
+            detail = (error_obj.get("message") if isinstance(error_obj, dict) else None) or msg.get(
+                "message"
             )
-            if result.error is None and last_final_time is None:
-                result.error = str(exc)
+            tx.fail(str(detail or msg))
+            self._log.warning("together_stt_error", msg=msg)
+            return True
 
-        if last_final_time is not None and result.audio_start_time is not None:
-            result.audio_to_final_seconds = last_final_time - result.audio_start_time
+        if msg_type.endswith("input_audio_transcription.delta"):
+            delta = str(msg.get("delta", ""))
+            if delta.strip():
+                tx.partial(delta, now)
+                tx.item_deltas[str(msg.get("item_id", ""))] = delta
+            return False
 
-        if final_segments:
-            result.complete_transcript = " ".join(final_segments).strip() or None
-        elif item_deltas:
-            result.complete_transcript = (
-                " ".join(d.strip() for d in item_deltas.values()).strip() or None
-            )
+        if msg_type.endswith("input_audio_transcription.completed"):
+            transcript = str(msg.get("transcript", "")).strip()
+            if not transcript:
+                salvaged = tx.item_deltas.get(str(msg.get("item_id", "")), "").strip()
+                if any(ch.isalnum() for ch in salvaged):
+                    transcript = salvaged
+            if transcript:
+                tx.final(transcript, now)
+            else:
+                tx.final_event.set()
+        return False
 
-        if result.complete_transcript:
-            result.transcript_length = len(result.complete_transcript)
-            result.word_count = len(result.complete_transcript.split())
+    def _finish(self, tx: Transcription) -> None:
+        tx = cast(_TogetherTranscription, tx)
+        segments = tx.finals or [d.strip() for d in tx.item_deltas.values()]
+        finalize_transcript(tx.result, final_segments=segments, partial_fallback="none")

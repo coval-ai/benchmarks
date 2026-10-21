@@ -3,16 +3,19 @@
 
 """Shared ABC stubs for STT and TTS providers.
 
-providers-stt and providers-tts agents will refine these contracts when they
-land.  Do not add provider-specific logic here.
+Do not add provider-specific logic here.
 """
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
+
+import structlog
+from pydantic import SecretStr
 
 if TYPE_CHECKING:
     from coval_bench.config import Settings
@@ -54,7 +57,7 @@ class TranscriptionResult:
     audio_start_time: float | None = None
     finalization_start_time: float | None = None
 
-    # Deepgram-specific VAD data
+    # VAD events, for the providers that emit them
     vad_first_detected: float | None = None
     vad_events_count: int | None = None
     vad_first_event_content: str | None = None
@@ -123,9 +126,48 @@ class Provider(ABC):
 
 
 class STTProvider(Provider, ABC):
-    """Abstract base class for speech-to-text providers."""
+    """Abstract base class for speech-to-text providers.
 
-    @abstractmethod
+    Subclasses implement :meth:`_transcribe`; :meth:`measure_ttft` owns the
+    result object, the input guard, the total-time clock and the failure log.
+    Streaming WebSocket providers should extend
+    :class:`coval_bench.providers.stt._streaming.WebSocketSTTProvider` instead.
+    """
+
+    # Set when the wire protocol accepts exactly one input rate.
+    _SAMPLE_RATE: ClassVar[int | None] = None
+
+    def __init__(self, settings: Settings, model: str) -> None:
+        self._settings = settings
+        self._model = model
+        self._log = structlog.get_logger(type(self).__module__).bind(
+            provider=self.key(), model=model
+        )
+
+    @classmethod
+    def key(cls) -> str:
+        """Registry key: the provider's module name (``stt/soniox.py`` -> ``soniox``)."""
+        return cls.__module__.rsplit(".", 1)[-1]
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    def _require_secret(self, field_name: str) -> SecretStr:
+        value: SecretStr | None = getattr(self._settings, field_name, None)
+        if value is None or not value.get_secret_value().strip():
+            raise ValueError(f"{field_name} is required for the {self.key()} STT provider")
+        return value
+
+    def _require_setting(self, field_name: str) -> str:
+        value: str | None = getattr(self._settings, field_name, None)
+        if not value or not value.strip():
+            raise ValueError(f"{field_name} is required for the {self.key()} STT provider")
+        return value
+
+    def _new_result(self) -> TranscriptionResult:
+        return TranscriptionResult(provider=self.name)
+
     async def measure_ttft(
         self,
         audio_data: bytes,
@@ -148,6 +190,42 @@ class STTProvider(Provider, ABC):
             A :class:`TranscriptionResult` with timing and transcript fields
             populated.
         """
+        result = self._new_result()
+        if channels != 1 or sample_width != 2:
+            result.error = (
+                f"{self.key()} requires mono 16-bit PCM input; "
+                f"got channels={channels}, sample_width={sample_width}"
+            )
+            return result
+        if self._SAMPLE_RATE is not None and sample_rate != self._SAMPLE_RATE:
+            result.error = (
+                f"{self.key()} requires {self._SAMPLE_RATE / 1000:g} kHz PCM input; "
+                f"got {sample_rate} Hz"
+            )
+            return result
+        if realtime_resolution <= 0:
+            result.error = "realtime_resolution must be > 0"
+            return result
+
+        total_start = time.monotonic()
+        try:
+            await self._transcribe(audio_data, sample_rate, realtime_resolution, result)
+        except Exception as exc:
+            self._log.warning("stt_measure_ttft_failed", exc_info=exc)
+            if result.error is None:
+                result.error = str(exc)
+        result.total_time = time.monotonic() - total_start
+        return result
+
+    @abstractmethod
+    async def _transcribe(
+        self,
+        audio_data: bytes,
+        sample_rate: int,
+        realtime_resolution: float,
+        result: TranscriptionResult,
+    ) -> None:
+        """Stream mono PCM16 *audio_data* and fill *result*. Raise to fail the clip."""
 
 
 class TTSProvider(Provider, ABC):

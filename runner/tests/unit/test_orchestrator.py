@@ -3890,13 +3890,14 @@ async def test_tts_wer_scores_against_spoken_reference(
 
 
 @pytest.mark.asyncio
-async def test_stt_guava_receives_base_url_and_domain(audio_file: Path, settings: Settings) -> None:
-    """The orchestrator wires Guava's endpoint settings into the provider constructor."""
+async def test_stt_provider_is_built_from_settings(audio_file: Path, settings: Settings) -> None:
+    """Every STT provider gets the run's Settings and its model id, nothing provider-specific."""
     seen: dict[str, Any] = {}
 
     class _Capture:
-        def __init__(self, **kwargs: Any) -> None:
-            seen.update(kwargs)
+        def __init__(self, settings: Settings, model: str) -> None:
+            seen["settings"] = settings
+            seen["model"] = model
             raise RuntimeError("stop here")
 
     entry = RegisteredModel(
@@ -3929,8 +3930,8 @@ async def test_stt_guava_receives_base_url_and_domain(audio_file: Path, settings
             entry=entry, item=item, run_id=0, gate=ModelGate(1), settings=cfg, writer=None
         )
 
-    assert seen["base_url"] == "https://guava.test"
-    assert seen["domain"] == "healthcare"
+    assert seen["settings"] is cfg
+    assert seen["model"] == "daytona-stt"
 
 
 @pytest.mark.asyncio

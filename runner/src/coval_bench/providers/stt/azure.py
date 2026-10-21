@@ -17,24 +17,15 @@ from __future__ import annotations
 
 import json
 import struct
-import time  # monotonic clock — wall-clock can step on NTP sync
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
-import structlog
-import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
-
-from coval_bench.providers.base import STTProvider, TranscriptionResult
+from coval_bench.config import Settings
+from coval_bench.providers.base import TranscriptionResult
 from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-from coval_bench.providers.stt._transcript_utils import (
-    add_partial_transcript,
-    set_first_token,
-)
-
-logger = structlog.get_logger(__name__)
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 # conversation mode keeps recognizing across pauses; interactive stops at the first.
 _WS_PATH = "/speech/recognition/conversation/cognitiveservices/v1"
@@ -48,163 +39,101 @@ _SPEECH_CONFIG = {
 }
 
 
-class AzureSTTProvider(STTProvider):
+@dataclass
+class _AzureTranscription(Transcription):
+    # Stamped on every audio frame of one turn.
+    request_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+
+class AzureSTTProvider(WebSocketSTTProvider):
     """Azure AI Speech real-time streaming STT provider (raw WebSocket)."""
 
-    def __init__(
-        self,
-        api_key: SecretStr,
-        model: str = "default",
-        region: str | None = None,
-    ) -> None:
-        if region is None:
-            raise ValueError("AzureSTTProvider requires region (set Settings.azure_region)")
-        if api_key is None:
-            raise ValueError("AzureSTTProvider requires api_key (set Settings.azure_api_key)")
-        self._api_key = api_key
-        self._model = model
-        self._region = region
+    def __init__(self, settings: Settings, model: str = "default") -> None:
+        super().__init__(settings, model)
+        self._api_key = self._require_secret("azure_api_key")
+        self._region = self._require_setting("azure_region")
 
     @property
     def name(self) -> str:
         return "azure"
 
-    @property
-    def model(self) -> str:
-        return self._model
+    def _new_result(self) -> TranscriptionResult:
+        return TranscriptionResult(provider=self.name, vad_events_count=0)
 
-    def _build_websocket_url(self) -> str:
+    def _new_transcription(self, result: TranscriptionResult) -> Transcription:
+        return _AzureTranscription(result)
+
+    def _ws_url(self, sample_rate: int) -> str:
         return (
             f"wss://{self._region}.stt.speech.microsoft.com{_WS_PATH}"
             f"?language={_LANGUAGE}&format=detailed"
         )
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name, vad_events_count=0)
-        total_start = time.monotonic()
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Ocp-Apim-Subscription-Key": self._api_key.get_secret_value(),
+            "X-ConnectionId": uuid.uuid4().hex,
+        }
 
-        try:
-            url = self._build_websocket_url()
-            request_id = uuid.uuid4().hex
-            headers = {
-                "Ocp-Apim-Subscription-Key": self._api_key.get_secret_value(),
-                "X-ConnectionId": uuid.uuid4().hex,
-            }
-            async with ws_client.connect(url, additional_headers=headers) as ws:
-                await ws.send(_text_message("speech.config", json.dumps(_SPEECH_CONFIG)))
-                await run_stream(
-                    result,
-                    self._send_audio(
-                        ws,
-                        audio_data,
-                        channels,
-                        sample_width,
-                        sample_rate,
-                        result,
-                        realtime_resolution,
-                        request_id,
-                    ),
-                    self._receive(ws, result),
-                )
+    async def _open(self, ws: Any, tx: Transcription, sample_rate: int) -> None:
+        await ws.send(_text_message("speech.config", json.dumps(_SPEECH_CONFIG)))
 
-        except Exception as exc:
-            logger.warning(
-                "azure_measure_ttft_failed", provider="azure", model=self._model, exc_info=exc
-            )
-            result.error = str(exc)
-
-        result.total_time = time.monotonic() - total_start
-        return result
-
-    async def _send_audio(
+    # Wholesale: every audio frame carries the per-call request id, which the
+    # chunk hook cannot see.
+    async def _send(
         self,
         ws: Any,
         audio_data: bytes,
-        channels: int,
-        sample_width: int,
         sample_rate: int,
-        result: TranscriptionResult,
         realtime_resolution: float,
-        request_id: str,
+        tx: Transcription,
     ) -> None:
+        tx = cast(_AzureTranscription, tx)
         # Payloads are concatenated server-side, so the RIFF header prefixes the PCM.
-        stream = _wav_header(sample_rate, channels, sample_width) + audio_data
-        byte_rate = sample_width * sample_rate * channels
-        chunk_size = int(byte_rate * realtime_resolution)
+        stream = _wav_header(sample_rate, 1, 2) + audio_data
+        byte_rate = sample_rate * 2
+        chunk_size = max(2, int(byte_rate * realtime_resolution))
         try:
             async for chunk, start in paced_chunks(stream, chunk_size, byte_rate):
-                if result.audio_start_time is None:
-                    result.audio_start_time = start
-                await ws.send(_audio_message(request_id, chunk))
-            await ws.send(_audio_message(request_id, b""))  # empty payload = end of stream
+                tx.result.audio_start_time = start
+                await ws.send(_audio_message(tx.request_id, chunk))
+            await self._end_audio(ws, tx)
         except Exception as exc:
-            logger.warning("azure_send_error", provider="azure", model=self._model, exc_info=exc)
+            self._log.warning("stt_send_error", exc_info=exc)
             raise
 
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
-        final_segments: list[str] = []
-        last_final_time: float | None = None
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        tx = cast(_AzureTranscription, tx)
+        await ws.send(_audio_message(tx.request_id, b""))  # empty payload = end of stream
 
-        try:
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    continue
+    def _decode(self, raw: str | bytes) -> Any:
+        return _parse_message(raw if isinstance(raw, str) else raw.decode())
 
-                path, body = _parse_message(raw)
-                now = time.monotonic()
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        path, body = msg
+        result = tx.result
 
-                if path == "speech.startdetected":
-                    if result.audio_start_time is not None and result.vad_first_detected is None:
-                        result.vad_first_detected = now - result.audio_start_time
-                        result.vad_first_event_content = str(body)
-                    result.vad_events_count = (result.vad_events_count or 0) + 1
-                    continue
+        if path == "speech.startdetected":
+            if result.audio_start_time is not None and result.vad_first_detected is None:
+                result.vad_first_detected = now - result.audio_start_time
+                result.vad_first_event_content = str(body)
+            result.vad_events_count = (result.vad_events_count or 0) + 1
+            return False
 
-                if path == "speech.hypothesis":
-                    transcript = str(body.get("Text", "")).strip()
-                    if transcript:
-                        set_first_token(result, transcript, now=now)
-                        add_partial_transcript(result, transcript)
-                    continue
+        if path == "speech.hypothesis":
+            tx.partial(str(body.get("Text", "")), now)
+            return False
 
-                if path == "speech.phrase":
-                    if body.get("RecognitionStatus") != "Success":
-                        continue
-                    transcript = _phrase_text(body)
-                    if not transcript:
-                        continue
-                    set_first_token(result, transcript, now=now)
-                    add_partial_transcript(result, transcript)
-                    final_segments.append(transcript)
-                    last_final_time = now
-                    continue
+        if path == "speech.phrase":
+            if body.get("RecognitionStatus") != "Success":
+                return False
+            transcript = _phrase_text(body)
+            if transcript:
+                tx.partial(transcript, now)
+                tx.final(transcript, now)
+            return False
 
-                if path == "turn.end":
-                    break
-
-        except Exception as exc:
-            logger.warning("azure_receive_error", provider="azure", model=self._model, exc_info=exc)
-            if result.error is None and last_final_time is None:
-                result.error = str(exc)
-        finally:
-            # In `finally` so a cancellation (BaseException, not caught above) when
-            # send fails still commits any finals already received.
-            if last_final_time is not None and result.audio_start_time is not None:
-                result.audio_to_final_seconds = last_final_time - result.audio_start_time
-
-            # Only finalized phrases are scored; unfinalized hypotheses stay out.
-            if final_segments:
-                result.complete_transcript = " ".join(final_segments).strip() or None
-            if result.complete_transcript:
-                result.transcript_length = len(result.complete_transcript)
-                result.word_count = len(result.complete_transcript.split())
+        return bool(path == "turn.end")
 
 
 # ---------------------------------------------------------------------------

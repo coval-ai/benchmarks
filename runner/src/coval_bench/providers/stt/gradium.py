@@ -24,183 +24,102 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
 import json
-import time
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, cast
 
-import structlog
-import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
-
-from coval_bench.providers.base import STTProvider, TranscriptionResult
-from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-
-logger = structlog.get_logger(__name__)
+from coval_bench.config import Settings
+from coval_bench.providers.base import TranscriptionResult
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 _WS_URL = "wss://api.gradium.ai/api/speech/asr"
-# Cap on waiting for the "flushed" ack before sending end_of_stream.
-_FLUSH_WAIT_S = 2.0
 
 
-class GradiumSTTProvider(STTProvider):
+@dataclass
+class _GradiumTranscription(Transcription):
+    # Every "text" is a final, so final_event can't double as the flush latch.
+    flushed: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+class GradiumSTTProvider(WebSocketSTTProvider):
     """Gradium streaming STT provider."""
 
-    def __init__(self, api_key: SecretStr, model: str = "default") -> None:
-        self._api_key = api_key
-        self._model = model
+    _SAMPLE_RATE = 16000
+    _FINAL_WAIT_S = 2.0
+
+    def __init__(self, settings: Settings, model: str = "default") -> None:
+        super().__init__(settings, model)
+        self._api_key = self._require_secret("gradium_api_key")
 
     @property
     def name(self) -> str:
         return "gradium"
 
-    @property
-    def model(self) -> str:
-        return self._model
+    def _new_result(self) -> TranscriptionResult:
+        return TranscriptionResult(provider=self.name, vad_events_count=0)
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name, vad_events_count=0)
-        if sample_rate != 16000:
-            result.error = f"Gradium requires 16 kHz PCM input; got {sample_rate} Hz"
-            return result
+    def _new_transcription(self, result: TranscriptionResult) -> Transcription:
+        return _GradiumTranscription(result)
 
-        total_start = time.monotonic()
+    def _ws_url(self, sample_rate: int) -> str:
+        return _WS_URL
 
-        try:
-            headers = {"x-api-key": self._api_key.get_secret_value()}
+    def _headers(self) -> dict[str, str]:
+        return {"x-api-key": self._api_key.get_secret_value()}
 
-            final_event = asyncio.Event()
-            async with ws_client.connect(_WS_URL, additional_headers=headers) as ws:
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "setup",
-                            "model_name": self._model,
-                            "input_format": "pcm_16000",
-                            "json_config": json.dumps({"language": "en"}),
-                        }
-                    )
-                )
-
-                await run_stream(
-                    result,
-                    self._send_audio(
-                        ws, audio_data, sample_rate, result, realtime_resolution, final_event
-                    ),
-                    self._receive(ws, result, final_event),
-                )
-
-        except Exception as exc:
-            logger.warning(
-                "gradium_measure_ttft_failed", provider="gradium", model=self._model, exc_info=exc
+    async def _open(self, ws: Any, tx: Transcription, sample_rate: int) -> None:
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "setup",
+                    "model_name": self._model,
+                    "input_format": "pcm_16000",
+                    "json_config": json.dumps({"language": "en"}),
+                }
             )
-            result.error = str(exc)
+        )
 
-        result.total_time = time.monotonic() - total_start
-        return result
+    async def _send_chunk(self, ws: Any, chunk: bytes) -> None:
+        b64 = base64.b64encode(chunk).decode("utf-8")
+        await ws.send(json.dumps({"type": "audio", "audio": b64}))
 
-    async def _send_audio(
-        self,
-        ws: Any,
-        audio_data: bytes,
-        sample_rate: int,
-        result: TranscriptionResult,
-        realtime_resolution: float,
-        final_event: asyncio.Event,
-    ) -> None:
-        bytes_per_second = sample_rate * 2  # 16-bit mono
-        chunk_size = int(bytes_per_second * realtime_resolution)
-        try:
-            async for chunk, start in paced_chunks(audio_data, chunk_size, bytes_per_second):
-                result.audio_start_time = start
-                b64 = base64.b64encode(chunk).decode("utf-8")
-                await ws.send(json.dumps({"type": "audio", "audio": b64}))
-            # Flush drains the lookahead buffer; wait for the "flushed" ack so
-            # end_of_stream can't cut off pending results.
-            await ws.send(json.dumps({"type": "flush", "flush_id": 1}))
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(final_event.wait(), timeout=_FLUSH_WAIT_S)
-            await ws.send(json.dumps({"type": "end_of_stream"}))
-        except Exception as exc:
-            logger.warning(
-                "gradium_send_error", provider="gradium", model=self._model, exc_info=exc
-            )
-            raise
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        tx = cast(_GradiumTranscription, tx)
+        # Flush drains the lookahead buffer; wait for the "flushed" ack so
+        # end_of_stream can't cut off pending results.
+        frame = json.dumps({"type": "flush", "flush_id": 1})
+        await self._send_and_wait(ws, frame, tx, event=tx.flushed)
+        await ws.send(json.dumps({"type": "end_of_stream"}))
 
-    async def _receive(
-        self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
-    ) -> None:
-        final_parts: list[str] = []
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        tx = cast(_GradiumTranscription, tx)
+        result = tx.result
+        msg_type: str = msg.get("type", "")
 
-        try:
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    continue
+        if msg_type == "step":
+            result.vad_events_count = (result.vad_events_count or 0) + 1
+            if result.vad_first_detected is None and result.audio_start_time is not None:
+                result.vad_first_detected = now - result.audio_start_time
+                result.vad_first_event_content = str(msg)
+            return False
 
-                msg: dict[str, Any] = json.loads(raw)
-                now = time.monotonic()
-                msg_type: str = msg.get("type", "")
+        if msg_type == "text":
+            transcript = str(msg.get("text", "")).strip()
+            if transcript:
+                tx.partial(transcript, now)
+                tx.final(transcript, now)
+            return False
 
-                if msg_type == "step":
-                    result.vad_events_count = (result.vad_events_count or 0) + 1
-                    if result.vad_first_detected is None and result.audio_start_time is not None:
-                        result.vad_first_detected = now - result.audio_start_time
-                        result.vad_first_event_content = str(msg)
-                    continue
+        if msg_type == "flushed":
+            tx.flushed.set()
+            return False
 
-                if msg_type == "text":
-                    transcript = str(msg.get("text", "")).strip()
-                    if not transcript:
-                        continue
-                    if result.ttft_seconds is None and result.audio_start_time is not None:
-                        result.ttft_seconds = now - result.audio_start_time
-                        result.first_token_content = (
-                            transcript[:30] + "..." if len(transcript) > 30 else transcript
-                        )
-                    result.partial_transcripts.append(transcript)
-                    final_parts.append(transcript)
-                    if result.audio_start_time is not None:
-                        result.audio_to_final_seconds = now - result.audio_start_time
-                    continue
+        if msg_type == "end_of_stream":
+            return True
 
-                if msg_type == "flushed":
-                    final_event.set()
-                    continue
+        if msg_type == "error":
+            tx.fail(str(msg.get("message", msg)))
+            self._log.warning("gradium_stt_error", msg=msg)
+            return True
 
-                if msg_type in ("ready", "end_text"):
-                    continue
-
-                if msg_type == "end_of_stream":
-                    break
-
-                if msg_type == "error":
-                    result.error = str(msg.get("message", msg))
-                    logger.warning(
-                        "gradium_stt_error", provider="gradium", model=self._model, msg=msg
-                    )
-                    break
-
-        except Exception as exc:
-            logger.warning(
-                "gradium_receive_error", provider="gradium", model=self._model, exc_info=exc
-            )
-            if result.error is None and result.audio_to_final_seconds is None:
-                result.error = str(exc)
-
-        if final_parts:
-            result.complete_transcript = " ".join(final_parts).strip() or None
-        elif result.partial_transcripts:
-            # Fallback: join all word groups received (not just the last one).
-            result.complete_transcript = " ".join(result.partial_transcripts).strip() or None
-
-        if result.complete_transcript:
-            result.transcript_length = len(result.complete_transcript)
-            result.word_count = len(result.complete_transcript.split())
+        return False

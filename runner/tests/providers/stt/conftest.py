@@ -38,6 +38,10 @@ from typing import Any, cast
 import pytest
 from pydantic import SecretStr
 
+from coval_bench.config import Settings
+from coval_bench.providers.stt import STT_PROVIDERS
+from coval_bench.providers.stt._streaming import WebSocketSTTProvider
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -137,20 +141,6 @@ class AsyncFakeWebSocketIter:
 
 _REAL_SLEEP = asyncio.sleep
 
-# Final/flush waits the FakeWebSocket never releases.
-_WAIT_PATCHES = (
-    "coval_bench.providers.stt.assemblyai._FINAL_WAIT_S",
-    "coval_bench.providers.stt.deepgram._FINAL_WAIT_S",
-    "coval_bench.providers.stt.revai._EOT_SILENCE_S",
-    "coval_bench.providers.stt.xai._FINAL_WAIT_S",
-    "coval_bench.providers.stt.gemini._FINAL_WAIT_S",
-    "coval_bench.providers.stt.gradium._FLUSH_WAIT_S",
-    "coval_bench.providers.stt.reson8._FLUSH_WAIT_S",
-    "coval_bench.providers.stt.inworld._CLOSE_WAIT_S",
-    "coval_bench.providers.stt.together._FINAL_WAIT_S",
-    "coval_bench.providers.stt.together._TAIL_SILENCE_S",
-)
-
 
 @pytest.fixture(autouse=True)
 def _fast_streaming(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -160,13 +150,87 @@ def _fast_streaming(monkeypatch: pytest.MonkeyPatch) -> None:
         return await _REAL_SLEEP(0, result)
 
     monkeypatch.setattr(asyncio, "sleep", _instant)
-    for target in _WAIT_PATCHES:
-        monkeypatch.setattr(target, 0.05)
+    # The fake never answers an end-of-audio frame, so every post-audio wait times out.
+    for cls in (WebSocketSTTProvider, *STT_PROVIDERS.values()):
+        if "_FINAL_WAIT_S" in vars(cls):
+            monkeypatch.setattr(cls, "_FINAL_WAIT_S", 0.05)
+
+
+_TEST_KEY = SecretStr("test-api-key-00000000000000000000")
+
+_STT_KEY_FIELDS = (
+    "assemblyai_api_key",
+    "azure_api_key",
+    "baseten_api_key",
+    "cartesia_api_key",
+    "cloudflare_api_key",
+    "deepgram_api_key",
+    "elevenlabs_api_key",
+    "gemini_api_key",
+    "gladia_api_key",
+    "gradium_api_key",
+    "guava_api_key",
+    "inworld_api_key",
+    "meta_api_key",
+    "mistral_api_key",
+    "modulate_api_key",
+    "nari_api_key",
+    "openai_api_key",
+    "reson8_api_key",
+    "revai_api_key",
+    "smallest_api_key",
+    "soniox_api_key",
+    "speechmatics_api_key",
+    "stepfun_api_key",
+    "together_api_key",
+    "xai_api_key",
+    "zoom_api_key",
+    "zoom_api_secret",
+)
+
+
+def make_settings(**overrides: Any) -> Settings:
+    """Settings with every STT credential set and the local .env ignored."""
+    values: dict[str, Any] = {field: _TEST_KEY for field in _STT_KEY_FIELDS}
+    values.update(
+        azure_region="eastus",
+        cloudflare_account_id="acct-test",
+        google_project_id="proj-test",
+        guava_base_url="https://guava.test",
+        baseten_whisper_url="wss://whisper.test/v1/websocket",
+        baseten_qwen_asr_url="wss://qwen.test/v1/websocket",
+    )
+    values.update(overrides)
+    return Settings(_env_file=None, **values)
+
+
+@pytest.fixture
+def stt_settings() -> Settings:
+    return make_settings()
 
 
 @pytest.fixture
 def fake_api_key() -> SecretStr:
-    return SecretStr("test-api-key-00000000000000000000")
+    return _TEST_KEY
+
+
+def fake_connect(
+    events: list[Any],
+    sent: list[Any] | None = None,
+    *,
+    server_closes: bool = True,
+) -> Any:
+    """A ``ws_client.connect`` stand-in: an async CM yielding a FakeWebSocket."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    ws = FakeWebSocket(
+        events, on_send=(sent.append if sent is not None else None), server_closes=server_closes
+    )
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    cm.ws = ws
+    return cm
 
 
 @pytest.fixture

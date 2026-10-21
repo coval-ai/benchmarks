@@ -18,19 +18,27 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.openai import OpenAISTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
+
+_CONNECT = "coval_bench.providers.stt._streaming.ws_client.connect"
 
 
-def _fake_connect(
-    events: list[Any],
-    *,
-    captured: dict[str, Any] | None = None,
-) -> Any:
-    ws = FakeWebSocket(events)
-    if captured is not None:
-        captured["ws"] = ws
+async def _measure(provider: OpenAISTTProvider, audio: bytes, **overrides: Any) -> Any:
+    kwargs: dict[str, Any] = {
+        "audio_data": audio,
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000,
+        "realtime_resolution": 0.5,
+    }
+    kwargs.update(overrides)
+    return await provider.measure_ttft(**kwargs)
+
+
+def _cm(ws: Any) -> Any:
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -38,20 +46,13 @@ def _fake_connect(
 
 
 @pytest.mark.asyncio
-async def test_openai_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+async def test_openai_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = OpenAISTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.openai.ws_client.connect",
-        return_value=_fake_connect(load_fixture_events("openai", "events-success")),
+        _CONNECT, return_value=fake_connect(load_fixture_events("openai", "events-success"))
     ):
-        result = await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.5,
-        )
+        result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is None
     assert result.ttft_seconds is not None
@@ -63,10 +64,8 @@ async def test_openai_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -
 
 
 @pytest.mark.asyncio
-async def test_openai_single_connection_and_session_shape(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
-) -> None:
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+async def test_openai_single_connection_and_session_shape(audio_pcm_bytes: bytes) -> None:
+    provider = OpenAISTTProvider(make_settings(openai_api_key=SecretStr("test-key-openai")))
     connections: list[dict[str, Any]] = []
 
     def connect_side_effect(
@@ -74,25 +73,14 @@ async def test_openai_single_connection_and_session_shape(
         additional_headers: dict[str, str] | None = None,
         **_: Any,
     ) -> Any:
-        captured: dict[str, Any] = {
-            "url": url,
-            "additional_headers": dict(additional_headers or {}),
-        }
-        cm = _fake_connect(load_fixture_events("openai", "events-success"), captured=captured)
-        connections.append(captured)
+        cm = fake_connect(load_fixture_events("openai", "events-success"))
+        connections.append(
+            {"url": url, "additional_headers": dict(additional_headers or {}), "ws": cm.ws}
+        )
         return cm
 
-    with patch(
-        "coval_bench.providers.stt.openai.ws_client.connect",
-        side_effect=connect_side_effect,
-    ):
-        result = await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.5,
-        )
+    with patch(_CONNECT, side_effect=connect_side_effect):
+        result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is None
     assert len(connections) == 1
@@ -103,10 +91,7 @@ async def test_openai_single_connection_and_session_shape(
     assert parsed.netloc == "api.openai.com"
     assert parsed.path == "/v1/realtime"
     assert parse_qs(parsed.query).get("intent") == ["transcription"]
-    assert (
-        conn["additional_headers"].get("Authorization")
-        == f"Bearer {fake_api_key.get_secret_value()}"
-    )
+    assert conn["additional_headers"].get("Authorization") == "Bearer test-key-openai"
     assert "OpenAI-Beta" not in conn["additional_headers"]
 
     sent = [json.loads(m) for m in conn["ws"]._sent if isinstance(m, str)]
@@ -123,21 +108,14 @@ async def test_openai_single_connection_and_session_shape(
 
 @pytest.mark.asyncio
 async def test_openai_delta_partials_captured(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+    provider = OpenAISTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.openai.ws_client.connect",
-        return_value=_fake_connect(load_fixture_events("openai", "events-success")),
+        _CONNECT, return_value=fake_connect(load_fixture_events("openai", "events-success"))
     ):
-        result = await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.5,
-        )
+        result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is None
     assert result.ttft_seconds is not None
@@ -150,14 +128,10 @@ async def test_openai_delta_partials_captured(
 
 @pytest.mark.asyncio
 async def test_openai_delta_ttft_not_overwritten_by_completed(
-    fake_api_key: SecretStr,
+    stt_settings: Settings,
     audio_pcm_bytes: bytes,
 ) -> None:
-    """TTFT is set at the first delta; completed must not replace first_token_content.
-
-    Both code paths in _receive call set_first_token. A regression (missing guard)
-    would set first_token_content from the completed event instead of the delta.
-    """
+    """TTFT is set at the first delta; completed must not replace first_token_content."""
     events = [
         {"type": "session.created", "session": {"id": "sess_001"}},
         {
@@ -177,19 +151,10 @@ async def test_openai_delta_ttft_not_overwritten_by_completed(
             "transcript": "hello world",
         },
     ]
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+    provider = OpenAISTTProvider(stt_settings)
 
-    with patch(
-        "coval_bench.providers.stt.openai.ws_client.connect",
-        return_value=_fake_connect(events),
-    ):
-        result = await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.5,
-        )
+    with patch(_CONNECT, return_value=fake_connect(events)):
+        result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is None
     assert result.first_token_content == "hello"  # noqa: S105
@@ -234,28 +199,16 @@ class _SendFailsRecvBlocksWebSocket:
 
 @pytest.mark.asyncio
 async def test_openai_send_failure_propagates_without_hang(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """A sender error surfaces immediately; the blocked receiver is cancelled, not awaited."""
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+    provider = OpenAISTTProvider(stt_settings)
     ws = _SendFailsRecvBlocksWebSocket(
         [{"type": "session.updated", "session": {"type": "transcription"}}]
     )
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("coval_bench.providers.stt.openai.ws_client.connect", return_value=cm):
-        result = await asyncio.wait_for(
-            provider.measure_ttft(
-                audio_data=audio_pcm_bytes,
-                channels=1,
-                sample_width=2,
-                sample_rate=16000,
-                realtime_resolution=0.5,
-            ),
-            timeout=2.0,
-        )
+    with patch(_CONNECT, return_value=_cm(ws)):
+        result = await asyncio.wait_for(_measure(provider, audio_pcm_bytes), timeout=2.0)
 
     assert result.error is not None
     assert "simulated send failure" in result.error
@@ -263,26 +216,15 @@ async def test_openai_send_failure_propagates_without_hang(
 
 
 @pytest.mark.asyncio
-async def test_openai_in_stream_error_event(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
-) -> None:
+async def test_openai_in_stream_error_event(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """Regression guard: a mid-stream top-level ``error`` event becomes result.error."""
     events = [
         {"type": "session.updated", "session": {"type": "transcription"}},
         {"type": "error", "error": {"message": "rate limit exceeded"}},
     ]
-    provider = OpenAISTTProvider(api_key=fake_api_key)
-    with patch(
-        "coval_bench.providers.stt.openai.ws_client.connect",
-        return_value=_fake_connect(events),
-    ):
-        result = await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.5,
-        )
+    provider = OpenAISTTProvider(stt_settings)
+    with patch(_CONNECT, return_value=fake_connect(events)):
+        result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is not None
     assert "rate limit exceeded" in result.error
@@ -327,10 +269,10 @@ class _RecvFailsSendBlocksWebSocket:
 
 @pytest.mark.asyncio
 async def test_openai_transcription_failed_aborts_sender_without_hang(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """A failed event cancels the still-running sender instead of awaiting the full clip."""
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+    provider = OpenAISTTProvider(stt_settings)
     ws = _RecvFailsSendBlocksWebSocket(
         [{"type": "session.updated", "session": {"type": "transcription"}}],
         {
@@ -338,21 +280,9 @@ async def test_openai_transcription_failed_aborts_sender_without_hang(
             "error": {"message": "audio too short"},
         },
     )
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("coval_bench.providers.stt.openai.ws_client.connect", return_value=cm):
-        result = await asyncio.wait_for(
-            provider.measure_ttft(
-                audio_data=audio_pcm_bytes,
-                channels=1,
-                sample_width=2,
-                sample_rate=16000,
-                realtime_resolution=0.5,
-            ),
-            timeout=2.0,
-        )
+    with patch(_CONNECT, return_value=_cm(ws)):
+        result = await asyncio.wait_for(_measure(provider, audio_pcm_bytes), timeout=2.0)
 
     assert result.error is not None
     assert "audio too short" in result.error
@@ -361,29 +291,17 @@ async def test_openai_transcription_failed_aborts_sender_without_hang(
 
 @pytest.mark.asyncio
 async def test_openai_session_ready_timeout_fires(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """The handshake deadline fires when the server never sends session.updated."""
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+    provider = OpenAISTTProvider(stt_settings)
     ws = _SendFailsRecvBlocksWebSocket([])  # recv() blocks; no session.updated ever
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
 
     with (
         patch("coval_bench.providers.stt.openai._READY_TIMEOUT_S", 0.05),
-        patch("coval_bench.providers.stt.openai.ws_client.connect", return_value=cm),
+        patch(_CONNECT, return_value=_cm(ws)),
     ):
-        result = await asyncio.wait_for(
-            provider.measure_ttft(
-                audio_data=audio_pcm_bytes,
-                channels=1,
-                sample_width=2,
-                sample_rate=16000,
-                realtime_resolution=0.5,
-            ),
-            timeout=2.0,
-        )
+        result = await asyncio.wait_for(_measure(provider, audio_pcm_bytes), timeout=2.0)
 
     assert result.error is not None
     assert "session.updated" in result.error
@@ -394,80 +312,64 @@ async def test_openai_session_ready_timeout_fires(
     ["gpt-realtime-whisper", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"],
 )
 def test_openai_valid_models_accepted(model: str) -> None:
-    provider = OpenAISTTProvider(api_key=SecretStr("test"), model=model)
+    provider = OpenAISTTProvider(make_settings(), model=model)
     assert provider.name == f"openai-{model}"
     assert provider.model == model
 
 
 def test_openai_default_model_is_whisper() -> None:
-    assert OpenAISTTProvider(api_key=SecretStr("test")).model == "gpt-realtime-whisper"
+    assert OpenAISTTProvider(make_settings()).model == "gpt-realtime-whisper"
+
+
+def test_openai_requires_api_key() -> None:
+    with pytest.raises(ValueError, match="openai_api_key is required"):
+        OpenAISTTProvider(make_settings(openai_api_key=None))
 
 
 @pytest.mark.asyncio
 async def test_openai_session_update_carries_model(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """The constructed model is sent in the session.update transcription config."""
-    provider = OpenAISTTProvider(api_key=fake_api_key, model="gpt-4o-transcribe")
-    captured: dict[str, Any] = {}
+    provider = OpenAISTTProvider(stt_settings, model="gpt-4o-transcribe")
+    cm = fake_connect(load_fixture_events("openai", "events-success"))
 
-    with patch(
-        "coval_bench.providers.stt.openai.ws_client.connect",
-        return_value=_fake_connect(
-            load_fixture_events("openai", "events-success"), captured=captured
-        ),
-    ):
-        result = await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.5,
-        )
+    with patch(_CONNECT, return_value=cm):
+        result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is None
-    sent = [json.loads(m) for m in captured["ws"]._sent if isinstance(m, str)]
+    sent = [json.loads(m) for m in cm.ws._sent if isinstance(m, str)]
     transcription = sent[0]["session"]["audio"]["input"]["transcription"]
     assert transcription["model"] == "gpt-4o-transcribe"
 
 
 @pytest.mark.asyncio
-async def test_openai_rejects_non_positive_realtime_resolution(fake_api_key: SecretStr) -> None:
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+async def test_openai_rejects_non_positive_realtime_resolution(stt_settings: Settings) -> None:
+    provider = OpenAISTTProvider(stt_settings)
 
-    with pytest.raises(ValueError, match="realtime_resolution must be > 0"):
-        await provider.measure_ttft(
-            audio_data=b"\x00\x00",
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0,
-        )
+    result = await _measure(provider, b"\x00\x00", realtime_resolution=0)
+
+    assert result.error is not None
+    assert "realtime_resolution must be > 0" in result.error
 
 
 @pytest.mark.asyncio
 async def test_openai_session_ready_stream_ended(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """Handshake stream ends before session.updated → bounded error (StopAsyncIteration path)."""
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+    provider = OpenAISTTProvider(stt_settings)
 
     with (
         patch("coval_bench.providers.stt.openai._READY_TIMEOUT_S", 0.05),
         patch(
-            "coval_bench.providers.stt.openai.ws_client.connect",
-            return_value=_fake_connect(
+            _CONNECT,
+            return_value=fake_connect(
                 [{"type": "session.created", "session": {"id": "sess_slow"}}]
             ),
         ),
     ):
-        result = await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.5,
-        )
+        result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is not None
     assert "session.updated" in result.error
@@ -475,38 +377,26 @@ async def test_openai_session_ready_stream_ended(
 
 @pytest.mark.asyncio
 async def test_openai_rejects_non_mono_input(
-    fake_api_key: SecretStr,
+    stt_settings: Settings,
     audio_pcm_bytes: bytes,
 ) -> None:
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+    provider = OpenAISTTProvider(stt_settings)
 
-    result = await provider.measure_ttft(
-        audio_data=audio_pcm_bytes,
-        channels=2,
-        sample_width=2,
-        sample_rate=16000,
-        realtime_resolution=0.5,
-    )
+    result = await _measure(provider, audio_pcm_bytes, channels=2)
 
     assert result.error is not None
-    assert "mono PCM" in result.error
+    assert "mono 16-bit PCM" in result.error
     assert result.complete_transcript is None
 
 
 @pytest.mark.asyncio
 async def test_openai_rejects_non_pcm16_input(
-    fake_api_key: SecretStr,
+    stt_settings: Settings,
     audio_pcm_bytes: bytes,
 ) -> None:
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+    provider = OpenAISTTProvider(stt_settings)
 
-    result = await provider.measure_ttft(
-        audio_data=audio_pcm_bytes,
-        channels=1,
-        sample_width=1,
-        sample_rate=16000,
-        realtime_resolution=0.5,
-    )
+    result = await _measure(provider, audio_pcm_bytes, sample_width=1)
 
     assert result.error is not None
     assert "16-bit PCM" in result.error
@@ -514,29 +404,17 @@ async def test_openai_rejects_non_pcm16_input(
 
 
 @pytest.mark.asyncio
-async def test_openai_session_setup_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+async def test_openai_session_setup_error(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = OpenAISTTProvider(stt_settings)
+    events = [
+        {
+            "type": "error",
+            "error": {"message": "Turn detection is not supported for this transcription model."},
+        }
+    ]
 
-    with patch(
-        "coval_bench.providers.stt.openai.ws_client.connect",
-        return_value=_fake_connect(
-            [
-                {
-                    "type": "error",
-                    "error": {
-                        "message": "Turn detection is not supported for this transcription model."
-                    },
-                }
-            ]
-        ),
-    ):
-        result = await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.5,
-        )
+    with patch(_CONNECT, return_value=fake_connect(events)):
+        result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is not None
     assert "session setup" in result.error
@@ -545,20 +423,11 @@ async def test_openai_session_setup_error(fake_api_key: SecretStr, audio_pcm_byt
 
 
 @pytest.mark.asyncio
-async def test_openai_error_event(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+async def test_openai_error_event(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = OpenAISTTProvider(stt_settings)
 
-    with patch(
-        "coval_bench.providers.stt.openai.ws_client.connect",
-        return_value=_fake_connect(load_fixture_events("openai", "events-error")),
-    ):
-        result = await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.5,
-        )
+    with patch(_CONNECT, return_value=fake_connect(load_fixture_events("openai", "events-error"))):
+        result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is not None
     assert "quota exceeded" in result.error
@@ -566,20 +435,13 @@ async def test_openai_error_event(fake_api_key: SecretStr, audio_pcm_bytes: byte
 
 
 @pytest.mark.asyncio
-async def test_openai_no_transcript(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+async def test_openai_no_transcript(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = OpenAISTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.openai.ws_client.connect",
-        return_value=_fake_connect(load_fixture_events("openai", "events-no-transcript")),
+        _CONNECT, return_value=fake_connect(load_fixture_events("openai", "events-no-transcript"))
     ):
-        result = await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.5,
-        )
+        result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error == "ws_closed_without_completed"
     assert result.ttft_seconds is not None
@@ -588,20 +450,13 @@ async def test_openai_no_transcript(fake_api_key: SecretStr, audio_pcm_bytes: by
 
 
 @pytest.mark.asyncio
-async def test_openai_item_id_tracking(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = OpenAISTTProvider(api_key=fake_api_key)
+async def test_openai_item_id_tracking(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = OpenAISTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.openai.ws_client.connect",
-        return_value=_fake_connect(load_fixture_events("openai", "events-multi-item")),
+        _CONNECT, return_value=fake_connect(load_fixture_events("openai", "events-multi-item"))
     ):
-        result = await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.5,
-        )
+        result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is None
     # `.completed` is scoped to its own item_id (no cross-item merge), so item_001's

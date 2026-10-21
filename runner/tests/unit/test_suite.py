@@ -20,6 +20,7 @@ from coval_bench.runner import orchestrator
 from coval_bench.runner.orchestrator import RunSummary, run_suite
 
 _SETTINGS = Settings(
+    _env_file=None,
     database_url="postgresql://runner:password@localhost:5432/benchmarks",
     posthog_disabled=True,
 )

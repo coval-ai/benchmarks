@@ -9,28 +9,20 @@ All tests use FakeWebSocket — no live network calls are made.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.providers.stt.assemblyai import AssemblyAIProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
 
 # A synthetic Pro id: the tests pin the id-to-wire rule, not any registry entry.
 PRO_MODEL = "universal-1.2-pro"
 
 
 def make_provider() -> AssemblyAIProvider:
-    return AssemblyAIProvider(api_key=SecretStr("test-key-assemblyai"))
-
-
-def _fake_connect(events: list[Any]) -> Any:
-    ws = FakeWebSocket(events)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
+    return AssemblyAIProvider(make_settings())
 
 
 # ---------------------------------------------------------------------------
@@ -39,13 +31,13 @@ def _fake_connect(events: list[Any]) -> Any:
 
 
 @pytest.mark.asyncio
-async def test_assemblyai_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_assemblyai_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("assemblyai", "events-success")
-    provider = AssemblyAIProvider(api_key=fake_api_key)
+    provider = AssemblyAIProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.assemblyai.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -80,19 +72,16 @@ def test_websocket_url_contains_required_params() -> None:
 
 @pytest.mark.asyncio
 async def test_universal_streaming_terminates_without_force_endpoint(
-    fake_api_key: SecretStr,
+    stt_settings: Settings,
 ) -> None:
     """TTFS-excluded models end the session per the vendor's streaming-WER guide."""
     sent: list[Any] = []
     final = {"type": "Turn", "end_of_turn": True, "transcript": "hello world"}
-    ws = FakeWebSocket([final], on_send=sent.append)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    provider = AssemblyAIProvider(api_key=fake_api_key)
+    cm = fake_connect([final], sent)
+    provider = AssemblyAIProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
+        "coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm
     ) as mock_connect:
         result = await provider.measure_ttft(
             audio_data=b"\x00" * 640,
@@ -111,17 +100,14 @@ async def test_universal_streaming_terminates_without_force_endpoint(
 
 
 @pytest.mark.asyncio
-async def test_pro_force_endpoint_before_terminate(fake_api_key: SecretStr) -> None:
+async def test_pro_force_endpoint_before_terminate(stt_settings: Settings) -> None:
     sent: list[Any] = []
     final = {"type": "Turn", "end_of_turn": True, "transcript": "hello world"}
-    ws = FakeWebSocket([final], on_send=sent.append)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    provider = AssemblyAIProvider(api_key=fake_api_key, model=PRO_MODEL)
+    cm = fake_connect([final], sent)
+    provider = AssemblyAIProvider(stt_settings, model=PRO_MODEL)
 
     with patch(
-        "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
+        "coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm
     ) as mock_connect:
         result = await provider.measure_ttft(
             audio_data=b"\x00" * 640,
@@ -151,23 +137,20 @@ def test_provider_name() -> None:
 
 
 def test_provider_name_universal_streaming_multilingual() -> None:
-    p = AssemblyAIProvider(api_key=SecretStr("k"), model="universal-streaming-multilingual")
+    p = AssemblyAIProvider(make_settings(), model="universal-streaming-multilingual")
     assert p.name == "assemblyai-universal-streaming-multilingual"
 
 
 @pytest.mark.asyncio
 async def test_pro_url_uses_api_speech_model_and_voice_agent_config(
-    fake_api_key: SecretStr,
+    stt_settings: Settings,
 ) -> None:
     """Any Pro id maps to the API speech_model and gets the min_latency voice-agent preset."""
-    ws = FakeWebSocket([{"type": "Turn", "end_of_turn": True, "transcript": "hi"}])
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    provider = AssemblyAIProvider(api_key=fake_api_key, model=PRO_MODEL)
+    cm = fake_connect([{"type": "Turn", "end_of_turn": True, "transcript": "hi"}])
+    provider = AssemblyAIProvider(stt_settings, model=PRO_MODEL)
 
     with patch(
-        "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
+        "coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm
     ) as mock_connect:
         await provider.measure_ttft(
             audio_data=b"\x00" * 640,
@@ -185,17 +168,14 @@ async def test_pro_url_uses_api_speech_model_and_voice_agent_config(
 
 @pytest.mark.asyncio
 async def test_universal_streaming_multilingual_url_uses_api_speech_model(
-    fake_api_key: SecretStr,
+    stt_settings: Settings,
 ) -> None:
     """The multilingual model id maps to its speech_model value with no language lock."""
-    ws = FakeWebSocket([{"type": "Turn", "end_of_turn": True, "transcript": "hola"}])
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    provider = AssemblyAIProvider(api_key=fake_api_key, model="universal-streaming-multilingual")
+    cm = fake_connect([{"type": "Turn", "end_of_turn": True, "transcript": "hola"}])
+    provider = AssemblyAIProvider(stt_settings, model="universal-streaming-multilingual")
 
     with patch(
-        "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
+        "coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm
     ) as mock_connect:
         await provider.measure_ttft(
             audio_data=b"\x00" * 640,
@@ -219,7 +199,7 @@ async def test_universal_streaming_multilingual_url_uses_api_speech_model(
 @pytest.mark.parametrize("model", ["bad-model", f"{PRO_MODEL}-x", "universal-pro"])
 def test_invalid_model_raises(model: str) -> None:
     with pytest.raises(ValueError, match="Invalid AssemblyAI model"):
-        AssemblyAIProvider(api_key=SecretStr("k"), model=model)
+        AssemblyAIProvider(make_settings(), model=model)
 
 
 # ---------------------------------------------------------------------------
@@ -248,12 +228,12 @@ async def test_assemblyai_wrong_sample_rate(audio_pcm_bytes: bytes) -> None:
 
 
 @pytest.mark.asyncio
-async def test_assemblyai_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = AssemblyAIProvider(api_key=fake_api_key)
+async def test_assemblyai_empty_stream(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = AssemblyAIProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.assemblyai.ws_client.connect",
-        return_value=_fake_connect([]),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect([]),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -274,15 +254,15 @@ async def test_assemblyai_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes:
 
 @pytest.mark.asyncio
 async def test_assemblyai_audio_to_final_populated(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """audio_to_final_seconds is set when at least one end_of_turn event is received."""
     events = load_fixture_events("assemblyai", "events-success")
-    provider = AssemblyAIProvider(api_key=fake_api_key)
+    provider = AssemblyAIProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.assemblyai.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -298,7 +278,7 @@ async def test_assemblyai_audio_to_final_populated(
 
 @pytest.mark.asyncio
 async def test_assemblyai_audio_to_final_none_when_no_end_of_turn(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """audio_to_final_seconds is None when no end_of_turn event arrives."""
     events: list[Any] = [
@@ -310,11 +290,11 @@ async def test_assemblyai_audio_to_final_none_when_no_end_of_turn(
             "words": [{"text": "hello"}, {"text": "world"}],
         },
     ]
-    provider = AssemblyAIProvider(api_key=fake_api_key)
+    provider = AssemblyAIProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.assemblyai.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -329,7 +309,7 @@ async def test_assemblyai_audio_to_final_none_when_no_end_of_turn(
 
 @pytest.mark.asyncio
 async def test_assemblyai_partial_only_leaves_complete_transcript_none(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """No end_of_turn=true final means no scorable transcript.
 
@@ -343,11 +323,11 @@ async def test_assemblyai_partial_only_leaves_complete_transcript_none(
         {"type": "Turn", "transcript": "hello", "end_of_turn": False},
         {"type": "Turn", "transcript": "hello world", "end_of_turn": False},
     ]
-    provider = AssemblyAIProvider(api_key=fake_api_key)
+    provider = AssemblyAIProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.assemblyai.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -364,7 +344,7 @@ async def test_assemblyai_partial_only_leaves_complete_transcript_none(
 
 @pytest.mark.asyncio
 async def test_assemblyai_audio_to_final_uses_last_end_of_turn(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """audio_to_final_seconds reflects the LAST end_of_turn event (not the first).
 
@@ -374,11 +354,11 @@ async def test_assemblyai_audio_to_final_uses_last_end_of_turn(
     loop did not exit after the first end_of_turn.
     """
     events = load_fixture_events("assemblyai", "events-multi-turn")
-    provider = AssemblyAIProvider(api_key=fake_api_key)
+    provider = AssemblyAIProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.assemblyai.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -398,15 +378,15 @@ async def test_assemblyai_audio_to_final_uses_last_end_of_turn(
 
 @pytest.mark.asyncio
 async def test_assemblyai_multi_turn_complete_transcript(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """All end_of_turn transcripts are joined into complete_transcript (not just first)."""
     events = load_fixture_events("assemblyai", "events-multi-turn")
-    provider = AssemblyAIProvider(api_key=fake_api_key)
+    provider = AssemblyAIProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.assemblyai.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,

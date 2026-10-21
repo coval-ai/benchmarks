@@ -20,7 +20,9 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pydantic import SecretStr
+
+from coval_bench.config import Settings
+from tests.providers.stt.conftest import make_settings
 
 google_speech = pytest.importorskip(
     "google.cloud.speech_v2",
@@ -55,14 +57,24 @@ def _load_fixture_responses(scenario: str = "events-success") -> list[Any]:
     return responses
 
 
-def _make_provider(model: str = "default") -> GoogleSTTProvider:
+def _make_provider(model: str = "default", client: Any = None) -> GoogleSTTProvider:
     with patch(
         "coval_bench.providers.stt.google.SpeechClient",
-        return_value=MagicMock(),
+        return_value=client if client is not None else MagicMock(),
     ):
-        return GoogleSTTProvider(
-            api_key=SecretStr("unused"), model=model, project_id="test-project"
-        )
+        return GoogleSTTProvider(make_settings(), model=model)
+
+
+def _client_replaying(responses: list[Any]) -> MagicMock:
+    client = MagicMock()
+
+    def _fake_recognize(requests: Any) -> Any:
+        # Consume the request iterator so audio_start_time gets set
+        list(requests)
+        return iter(responses)
+
+    client.streaming_recognize.side_effect = _fake_recognize
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -72,26 +84,7 @@ def _make_provider(model: str = "default") -> GoogleSTTProvider:
 
 @pytest.mark.asyncio
 async def test_google_success(audio_pcm_bytes: bytes) -> None:
-    responses = _load_fixture_responses()
-
-    mock_client = MagicMock()
-
-    def _fake_recognize(requests: Any) -> Any:
-        # Consume the request iterator so audio_start_time gets set
-        list(requests)
-        return iter(responses)
-
-    mock_client.streaming_recognize.side_effect = _fake_recognize
-
-    with patch(
-        "coval_bench.providers.stt.google.SpeechClient",
-        return_value=mock_client,
-    ):
-        provider = GoogleSTTProvider(
-            api_key=SecretStr("unused"), model="default", project_id="test-project"
-        )
-
-    provider._client = mock_client
+    provider = _make_provider(client=_client_replaying(_load_fixture_responses()))
 
     with patch("coval_bench.providers.stt.google.time.sleep"):
         result = await provider.measure_ttft(
@@ -110,25 +103,9 @@ async def test_google_success(audio_pcm_bytes: bytes) -> None:
 @pytest.mark.asyncio
 async def test_google_joins_multiple_finals(audio_pcm_bytes: bytes) -> None:
     """Two distinct is_final results are joined in order, not just the last one."""
-    responses = _load_fixture_responses("events-multi-final")
-
-    mock_client = MagicMock()
-
-    def _fake_recognize(requests: Any) -> Any:
-        list(requests)
-        return iter(responses)
-
-    mock_client.streaming_recognize.side_effect = _fake_recognize
-
-    with patch(
-        "coval_bench.providers.stt.google.SpeechClient",
-        return_value=mock_client,
-    ):
-        provider = GoogleSTTProvider(
-            api_key=SecretStr("unused"), model="default", project_id="test-project"
-        )
-
-    provider._client = mock_client
+    provider = _make_provider(
+        client=_client_replaying(_load_fixture_responses("events-multi-final"))
+    )
 
     with patch("coval_bench.providers.stt.google.time.sleep"):
         result = await provider.measure_ttft(
@@ -145,7 +122,7 @@ async def test_google_joins_multiple_finals(audio_pcm_bytes: bytes) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Provider name
+# Provider name + validation
 # ---------------------------------------------------------------------------
 
 
@@ -162,6 +139,22 @@ def test_provider_name_chirp2() -> None:
 def test_provider_name_chirp3() -> None:
     p = _make_provider("chirp_3")
     assert p.name == "google-chirp_3"
+
+
+def test_missing_project_id_raises() -> None:
+    with (
+        patch("coval_bench.providers.stt.google.SpeechClient", return_value=MagicMock()),
+        pytest.raises(ValueError, match="google_project_id is required"),
+    ):
+        GoogleSTTProvider(make_settings(google_project_id=None))
+
+
+def test_missing_dependency_raises(stt_settings: Settings) -> None:
+    with (
+        patch("coval_bench.providers.stt.google.GOOGLE_AVAILABLE", False),
+        pytest.raises(ImportError, match="google-stt"),
+    ):
+        GoogleSTTProvider(stt_settings)
 
 
 # ---------------------------------------------------------------------------
@@ -205,16 +198,7 @@ def test_chirp3_uses_us() -> None:
 async def test_google_streaming_error(audio_pcm_bytes: bytes) -> None:
     mock_client = MagicMock()
     mock_client.streaming_recognize.side_effect = RuntimeError("quota exceeded")
-
-    with patch(
-        "coval_bench.providers.stt.google.SpeechClient",
-        return_value=mock_client,
-    ):
-        provider = GoogleSTTProvider(
-            api_key=SecretStr("unused"), model="default", project_id="test-project"
-        )
-
-    provider._client = mock_client
+    provider = _make_provider(client=mock_client)
 
     result = await provider.measure_ttft(
         audio_data=audio_pcm_bytes,

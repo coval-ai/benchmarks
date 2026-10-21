@@ -14,18 +14,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import time  # monotonic clock — wall-clock can step on NTP sync
 from typing import Any
 
-import structlog
-import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
+from coval_bench.config import Settings
+from coval_bench.providers.base import TranscriptionResult
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
-from coval_bench.providers.base import STTProvider, TranscriptionResult
-from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-
-logger = structlog.get_logger(__name__)
+_SESSION_START_TIMEOUT_S = 5.0
 
 _ERROR_MSG_TYPES = frozenset(
     {
@@ -59,173 +54,67 @@ _ERROR_MSG_TYPES = frozenset(
 )
 
 
-class ElevenLabsSTTProvider(STTProvider):
+class ElevenLabsSTTProvider(WebSocketSTTProvider):
     """ElevenLabs real-time STT provider."""
 
-    def __init__(self, api_key: SecretStr, model: str = "scribe_v2_realtime") -> None:
-        self._api_key = api_key
-        self._model = model
+    _SAMPLE_RATE = 16000
+    # No committed transcript: score the last partial rather than fail the clip.
+    _PARTIAL_FALLBACK = "last"
+
+    def __init__(self, settings: Settings, model: str = "scribe_v2_realtime") -> None:
+        super().__init__(settings, model)
+        self._api_key = self._require_secret("elevenlabs_api_key")
 
     @property
     def name(self) -> str:
         return f"elevenlabs-{self._model}"
 
-    @property
-    def model(self) -> str:
-        return self._model
+    def _new_result(self) -> TranscriptionResult:
+        return TranscriptionResult(provider=self.name, vad_events_count=0)
 
-    def _build_websocket_url(self) -> str:
+    def _ws_url(self, sample_rate: int) -> str:
         return (
             f"wss://api.elevenlabs.io/v1/speech-to-text/realtime"
-            f"?model_id={self._model}&audio_format=pcm_16000"
+            f"?model_id={self._model}&audio_format=pcm_{sample_rate}"
         )
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name, vad_events_count=0)
-        if sample_rate != 16000:
-            result.error = f"ElevenLabs requires 16 kHz PCM input; got {sample_rate} Hz"
-            return result
-        total_start = time.monotonic()
+    def _headers(self) -> dict[str, str]:
+        return {"xi-api-key": self._api_key.get_secret_value()}
 
+    async def _open(self, ws: Any, tx: Transcription, sample_rate: int) -> None:
         try:
-            url = self._build_websocket_url()
-            headers = {"xi-api-key": self._api_key.get_secret_value()}
+            raw = await asyncio.wait_for(ws.recv(), timeout=_SESSION_START_TIMEOUT_S)
+        except TimeoutError:
+            self._log.warning("elevenlabs_session_started_timeout")
+            return
+        session: dict[str, Any] = json.loads(raw)
+        if session.get("message_type") != "session_started":
+            self._log.warning("elevenlabs_unexpected_first_message", msg=session)
 
-            async with ws_client.connect(url, additional_headers=headers) as ws:
-                # Wait for session_started
-                try:
-                    raw_session = await asyncio.wait_for(ws.recv(), timeout=5.0)
-                    session_data: dict[str, Any] = json.loads(raw_session)
-                    if session_data.get("message_type") != "session_started":
-                        logger.warning(
-                            "elevenlabs_unexpected_first_message",
-                            msg=session_data,
-                        )
-                except TimeoutError:
-                    logger.warning("elevenlabs_session_started_timeout")
-                except Exception as exc:
-                    logger.warning(
-                        "elevenlabs_session_started_error",
-                        provider="elevenlabs",
-                        model=self._model,
-                        exc_info=exc,
-                    )
-                    raise
+    async def _send_chunk(self, ws: Any, chunk: bytes) -> None:
+        b64 = base64.b64encode(chunk).decode("utf-8")
+        await ws.send(json.dumps({"message_type": "input_audio_chunk", "audio_base_64": b64}))
 
-                await run_stream(
-                    result,
-                    self._send_audio(ws, audio_data, sample_rate, result, realtime_resolution),
-                    self._receive(ws, result),
-                )
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        await ws.send(
+            json.dumps({"message_type": "input_audio_chunk", "audio_base_64": "", "commit": True})
+        )
 
-        except Exception as exc:
-            logger.warning(
-                "elevenlabs_measure_ttft_failed",
-                provider="elevenlabs",
-                model=self._model,
-                exc_info=exc,
-            )
-            result.error = str(exc)
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        msg_type: str = msg.get("message_type", "")
 
-        result.total_time = time.monotonic() - total_start
-        return result
+        if msg_type in _ERROR_MSG_TYPES:
+            error_text = msg.get("message", msg.get("error", "Unknown error"))
+            tx.fail(f"{msg_type}: {error_text}")
+            self._log.warning("elevenlabs_api_error", msg_type=msg_type, error=error_text)
+            return True
 
-    async def _send_audio(
-        self,
-        ws: Any,
-        audio_data: bytes,
-        sample_rate: int,
-        result: TranscriptionResult,
-        realtime_resolution: float,
-    ) -> None:
-        # ElevenLabs expects base64-encoded PCM chunks in JSON
-        bytes_per_second = sample_rate * 2  # 16-bit mono
-        chunk_size = int(bytes_per_second * realtime_resolution)
-        try:
-            async for chunk, start in paced_chunks(audio_data, chunk_size, bytes_per_second):
-                result.audio_start_time = start
-                b64 = base64.b64encode(chunk).decode("utf-8")
-                await ws.send(
-                    json.dumps({"message_type": "input_audio_chunk", "audio_base_64": b64})
-                )
-
-            # Commit / end-of-input signal
-            await ws.send(
-                json.dumps(
-                    {"message_type": "input_audio_chunk", "audio_base_64": "", "commit": True}
-                )
-            )
-        except Exception as exc:
-            logger.warning(
-                "elevenlabs_send_error", provider="elevenlabs", model=self._model, exc_info=exc
-            )
-            raise
-
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
-        committed_parts: list[str] = []
-
-        try:
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    continue
-
-                msg: dict[str, Any] = json.loads(raw)
-                now = time.monotonic()
-                msg_type: str = msg.get("message_type", "")
-
-                if msg_type in _ERROR_MSG_TYPES:
-                    error_text = msg.get("message", msg.get("error", "Unknown error"))
-                    result.error = f"{msg_type}: {error_text}"
-                    logger.warning(
-                        "elevenlabs_api_error",
-                        provider="elevenlabs",
-                        model=self._model,
-                        msg_type=msg_type,
-                        error=error_text,
-                    )
-                    break
-
-                if msg_type == "partial_transcript":
-                    transcript = msg.get("text", "").strip()
-                    if transcript:
-                        if result.ttft_seconds is None and result.audio_start_time is not None:
-                            result.ttft_seconds = now - result.audio_start_time
-                            result.first_token_content = transcript
-                        result.partial_transcripts.append(transcript)
-
-                elif msg_type in ("committed_transcript", "committed_transcript_with_timestamps"):
-                    # Both types carry "text" in the same position.
-                    # committed_transcript_with_timestamps arrives when include_timestamps=true,
-                    # but handling it defensively prevents silent data loss if the server ever
-                    # sends it unexpectedly (account setting, API default change, etc.).
-                    transcript = msg.get("text", "").strip()
-                    if transcript:
-                        committed_parts.append(transcript)
-                        if result.audio_start_time is not None:
-                            result.audio_to_final_seconds = now - result.audio_start_time
-
-        except Exception as exc:
-            logger.warning(
-                "elevenlabs_receive_error",
-                provider="elevenlabs",
-                model=self._model,
-                exc_info=exc,
-            )
-            if result.error is None and result.audio_to_final_seconds is None:
-                result.error = str(exc)
-
-        if committed_parts:
-            result.complete_transcript = " ".join(committed_parts).strip() or None
-        elif result.partial_transcripts:
-            result.complete_transcript = result.partial_transcripts[-1].strip() or None
-
-        if result.complete_transcript:
-            result.transcript_length = len(result.complete_transcript)
-            result.word_count = len(result.complete_transcript.split())
+        if msg_type == "partial_transcript":
+            tx.partial(str(msg.get("text", "")), now)
+        elif msg_type in ("committed_transcript", "committed_transcript_with_timestamps"):
+            # The _with_timestamps variant only arrives with include_timestamps=true,
+            # but it carries "text" in the same place, so accept it rather than drop it.
+            text = str(msg.get("text", "")).strip()
+            if text:
+                tx.final(text, now)
+        return False

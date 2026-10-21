@@ -35,6 +35,7 @@ def override_settings(
     receives the test settings rather than reading real env vars.
     """
     test_settings = Settings(
+        _env_file=None,
         database_url="postgresql://runner:password@localhost:5432/benchmarks",
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
