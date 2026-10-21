@@ -433,9 +433,11 @@ async def recent_completed_runs(
 ) -> list[CovalRun]:
     """Completed Coval runs for one agent within the ingest window, newest first.
 
-    List returns the summary view newest-first; filter by agent_id + status
-    (tags are not filterable). ``test_set_id`` narrows to one test set so other
-    sims on the same agents (e.g. the single-turn set) are not ingested. Runs
+    List returns the summary view newest-first. The server filter is agent_id
+    alone because the API WAF rejects AND-joined filters; status and test set
+    are checked here (tags are not filterable). ``test_set_id`` narrows to one
+    test set so other sims on the same agents (e.g. the single-turn set) are not
+    ingested. Runs
     without a parseable create_time are kept: better to ingest with a fetch-time
     slot than to drop data. Pages are followed until one reaches past the window,
     so an agent with several runs a day (one per persona) is never cut off at the
@@ -443,9 +445,7 @@ async def recent_completed_runs(
     the workspace the client's API key defaults to.
     """
     window = window_seconds or max(WINDOW_FLOOR_SECONDS, 2 * period_seconds)
-    filt = f'status="COMPLETED" AND agent_id="{agent_id}"'
-    if test_set_id:
-        filt += f' AND test_set_id="{test_set_id}"'
+    filt = f'agent_id="{agent_id}"'
     now = datetime.now(tz=UTC)
     runs: list[CovalRun] = []
     page_token: str | None = None
@@ -465,6 +465,10 @@ async def recent_completed_runs(
         raw = cast("list[dict[str, Any]]", payload.get("runs", []))
         left_window = False
         for r in raw:
+            if r.get("status") != "COMPLETED":
+                continue
+            if test_set_id and r.get("test_set_id") != test_set_id:
+                continue
             run = CovalRun(
                 run_id=cast("str", r["run_id"]),
                 create_time=_parse_time(r.get("create_time")),
