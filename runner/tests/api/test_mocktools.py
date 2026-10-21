@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
+from types import SimpleNamespace
 from typing import Any
 
 import psycopg
@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 import coval_bench.scenarios as contracts_module
+from coval_bench.api.routers import mocktools as mocktools_router
 from coval_bench.mocktools.dispatch import Dispatcher, load_tool_specs
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture
 from tests.api.conftest import MOCK_TOOLS_KEY, _make_db_url
@@ -242,25 +243,29 @@ async def test_calls_are_recoverable_in_the_order_they_fired(
 # --- the appliance's own guarantees ----------------------------------------
 
 
+@pytest.fixture
+def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Seconds the router asked to hold each answer; the hold itself is skipped."""
+    requested: list[float] = []
+
+    async def _sleep(seconds: float) -> None:
+        requested.append(seconds)
+
+    monkeypatch.setattr(mocktools_router, "asyncio", SimpleNamespace(sleep=_sleep))
+    return requested
+
+
 async def test_every_answer_is_held_to_the_latency_budget(
-    client: AsyncClient, app: FastAPI
+    client: AsyncClient, app: FastAPI, sleeps: list[float]
 ) -> None:
     app.state.mock_dispatcher = Dispatcher(load_tool_specs("dental"), _test_fixtures())
     app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 120.0})
-    started = time.perf_counter()
     response = await client.post(
         "/mock/generic/lookup_patient", json={"phone": PHONE}, headers=AUTH
     )
-    elapsed_ms = (time.perf_counter() - started) * 1000
     assert response.status_code == 200
-    assert elapsed_ms >= 120.0
-
-
-async def test_the_budget_is_configurable(client: AsyncClient, mock_app: FastAPI) -> None:
-    """Zeroed by the fixture: the budget is a setting, not a constant in the route."""
-    started = time.perf_counter()
-    await client.post("/mock/generic/lookup_patient", json={"phone": PHONE}, headers=AUTH)
-    assert (time.perf_counter() - started) * 1000 < 120.0
+    assert len(sleeps) == 1
+    assert 0.1 < sleeps[0] <= 0.12
 
 
 async def test_the_appliance_is_never_rate_limited(client: AsyncClient, mock_app: FastAPI) -> None:
@@ -366,30 +371,29 @@ async def test_vapi_batch_writes_one_row_per_call_in_order(
     assert [row["matched_seed"] for row in rows] == ["marcus_lee", None]
 
 
-async def test_vapi_batch_is_held_to_the_budget_per_call(client: AsyncClient, app: FastAPI) -> None:
+async def test_vapi_batch_is_held_to_the_budget_per_call(
+    client: AsyncClient, app: FastAPI, sleeps: list[float]
+) -> None:
     app.state.mock_dispatcher = Dispatcher(load_tool_specs("dental"), _test_fixtures())
     app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 60.0})
     body = _vapi(
         {"id": "tc_1", "name": "lookup_patient", "arguments": {"phone": PHONE}},
         {"id": "tc_2", "name": "lookup_patient", "arguments": {"phone": PHONE}},
     )
-    started = time.perf_counter()
     response = await client.post("/mock/vapi", json=body, headers=AUTH)
-    elapsed_ms = (time.perf_counter() - started) * 1000
     assert response.status_code == 200
-    assert elapsed_ms >= 120.0
+    assert len(sleeps) == 1
+    assert 0.1 < sleeps[0] <= 0.12
 
 
 async def test_vapi_with_no_calls_answers_empty_and_writes_nothing(
-    client: AsyncClient, app: FastAPI, postgresql: Any
+    client: AsyncClient, app: FastAPI, postgresql: Any, sleeps: list[float]
 ) -> None:
     app.state.mock_dispatcher = Dispatcher(load_tool_specs("dental"), _test_fixtures())
     app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 200.0})
-    started = time.perf_counter()
     response = await client.post("/mock/vapi", json=_vapi(), headers=AUTH)
-    elapsed_ms = (time.perf_counter() - started) * 1000
     assert response.json() == {"results": []}
-    assert elapsed_ms < 200.0
+    assert sleeps == []
     assert await _rows(postgresql) == []
 
 

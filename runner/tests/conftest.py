@@ -6,8 +6,23 @@
 from __future__ import annotations
 
 import pytest
+import structlog
 
 from coval_bench.config import Settings
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # The default renderer pretty-prints exc_info tracebacks through Rich, which
+    # costs a quarter second or more per logged exception.
+    processors = structlog.get_config()["processors"]
+    structlog.configure(
+        processors=[
+            *processors[:-1],
+            structlog.dev.ConsoleRenderer(
+                colors=False, exception_formatter=structlog.dev.plain_traceback
+            ),
+        ]
+    )
 
 
 @pytest.fixture(autouse=False)

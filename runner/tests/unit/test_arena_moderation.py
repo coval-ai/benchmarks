@@ -139,6 +139,7 @@ async def test_verdict_does_not_outlive_the_request_budget(
         raise AssertionError("should have been abandoned long before this")
 
     _install_stub(monkeypatch, _hang)
+    monkeypatch.setattr(moderation, "MODERATION_TIMEOUT_S", 0.01)
     verdict = await asyncio.wait_for(
         moderation_verdict(Settings(), "hello"), timeout=MODERATION_TIMEOUT_S + 1
     )

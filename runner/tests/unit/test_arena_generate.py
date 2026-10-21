@@ -383,8 +383,8 @@ async def test_a_replacement_is_cancelled_by_the_remaining_deadline(
         provider=_stub_provider(tmp_path, script, attempted),
     )
     # The stand-in must actually be started, then cut off — so the floor has to be low.
-    monkeypatch.setattr(generate_module, "_BATTLE_BUDGET_S", 1.0)
-    monkeypatch.setattr(generate_module, "_MIN_ATTEMPT_S", 0.1)
+    monkeypatch.setattr(generate_module, "_BATTLE_BUDGET_S", 0.2)
+    monkeypatch.setattr(generate_module, "_MIN_ATTEMPT_S", 0.02)
 
     started = time.monotonic()
     battle = await generate_battle(
