@@ -167,7 +167,7 @@ def _iso(age: timedelta) -> str:
 
 
 def _list_json(*runs: dict[str, Any]) -> dict[str, Any]:
-    return {"runs": [{"status": "COMPLETED", **r} for r in runs]}
+    return {"runs": [{"status": "COMPLETED", "test_set_id": "TSD", **r} for r in runs]}
 
 
 def _run_json(
@@ -209,7 +209,7 @@ def _fake_client(
                 return httpx.Response(200, json=payload)
             agent = request.url.params["filter"].removeprefix('agent_id="').removesuffix('"')
             runs = [r for r in list_json["runs"] if r.get("agent_id", agent) == agent]
-            return httpx.Response(200, json={**list_json, "runs": runs})
+            return httpx.Response(200, json={"runs": runs})
         run_id = request.url.path.rsplit("/", 1)[-1]
         if "run" in run_json:
             return httpx.Response(200, json=run_json)
@@ -987,9 +987,7 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
     )
 
     writer = _stub_writer()
-    list_json = _list_json(
-        {"run_id": "R1", "test_set_id": "TSD", "create_time": _iso(timedelta(hours=1))}
-    )
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
     values = [{"simulation_output_id": f"s{i}", "value": 0.5} for i in range(2)]
     client = _fake_client(list_json, _run_json(values))
 
@@ -1117,12 +1115,7 @@ async def _fetch_llm(
     persona_conditions: dict[str, Condition] | None = None,
 ) -> tuple[RunStatus, int]:
     list_json = _list_json(
-        {
-            "run_id": "R1",
-            "test_set_id": "TSD",
-            "create_time": _iso(timedelta(hours=1)),
-            "persona_id": "P1",
-        }
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "persona_id": "P1"}
     )
     async with _fake_client(list_json, _run_json(values, metric_id="IID")) as client:
         return await _fetch_one_provider(
@@ -1246,9 +1239,7 @@ async def test_fetch_and_write_v2v_still_requires_the_latency_metric_for_legacy_
 @pytest.mark.asyncio
 async def test_fetch_one_provider_rejects_a_dataset_from_another_benchmark() -> None:
     writer = _stub_writer()
-    list_json = _list_json(
-        {"run_id": "R1", "test_set_id": "TS1", "create_time": _iso(timedelta(hours=1))}
-    )
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
 
     with capture_logs() as logs:
         async with _fake_client(list_json, {}) as client:
@@ -1258,7 +1249,7 @@ async def test_fetch_one_provider_rejects_a_dataset_from_another_benchmark() -> 
                 spec=replace(LLM_SPEC, family=FAMILY_MULTITURN),
                 agent_id="a1",
                 metric_ids={Metric.INSTRUCTION_FOLLOWING: "IID"},
-                test_set_id="TS1",
+                test_set_id="TSD",
                 period_seconds=10_800,
                 stale_grace_seconds=5_400,
             )
@@ -1291,9 +1282,7 @@ async def test_samples_publish_without_the_shared_test_set(
     assert settings.coval_s2s_test_set_id is None
 
     writer = _stub_writer()
-    list_json = _list_json(
-        {"run_id": "R1", "test_set_id": "TSD", "create_time": _iso(timedelta(hours=1))}
-    )
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
     values = [{"simulation_output_id": "s1", "value": 0.5}]
     client = _fake_client(list_json, _run_json(values))
 
@@ -1339,13 +1328,7 @@ async def test_each_dataset_publishes_its_own_sample_tick(
     writer = _stub_writer()
     created = _iso(timedelta(hours=1))
     list_json = _list_json(
-        {
-            "run_id": "R1",
-            "agent_id": "a1",
-            "test_set_id": "TSD",
-            "create_time": created,
-            "persona_id": "PID",
-        },
+        {"run_id": "R1", "agent_id": "a1", "create_time": created, "persona_id": "PID"},
         {
             "run_id": "R2",
             "agent_id": "b1",
@@ -1406,9 +1389,7 @@ async def test_fetch_and_write_v2v_noop_tick_succeeds(
 
     writer = _stub_writer()
     writer.coval_metric_ingested = AsyncMock(return_value=True)  # nothing new this tick
-    list_json = _list_json(
-        {"run_id": "R1", "test_set_id": "TSD", "create_time": _iso(timedelta(hours=1))}
-    )
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
     client = _fake_client(list_json, {})
 
     @contextlib.asynccontextmanager
@@ -1687,18 +1668,8 @@ async def test_unmapped_persona_skips_only_its_run() -> None:
     """One stray persona must not fail the provider or hide the mapped runs."""
     writer = _stub_writer()
     list_json = _list_json(
-        {
-            "run_id": "R1",
-            "test_set_id": "TS1",
-            "create_time": _iso(timedelta(hours=1)),
-            "persona_id": "PC",
-        },
-        {
-            "run_id": "R2",
-            "test_set_id": "TS1",
-            "create_time": _iso(timedelta(hours=2)),
-            "persona_id": "PUNKNOWN",
-        },
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "persona_id": "PC"},
+        {"run_id": "R2", "create_time": _iso(timedelta(hours=2)), "persona_id": "PUNKNOWN"},
     )
     values = [{"simulation_output_id": "s1", "value": 0.5}]
     unmapped: dict[str, int] = {}
@@ -1710,7 +1681,7 @@ async def test_unmapped_persona_skips_only_its_run() -> None:
                 spec=SPEC,
                 agent_id="a1",
                 metric_ids=LATENCY_IDS,
-                test_set_id="TS1",
+                test_set_id="TSD",
                 persona_conditions={"PC": Condition.CLEAN},
                 period_seconds=10_800,
                 stale_grace_seconds=5_400,
@@ -1746,18 +1717,8 @@ async def test_noisy_and_clean_runs_land_in_different_datasets() -> None:
     """One scan, two personas: the dataset is chosen per run, not per tick."""
     writer = _stub_writer()
     list_json = _list_json(
-        {
-            "run_id": "RNOISY",
-            "test_set_id": "TS1",
-            "create_time": _iso(timedelta(hours=1)),
-            "persona_id": "PN",
-        },
-        {
-            "run_id": "RCLEAN",
-            "test_set_id": "TS1",
-            "create_time": _iso(timedelta(hours=1)),
-            "persona_id": "PCLEAN",
-        },
+        {"run_id": "RNOISY", "create_time": _iso(timedelta(hours=1)), "persona_id": "PN"},
+        {"run_id": "RCLEAN", "create_time": _iso(timedelta(hours=1)), "persona_id": "PCLEAN"},
     )
     latency = [{"simulation_output_id": "s1", "value": 0.5}]
     instruction = [{"simulation_output_id": "s1", "value": "YES"}]
@@ -1768,7 +1729,7 @@ async def test_noisy_and_clean_runs_land_in_different_datasets() -> None:
             spec=SPEC,
             agent_id="a1",
             metric_ids=IDS,
-            test_set_id="TS1",
+            test_set_id="TSD",
             noisy_persona_id="PN",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
@@ -1794,18 +1755,8 @@ async def test_noisy_caller_never_becomes_a_sample_candidate() -> None:
 
     writer = _stub_writer()
     list_json = _list_json(
-        {
-            "run_id": "RNOISY",
-            "test_set_id": "TS1",
-            "create_time": _iso(timedelta(hours=1)),
-            "persona_id": "PN",
-        },
-        {
-            "run_id": "RCLEAN",
-            "test_set_id": "TS1",
-            "create_time": _iso(timedelta(hours=1)),
-            "persona_id": "PCLEAN",
-        },
+        {"run_id": "RNOISY", "create_time": _iso(timedelta(hours=1)), "persona_id": "PN"},
+        {"run_id": "RCLEAN", "create_time": _iso(timedelta(hours=1)), "persona_id": "PCLEAN"},
     )
     values = [{"simulation_output_id": "s1", "value": 0.5}]
     sampled: list[SampleRun] = []
@@ -1816,7 +1767,7 @@ async def test_noisy_caller_never_becomes_a_sample_candidate() -> None:
             spec=SPEC,
             agent_id="a1",
             metric_ids=LATENCY_IDS,
-            test_set_id="TS1",
+            test_set_id="TSD",
             noisy_persona_id="PN",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
@@ -2341,12 +2292,7 @@ async def test_already_ingested_instruction_only_run_is_fresh() -> None:
 
     writer.coval_metric_ingested = AsyncMock(side_effect=metric_ingested)
     list_json = _list_json(
-        {
-            "run_id": "R1",
-            "test_set_id": "TS1",
-            "create_time": _iso(timedelta(hours=1)),
-            "persona_id": "PN",
-        }
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "persona_id": "PN"}
     )
     instruction = [{"simulation_output_id": "s0", "value": "YES"}]
     async with _fake_client(list_json, _run_json(instruction, metric_id="IID")) as client:
@@ -2356,7 +2302,7 @@ async def test_already_ingested_instruction_only_run_is_fresh() -> None:
             spec=SPEC,
             agent_id="a1",
             metric_ids=IDS,
-            test_set_id="TS1",
+            test_set_id="TSD",
             noisy_persona_id="PN",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
@@ -2374,12 +2320,7 @@ async def test_run_skipped_when_the_required_metric_is_unconfigured() -> None:
 
     writer = _stub_writer()
     list_json = _list_json(
-        {
-            "run_id": "RNOISY",
-            "test_set_id": "TS1",
-            "create_time": _iso(timedelta(hours=1)),
-            "persona_id": "PN",
-        }
+        {"run_id": "RNOISY", "create_time": _iso(timedelta(hours=1)), "persona_id": "PN"}
     )
     sampled: list[SampleRun] = []
     async with _fake_client(list_json, _run_json([{"simulation_output_id": "s1"}])) as client:
