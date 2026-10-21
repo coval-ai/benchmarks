@@ -81,6 +81,7 @@ dev = [
     "asgi-lifespan>=2.1.0",
     "pip-licenses>=5.5.5",
     "pyarrow>=17",
+    "pytest-xdist>=3.6",
 ]
 
 [build-system]

@@ -77,11 +77,12 @@ jobs:
       # Tests
       # -----------------------------------------------------------------------
       # pytest-socket blocks all network calls except the embedded Postgres
-      # spun up by pytest-postgresql on the loopback interface.
+      # spun up by pytest-postgresql on the loopback interface. -n 4 matches the
+      # runner's vCPUs; each xdist worker starts its own Postgres.
       - name: pytest
         working-directory: runner
         run: >
-          uv run pytest -q --disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1
+          uv run pytest -q -n 4 --disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1
           --cov=coval_bench --cov-report=term-missing --cov-fail-under=0
 
       # -----------------------------------------------------------------------
