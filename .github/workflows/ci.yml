@@ -108,39 +108,43 @@ jobs:
             | tar -xz -C /tmp gitleaks
           /tmp/gitleaks detect --source . --no-banner --redact --verbose
 
-      # -----------------------------------------------------------------------
-      # Docker build — confirm all three Dockerfiles build; no push.
-      # GHA cache via buildx gha backend.
-      # -----------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Docker build — confirm each Dockerfile builds; no push. One runner per
+  # image, in parallel with the tests. The gha cache is scoped per image so
+  # the three builds don't overwrite each other, and mode=min exports only the
+  # final image's layers: mode=max spent minutes uploading the build stage.
+  # ---------------------------------------------------------------------------
+  docker-build:
+    name: Docker build (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: runner
+            file: runner/Dockerfile
+          - image: api
+            file: runner/Dockerfile.api
+          - image: livekit
+            file: runner/Dockerfile.livekit
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Docker build — runner image
+      - name: Docker build
         uses: docker/build-push-action@v7
         with:
           context: runner
-          file: runner/Dockerfile
+          file: ${{ matrix.file }}
           platforms: linux/amd64
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Docker build — api image
-        uses: docker/build-push-action@v7
-        with:
-          context: runner
-          file: runner/Dockerfile.api
-          platforms: linux/amd64
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Docker build — livekit agent image
-        uses: docker/build-push-action@v7
-        with:
-          context: runner
-          file: runner/Dockerfile.livekit
-          platforms: linux/amd64
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=min,scope=${{ matrix.image }}
