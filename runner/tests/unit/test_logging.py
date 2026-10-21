@@ -26,8 +26,10 @@ from coval_bench.logging import configure_logging, uvicorn_log_config
 @pytest.fixture(autouse=True)
 def _reset_structlog() -> Iterator[None]:
     """Restore structlog and stdlib logging defaults after each test — both are global."""
+    saved = structlog.get_config()
     yield
     structlog.reset_defaults()
+    structlog.configure(**saved)
     for name in ("", "uvicorn", "uvicorn.error", "uvicorn.access"):
         lg = logging.getLogger(name)
         lg.handlers.clear()

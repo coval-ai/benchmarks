@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import random
 from dataclasses import replace
@@ -16,6 +17,7 @@ import httpx
 import pytest
 from google.api_core.exceptions import NotFound
 
+from coval_bench.runner.retry import with_retry
 from coval_bench.s2s import samples
 from coval_bench.s2s.samples import PREFIX, SampleRun, publish_tick_sample
 
@@ -370,7 +372,9 @@ async def test_index_stays_newest_first_when_an_older_day_lands_later() -> None:
 
 
 @pytest.mark.asyncio
-async def test_never_raises_on_total_failure() -> None:
+async def test_never_raises_on_total_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(samples, "with_retry", functools.partial(with_retry, base_delay_s=0.0))
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 

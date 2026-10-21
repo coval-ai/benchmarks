@@ -15,12 +15,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
+from coval_bench.providers.stt import cloudflare
 from coval_bench.providers.stt.cloudflare import CloudflareSTTProvider
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
 
 _CONNECT = "coval_bench.providers.stt.cloudflare.ws_client.connect"
 _ACCOUNT = "acct-0123"
+
+
+@pytest.fixture(autouse=True)
+def _no_final_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fake replays every event before Finalize, so the wait could only time out."""
+    monkeypatch.setattr(cloudflare, "_FINAL_WAIT_S", 0.0)
 
 
 def _fake_connect(events: list[Any], captured: dict[str, Any]) -> Any:
