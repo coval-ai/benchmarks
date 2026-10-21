@@ -51,6 +51,9 @@ def _tampered(token: str) -> str:
         (_tampered(encode(PAYLOAD, KEY)), KEY),
         ("v1.not-a-fernet-token", KEY),
     ],
+    # Fresh tokens differ per process, so the ids must not come from the values
+    # or xdist workers disagree about what they collected.
+    ids=["legacy", "wrong-key", "tampered", "malformed"],
 )
 def test_wrong_tampered_legacy_and_malformed_tokens_are_rejected(
     token: str, key: SecretStr
