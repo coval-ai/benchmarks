@@ -3,9 +3,8 @@
 
 """Shared fixtures for TTS provider tests.
 
-No live network calls are made in any test in this package.  HTTP-streaming
-providers are covered by VCR cassettes; WebSocket providers are covered by
-monkeypatched fake SDKs.
+No live network calls are made in any test in this package; every provider
+is covered by monkeypatched fake SDKs and fake HTTP clients.
 """
 
 from __future__ import annotations
@@ -23,21 +22,6 @@ import pytest
 from pydantic import SecretStr
 
 from coval_bench.config import Settings
-
-# ---------------------------------------------------------------------------
-# VCR config — must be module-scope so pytest-vcr picks it up
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-def vcr_config() -> dict[str, Any]:
-    """Filter secrets from VCR cassettes before they are written to disk."""
-    return {
-        "filter_headers": ["authorization", "xi-api-key", "api-key", "x-api-key"],
-        "filter_query_parameters": ["api_key", "key"],
-        "decode_compressed_response": True,
-    }
-
 
 # ---------------------------------------------------------------------------
 # Settings fixture with fake API keys

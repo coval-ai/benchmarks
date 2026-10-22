@@ -268,7 +268,7 @@ To produce a fresh `(provider, model, voice, metric)` measurement:
 1. Clone the current repository.
 2. `uv sync` inside `runner/`.
 3. Set the relevant provider API key in `.env`.
-4. `coval-bench run --kind stt --providers <provider> --models <model>`
+4. `coval-bench run --kind stt --only <provider>/<model>`
    (or analogous for TTS). The runner downloads the same dataset audio from
    GCS, verifies the SHA, runs against the same model identifier, and applies
    the same normalization pipeline.

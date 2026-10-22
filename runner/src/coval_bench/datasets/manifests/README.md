@@ -280,26 +280,10 @@ providers train on LibriSpeech — so the value lives in (a) latency metrics,
 which are unaffected, and (b) per-provider regression-over-time, which works
 symmetrically.
 
-To rebuild the manifest from scratch (downloads LibriSpeech, transcodes,
-uploads, recomputes hashes), run `scripts/build_dataset.py`:
-
-```bash
-uv run python scripts/build_dataset.py build \
-    --dataset stt-v1 \
-    --bucket coval-benchmarks-datasets
-```
-
-This script:
-1. Downloads the LibriSpeech `test-clean` tar from OpenSLR.
-2. Deterministically selects 50 utterances per ADR-020:
-   - Filter to utterances with `2.0 <= duration_sec <= 15.0`.
-   - Sort by `(speaker_id, chapter_id, utterance_id)` lex.
-   - Round-robin by speaker until 50 are picked; re-sort the picks by lex
-     so filenames `0001.wav..0050.wav` are in stable order.
-3. Transcodes each file to 16 kHz mono PCM_16 WAV.
-4. Computes SHA256 for each file.
-5. Uploads to `gs://coval-benchmarks-datasets/stt-v1/audio/`.
-6. Writes the updated `stt-v1.json` (commit the result).
+The manifest is frozen. The one-off LibriSpeech builder that produced it was
+removed once `coval-build-dataset` became the shared builder; the selection rule
+above (ADR-020) and the audio at `gs://coval-benchmarks-datasets/stt-v1/audio/`
+are the record.
 
 **Never overwrite v1.**
 

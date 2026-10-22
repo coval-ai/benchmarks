@@ -31,7 +31,7 @@ uv sync
 uv run pytest -q
 ```
 
-VCR cassettes + fakes — never hit the network.
+Fakes only — never hit the network.
 
 ### Full stack (Postgres + API + runner image, real provider APIs)
 
