@@ -142,6 +142,7 @@ jobs:
           context: runner
           file: runner/${{ matrix.dockerfile }}
           platforms: linux/amd64
+          pull: true
           push: true
           tags: ${{ env.IMAGE }}:${{ needs.context.outputs.deploy_sha }}
           cache-from: type=gha,scope=${{ matrix.image }}
