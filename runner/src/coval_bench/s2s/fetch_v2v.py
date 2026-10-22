@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import random
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import click
@@ -30,9 +31,11 @@ from coval_bench.db.registry_store import fetch_models
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import Metric
 from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.runner.capture import ImportRunClaim, ImportRunIdentity
 from coval_bench.s2s.conditions import (
     DATASET_ID,
     Condition,
+    DatasetMetrics,
     condition_for,
     dataset_id_for,
 )
@@ -65,21 +68,6 @@ from coval_bench.s2s.specs import AgentSpec, llm_specs, s2s_specs
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 
 
-def _backfill_status(statuses: list[RunStatus]) -> RunStatus:
-    """A targeted backfill's verdict, which freshness is no part of.
-
-    Nothing matched is a success here: the named runs belong to one agent, so every
-    other provider legitimately has nothing to do.
-    """
-    if not statuses:
-        return RunStatus.SUCCEEDED
-    if all(s is RunStatus.FAILED for s in statuses):
-        return RunStatus.FAILED
-    if all(s is RunStatus.SUCCEEDED for s in statuses):
-        return RunStatus.SUCCEEDED
-    return RunStatus.PARTIAL
-
-
 def _expected_sample_models(settings: Settings, dataset_id: str) -> set[tuple[str, str]]:
     """The pairs a sample on *dataset_id* must cover; a bucket short one publishes nothing.
 
@@ -93,6 +81,120 @@ def _expected_sample_models(settings: Settings, dataset_id: str) -> set[tuple[st
         and spec.publish_samples
         and dataset_id_for(spec.family, Condition.CLEAN) == dataset_id
     }
+
+
+@dataclass(frozen=True)
+class _RunPlan:
+    """What one listed Coval run needs before it can be ingested."""
+
+    dataset_id: str
+    dataset_sha256: str
+    condition: DatasetMetrics
+    # Ingestable metrics already stored on an earlier scan.
+    persisted: frozenset[Metric]
+    # Metrics this scan still owes; empty means nothing to do.
+    pending: frozenset[Metric]
+    import_identity: ImportRunIdentity
+    import_claim: ImportRunClaim | None
+    # None while a sealed but unfinalized generation is waiting on recovery.
+    import_generation: int | None
+
+
+async def _plan_run(
+    writer: RunWriter,
+    *,
+    spec: AgentSpec,
+    coval_run: CovalRun,
+    metric_ids: Mapping[Metric, str],
+    test_set_id: str | None,
+    noisy_persona_id: str | None,
+    persona_conditions: Mapping[str, Condition] | None,
+    artifact_client: storage.Client | None,
+    artifact_bucket: str,
+    workspace_id: str | None,
+) -> _RunPlan | None:
+    """Resolve a run's dataset, condition, and what is still owed; None skips it.
+
+    Raises UnmappedPersona so the caller can count the persona once per job.
+    """
+    identity = dataset_identity(
+        test_set_id,
+        coval_run.persona_id,
+        noisy_persona_id,
+        family=spec.family,
+        persona_conditions=persona_conditions,
+    )
+    if identity is None:
+        return None
+    dataset_id, dataset_sha256 = identity
+    condition = condition_for(dataset_id)
+    if condition.benchmark is not spec.benchmark:
+        raise RuntimeError(
+            f"dataset {dataset_id!r} belongs to {condition.benchmark}, not {spec.benchmark}"
+        )
+    if condition.required not in metric_ids:
+        logger.warning(
+            "required_metric_unconfigured",
+            provider=spec.provider,
+            dataset_id=dataset_id,
+            metric=condition.required.value,
+        )
+        return None
+    if artifact_client is None:
+        raise RuntimeError("required capture storage is unavailable")
+    identity_value = import_identity(
+        spec=spec,
+        coval_run=coval_run,
+        dataset_id=dataset_id,
+        dataset_sha256=dataset_sha256 or packaged_dataset_sha256(),
+        workspace_id=workspace_id,
+    )
+    import_claim, import_generation = await resolve_import_generation(
+        artifact_client, artifact_bucket, identity_value
+    )
+    database_pending = await pending_metrics(
+        writer,
+        benchmark=spec.benchmark,
+        provider=spec.provider,
+        coval_run_id=coval_run.run_id,
+        condition=condition,
+        metric_ids=metric_ids,
+    )
+    return _RunPlan(
+        dataset_id=dataset_id,
+        dataset_sha256=dataset_sha256,
+        condition=condition,
+        persisted=ingestable_metrics(condition, metric_ids) - database_pending,
+        pending=(
+            frozenset(Metric(metric) for metric in import_claim.metric_types)
+            if import_claim is not None
+            else database_pending
+        ),
+        import_identity=identity_value,
+        import_claim=import_claim,
+        import_generation=import_generation,
+    )
+
+
+def _aggregate_status(statuses: list[RunStatus]) -> RunStatus:
+    """FAILED or SUCCEEDED when every run agrees, PARTIAL otherwise; nothing is a success.
+
+    For a backfill, nothing matched is fine: the named runs belong to one agent, so
+    every other provider legitimately has nothing to do.
+    """
+    if not statuses:
+        return RunStatus.SUCCEEDED
+    if all(s is RunStatus.FAILED for s in statuses):
+        return RunStatus.FAILED
+    if all(s is RunStatus.SUCCEEDED for s in statuses):
+        return RunStatus.SUCCEEDED
+    return RunStatus.PARTIAL
+
+
+def _is_stale(newest_data_at: datetime | None, threshold_seconds: int) -> bool:
+    if newest_data_at is None:
+        return True
+    return (datetime.now(tz=UTC) - newest_data_at).total_seconds() > threshold_seconds
 
 
 async def _fetch_one_provider(
@@ -119,46 +221,47 @@ async def _fetch_one_provider(
 ) -> tuple[RunStatus, int]:
     """Scan the window and ingest every clean, not-yet-ingested run.
 
-    Returns (provider status, runs ingested this tick). Staleness wins: when
-    the newest usable run is unknown-age or older than period + grace, the
-    provider is FAILED even if old runs were backfilled this tick, so a stuck
-    sim, a paused schedule, or a Coval outage is always loud. Errors are
-    caught here so one provider can't abort others.
+    Returns (provider status, runs ingested this tick). Staleness wins: if the
+    newest usable run is unknown-age or older than period + grace, the provider
+    is FAILED even when old runs were backfilled, so a stuck sim, a paused
+    schedule, or a Coval outage is always loud. With *only_run_ids* this is a
+    targeted backfill instead: no staleness verdict, no samples. Errors are
+    caught here so one provider can't abort the others.
     """
+    backfill = only_run_ids is not None
     statuses: list[RunStatus] = []
     candidates: dict[tuple[datetime, str], SampleRun] = {}
     # The clean caller, plus the legacy single-turn manifest which has no conditions.
     publishable = {DATASET_ID, dataset_id_for(spec.family, Condition.CLEAN)}
+    newest_data_at: datetime | None = None
+    data_seen = False
 
     def note_sample_candidate(coval_run: CovalRun, dataset_id: str) -> None:
-        # Newest-first scan: keep the newest eligible run PER (BUCKET, PERSONA).
-        # Multi-turn runs the same test set once per persona, so a provider yields
-        # one candidate per persona per day (single-turn has no persona -> a "" key).
-        # Keying on the bucket too is what lets a missed day still be published: the
-        # window spans two periods, and keying on persona alone let today's run evict
-        # yesterday's before the sampler ever saw it. Staggered arrivals must not
-        # shrink the sample; committed only after the staleness check so a stale
-        # provider's old recording never ships today.
-        # Every other condition's recording stays internal, as does every recording
-        # from an agent under embargo.
-        if only_run_ids is not None:
-            return
-        if not spec.publish_samples or dataset_id not in publishable:
+        # Newest-first scan: keep the newest eligible run per (bucket, persona), so
+        # today's run can't evict yesterday's before the sampler sees it. Committed
+        # only after the staleness check, so a stale provider's old recording never
+        # ships. Other conditions and embargoed agents stay internal.
+        if backfill or not spec.publish_samples or dataset_id not in publishable:
             return
         bucket_at = bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
-        key = (bucket_at, coval_run.persona_id)
-        if key in candidates:
-            return
-        candidates[key] = SampleRun(
-            provider=spec.provider,
-            model=spec.model,
-            coval_run_id=coval_run.run_id,
-            bucket_at=bucket_at,
-            persona_id=coval_run.persona_id,
-            agent_id=agent_id,
-            test_set_id=test_set_id or "",
-            dataset_id=dataset_id,
+        candidates.setdefault(
+            (bucket_at, coval_run.persona_id),
+            SampleRun(
+                provider=spec.provider,
+                model=spec.model,
+                coval_run_id=coval_run.run_id,
+                bucket_at=bucket_at,
+                persona_id=coval_run.persona_id,
+                agent_id=agent_id,
+                test_set_id=test_set_id or "",
+                dataset_id=dataset_id,
+            ),
         )
+
+    def note_data(coval_run: CovalRun) -> None:
+        nonlocal data_seen, newest_data_at
+        if not data_seen:
+            data_seen, newest_data_at = True, coval_run.create_time
 
     try:
         runs = await recent_completed_runs(
@@ -171,22 +274,24 @@ async def _fetch_one_provider(
             requested_run_ids=only_run_ids,
             workspace_id=workspace_id,
         )
-        data_seen = False
-        newest_data_at: datetime | None = None
         for coval_run in runs:
             if only_run_ids is not None and coval_run.run_id not in only_run_ids:
                 continue
-            # An unmapped persona skips only its own run: the provider's other runs
-            # still ingest, and the job reports the persona once at the end.
             try:
-                identity = dataset_identity(
-                    test_set_id,
-                    coval_run.persona_id,
-                    noisy_persona_id,
-                    family=spec.family,
+                plan = await _plan_run(
+                    writer,
+                    spec=spec,
+                    coval_run=coval_run,
+                    metric_ids=metric_ids,
+                    test_set_id=test_set_id,
+                    noisy_persona_id=noisy_persona_id,
                     persona_conditions=persona_conditions,
+                    artifact_client=artifact_client,
+                    artifact_bucket=artifact_bucket,
+                    workspace_id=workspace_id,
                 )
             except UnmappedPersona:
+                # Skips only this run; the job reports the persona once at the end.
                 logger.warning(
                     "run_persona_unmapped",
                     provider=spec.provider,
@@ -198,62 +303,21 @@ async def _fetch_one_provider(
                         unmapped_personas.get(coval_run.persona_id, 0) + 1
                     )
                 continue
-            if identity is None:
+            if plan is None:
                 continue
-            dataset_id, dataset_sha256 = identity
-            condition = condition_for(dataset_id)
-            if condition.benchmark is not spec.benchmark:
-                raise RuntimeError(
-                    f"dataset {dataset_id!r} belongs to {condition.benchmark}, not {spec.benchmark}"
-                )
-            if condition.required not in metric_ids:
-                logger.warning(
-                    "required_metric_unconfigured",
-                    provider=spec.provider,
-                    dataset_id=dataset_id,
-                    metric=condition.required.value,
-                )
-                continue
-            ingestable = ingestable_metrics(condition, metric_ids)
-            if artifact_client is None:
-                raise RuntimeError("required capture storage is unavailable")
-            import_identity_value = import_identity(
-                spec=spec,
-                coval_run=coval_run,
-                dataset_id=dataset_id,
-                dataset_sha256=dataset_sha256 or packaged_dataset_sha256(),
-                workspace_id=workspace_id,
-            )
-            import_claim, import_generation = await resolve_import_generation(
-                artifact_client, artifact_bucket, import_identity_value
-            )
-            database_pending = await pending_metrics(
-                writer,
-                benchmark=spec.benchmark,
-                provider=spec.provider,
-                coval_run_id=coval_run.run_id,
-                condition=condition,
-                metric_ids=metric_ids,
-            )
-            persisted = ingestable - database_pending
-            if persisted:
-                note_sample_candidate(coval_run, dataset_id)
-            if condition.required in persisted and not data_seen:
-                data_seen, newest_data_at = True, coval_run.create_time
-            if import_generation is None:
+            if plan.persisted:
+                note_sample_candidate(coval_run, plan.dataset_id)
+            if plan.condition.required in plan.persisted:
+                note_data(coval_run)
+            if plan.import_generation is None:
                 logger.warning(
                     "normalized_import_recovery_pending",
                     provider=spec.provider,
                     coval_run_id=coval_run.run_id,
                 )
                 continue
-            pending = (
-                frozenset(Metric(metric) for metric in import_claim.metric_types)
-                if import_claim is not None
-                else database_pending
-            )
-            if not pending:
-                if matched_run_ids is not None and only_run_ids is not None:
+            if not plan.pending:
+                if backfill and matched_run_ids is not None:
                     matched_run_ids.add(coval_run.run_id)
                 logger.info(
                     "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
@@ -265,43 +329,31 @@ async def _fetch_one_provider(
                 spec=spec,
                 coval_run=coval_run,
                 metric_ids=metric_ids,
-                condition=condition,
-                pending=pending,
-                dataset_id=dataset_id,
-                dataset_sha256=dataset_sha256,
+                condition=plan.condition,
+                pending=plan.pending,
+                dataset_id=plan.dataset_id,
+                dataset_sha256=plan.dataset_sha256,
                 period_seconds=period_seconds,
                 artifact_client=artifact_client,
                 artifact_bucket=artifact_bucket,
                 workspace_id=workspace_id,
-                import_identity=import_identity_value,
-                import_generation=import_generation,
-                import_claim=import_claim,
+                import_identity=plan.import_identity,
+                import_generation=plan.import_generation,
+                import_claim=plan.import_claim,
             )
             if status is None:
                 continue
-            if (
-                status is not RunStatus.FAILED
-                and matched_run_ids is not None
-                and only_run_ids is not None
-            ):
-                matched_run_ids.add(coval_run.run_id)
             if status is not RunStatus.FAILED:
-                note_sample_candidate(coval_run, dataset_id)
-                if not data_seen:
-                    data_seen, newest_data_at = True, coval_run.create_time
+                if backfill and matched_run_ids is not None:
+                    matched_run_ids.add(coval_run.run_id)
+                note_sample_candidate(coval_run, plan.dataset_id)
+                note_data(coval_run)
             statuses.append(status)
 
-        if only_run_ids is not None:
-            return _backfill_status(statuses), len(statuses)
-
+        if backfill:
+            return _aggregate_status(statuses), len(statuses)
         threshold = period_seconds + stale_grace_seconds
-        age = (
-            None
-            if newest_data_at is None
-            else (datetime.now(tz=UTC) - newest_data_at).total_seconds()
-        )
-        stale = not data_seen or age is None or age > threshold
-        if stale:
+        if not data_seen or _is_stale(newest_data_at, threshold):
             logger.warning(
                 "provider_stale",
                 provider=spec.provider,
@@ -309,17 +361,9 @@ async def _fetch_one_provider(
                 threshold_seconds=threshold,
             )
             return RunStatus.FAILED, len(statuses)
-
         if sampled_runs is not None:
             sampled_runs.extend(candidates.values())
-
-        if statuses:
-            if all(s is RunStatus.FAILED for s in statuses):
-                return RunStatus.FAILED, len(statuses)
-            if all(s is RunStatus.SUCCEEDED for s in statuses):
-                return RunStatus.SUCCEEDED, len(statuses)
-            return RunStatus.PARTIAL, len(statuses)
-        return RunStatus.SUCCEEDED, 0
+        return _aggregate_status(statuses), len(statuses)
     except Exception as exc:
         logger.warning("provider_fetch_failed", provider=spec.provider, error=str(exc))
         return RunStatus.FAILED, len(statuses)
