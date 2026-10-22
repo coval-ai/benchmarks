@@ -129,7 +129,9 @@ async def test_google_no_audio(fake_settings: Settings, sample_text: str) -> Non
         provider = GoogleTTSProvider(fake_settings, model=CHIRP_MODEL, voice=CHIRP_VOICE)
         result = await provider.synthesize(sample_text)
 
-    assert result.error is None
+    # A stream that ends without audio or an error is a silent failure, not a success.
+    assert result.error is not None
+    assert result.error.startswith("provider closed the stream without sending audio")
     assert result.ttfa_ms is None
     assert result.audio_path is None
 

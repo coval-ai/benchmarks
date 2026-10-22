@@ -16,17 +16,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.gladia import GladiaSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events, make_settings
 
 _WS_URL = "wss://api.gladia.io/v2/live/test-session"
 
 
 def make_provider() -> GladiaSTTProvider:
-    return GladiaSTTProvider(api_key=SecretStr("test-key-gladia"))
+    return GladiaSTTProvider(make_settings())
 
 
 def _fake_ws_connect(events: list[Any]) -> Any:
@@ -55,9 +55,9 @@ def _init_ok() -> httpx.Response:
 
 
 @pytest.mark.asyncio
-async def test_gladia_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_gladia_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("gladia", "events-success")
-    provider = GladiaSTTProvider(api_key=fake_api_key)
+    provider = GladiaSTTProvider(stt_settings)
 
     with (
         patch(
@@ -65,7 +65,7 @@ async def test_gladia_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -
             return_value=_fake_http_client(_init_ok()),
         ),
         patch(
-            "coval_bench.providers.stt.gladia.ws_client.connect",
+            "coval_bench.providers.stt._streaming.ws_client.connect",
             return_value=_fake_ws_connect(events),
         ),
     ):
@@ -89,14 +89,14 @@ async def test_gladia_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -
 
 @pytest.mark.asyncio
 async def test_gladia_partials_only_falls_back_to_longest(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """With no final, the longest partial is salvaged as the transcript."""
     events: list[Any] = [
         {"type": "transcript", "data": {"is_final": False, "utterance": {"text": "hello"}}},
         {"type": "transcript", "data": {"is_final": False, "utterance": {"text": "hello world"}}},
     ]
-    provider = GladiaSTTProvider(api_key=fake_api_key)
+    provider = GladiaSTTProvider(stt_settings)
 
     with (
         patch(
@@ -104,7 +104,7 @@ async def test_gladia_partials_only_falls_back_to_longest(
             return_value=_fake_http_client(_init_ok()),
         ),
         patch(
-            "coval_bench.providers.stt.gladia.ws_client.connect",
+            "coval_bench.providers.stt._streaming.ws_client.connect",
             return_value=_fake_ws_connect(events),
         ),
     ):
@@ -141,7 +141,7 @@ def test_provider_model() -> None:
 
 def test_missing_api_key_raises() -> None:
     with pytest.raises(ValueError, match="gladia_api_key is required"):
-        GladiaSTTProvider(api_key=None)
+        GladiaSTTProvider(make_settings(gladia_api_key=None))
 
 
 # ---------------------------------------------------------------------------
@@ -150,8 +150,8 @@ def test_missing_api_key_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gladia_init_failure(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = GladiaSTTProvider(api_key=fake_api_key)
+async def test_gladia_init_failure(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = GladiaSTTProvider(stt_settings)
     response = httpx.Response(401, json={"message": "Invalid API key"})
 
     with patch(
@@ -178,9 +178,9 @@ async def test_gladia_init_failure(fake_api_key: SecretStr, audio_pcm_bytes: byt
 
 
 @pytest.mark.asyncio
-async def test_gladia_error_event(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_gladia_error_event(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("gladia", "events-error")
-    provider = GladiaSTTProvider(api_key=fake_api_key)
+    provider = GladiaSTTProvider(stt_settings)
 
     with (
         patch(
@@ -188,7 +188,7 @@ async def test_gladia_error_event(fake_api_key: SecretStr, audio_pcm_bytes: byte
             return_value=_fake_http_client(_init_ok()),
         ),
         patch(
-            "coval_bench.providers.stt.gladia.ws_client.connect",
+            "coval_bench.providers.stt._streaming.ws_client.connect",
             return_value=_fake_ws_connect(events),
         ),
     ):
@@ -206,7 +206,7 @@ async def test_gladia_error_event(fake_api_key: SecretStr, audio_pcm_bytes: byte
 
 @pytest.mark.asyncio
 async def test_gladia_cancels_sender_when_receiver_errors(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """A receiver error cancels the still-streaming sender instead of draining it."""
     sent: list[Any] = []
@@ -214,14 +214,14 @@ async def test_gladia_cancels_sender_when_receiver_errors(
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
-    provider = GladiaSTTProvider(api_key=fake_api_key)
+    provider = GladiaSTTProvider(stt_settings)
 
     with (
         patch(
             "coval_bench.providers.stt.gladia.httpx.AsyncClient",
             return_value=_fake_http_client(_init_ok()),
         ),
-        patch("coval_bench.providers.stt.gladia.ws_client.connect", return_value=cm),
+        patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes, channels=1, sample_width=2, sample_rate=16000
@@ -240,8 +240,8 @@ async def test_gladia_cancels_sender_when_receiver_errors(
 
 
 @pytest.mark.asyncio
-async def test_gladia_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = GladiaSTTProvider(api_key=fake_api_key)
+async def test_gladia_empty_stream(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = GladiaSTTProvider(stt_settings)
 
     with (
         patch(
@@ -249,7 +249,7 @@ async def test_gladia_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: byt
             return_value=_fake_http_client(_init_ok()),
         ),
         patch(
-            "coval_bench.providers.stt.gladia.ws_client.connect",
+            "coval_bench.providers.stt._streaming.ws_client.connect",
             return_value=_fake_ws_connect([]),
         ),
     ):

@@ -19,13 +19,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.soniox import SonioxSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events, make_settings
 
 
 def make_provider() -> SonioxSTTProvider:
-    return SonioxSTTProvider(api_key=SecretStr("test-key-soniox"))
+    return SonioxSTTProvider(make_settings(soniox_api_key=SecretStr("test-key-soniox")))
 
 
 def _fake_connect(events: list[Any]) -> Any:
@@ -42,12 +43,12 @@ def _fake_connect(events: list[Any]) -> Any:
 
 
 @pytest.mark.asyncio
-async def test_soniox_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_soniox_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("soniox", "events-success")
-    provider = SonioxSTTProvider(api_key=fake_api_key)
+    provider = SonioxSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.soniox.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect(events),
     ):
         result = await provider.measure_ttft(
@@ -77,7 +78,9 @@ async def test_soniox_authenticates_with_header(audio_pcm_bytes: bytes) -> None:
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("coval_bench.providers.stt.soniox.ws_client.connect", return_value=cm) as connect:
+    with patch(
+        "coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm
+    ) as connect:
         await make_provider().measure_ttft(
             audio_data=audio_pcm_bytes,
             channels=1,
@@ -96,7 +99,7 @@ async def test_soniox_authenticates_with_header(audio_pcm_bytes: bytes) -> None:
 
 @pytest.mark.asyncio
 async def test_soniox_excludes_interim_tokens(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """Only ``is_final`` tokens form the transcript; interim tokens are dropped.
 
@@ -109,10 +112,10 @@ async def test_soniox_excludes_interim_tokens(
         {"tokens": [{"text": " world", "is_final": True}]},
         {"finished": True},
     ]
-    provider = SonioxSTTProvider(api_key=fake_api_key)
+    provider = SonioxSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.soniox.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect(events),
     ):
         result = await provider.measure_ttft(
@@ -129,7 +132,7 @@ async def test_soniox_excludes_interim_tokens(
 
 
 @pytest.mark.asyncio
-async def test_soniox_keeps_space_tokens(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_soniox_keeps_space_tokens(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """A standalone " " token is a word boundary, not an empty token to skip."""
     events: list[Any] = [
         {"tokens": [{"text": "hello", "is_final": True}]},
@@ -137,10 +140,10 @@ async def test_soniox_keeps_space_tokens(fake_api_key: SecretStr, audio_pcm_byte
         {"tokens": [{"text": "world", "is_final": True}]},
         {"finished": True},
     ]
-    provider = SonioxSTTProvider(api_key=fake_api_key)
+    provider = SonioxSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.soniox.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect(events),
     ):
         result = await provider.measure_ttft(
@@ -171,7 +174,7 @@ def test_provider_model() -> None:
 
 
 def test_stt_rt_v4_still_supported() -> None:
-    assert SonioxSTTProvider(api_key=SecretStr("k"), model="stt-rt-v4").model == "stt-rt-v4"
+    assert SonioxSTTProvider(make_settings(), model="stt-rt-v4").model == "stt-rt-v4"
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +184,7 @@ def test_stt_rt_v4_still_supported() -> None:
 
 def test_missing_api_key_raises() -> None:
     with pytest.raises(ValueError, match="soniox_api_key is required"):
-        SonioxSTTProvider(api_key=None)
+        SonioxSTTProvider(make_settings(soniox_api_key=None))
 
 
 # ---------------------------------------------------------------------------
@@ -190,8 +193,8 @@ def test_missing_api_key_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_soniox_wrong_sample_rate(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = SonioxSTTProvider(api_key=fake_api_key)
+async def test_soniox_wrong_sample_rate(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = SonioxSTTProvider(stt_settings)
     result = await provider.measure_ttft(
         audio_data=audio_pcm_bytes,
         channels=1,
@@ -206,10 +209,10 @@ async def test_soniox_wrong_sample_rate(fake_api_key: SecretStr, audio_pcm_bytes
 
 @pytest.mark.asyncio
 async def test_soniox_rejects_non_mono_or_non_16bit(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """The config hardcodes mono 16-bit, so non-matching input is rejected upfront."""
-    provider = SonioxSTTProvider(api_key=fake_api_key)
+    provider = SonioxSTTProvider(stt_settings)
     result = await provider.measure_ttft(
         audio_data=audio_pcm_bytes,
         channels=2,
@@ -228,12 +231,12 @@ async def test_soniox_rejects_non_mono_or_non_16bit(
 
 
 @pytest.mark.asyncio
-async def test_soniox_error_event(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_soniox_error_event(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("soniox", "events-error")
-    provider = SonioxSTTProvider(api_key=fake_api_key)
+    provider = SonioxSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.soniox.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect(events),
     ):
         result = await provider.measure_ttft(
@@ -255,11 +258,11 @@ async def test_soniox_error_event(fake_api_key: SecretStr, audio_pcm_bytes: byte
 
 
 @pytest.mark.asyncio
-async def test_soniox_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = SonioxSTTProvider(api_key=fake_api_key)
+async def test_soniox_empty_stream(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = SonioxSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.soniox.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect([]),
     ):
         result = await provider.measure_ttft(
@@ -280,12 +283,12 @@ async def test_soniox_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: byt
 
 
 @pytest.mark.asyncio
-async def test_soniox_connection_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_soniox_connection_error(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """A connect failure surfaces as result.error, not a silent empty success."""
-    provider = SonioxSTTProvider(api_key=fake_api_key)
+    provider = SonioxSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.soniox.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         side_effect=OSError("connection refused"),
     ):
         result = await provider.measure_ttft(
@@ -303,9 +306,7 @@ async def test_soniox_connection_error(fake_api_key: SecretStr, audio_pcm_bytes:
 
 
 @pytest.mark.asyncio
-async def test_soniox_surfaces_send_failure(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
-) -> None:
+async def test_soniox_surfaces_send_failure(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """A send failure inside the streaming task is surfaced, not swallowed by gather."""
 
     def _raise_on_audio(msg: object) -> None:
@@ -317,8 +318,8 @@ async def test_soniox_surfaces_send_failure(
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
 
-    provider = SonioxSTTProvider(api_key=fake_api_key)
-    with patch("coval_bench.providers.stt.soniox.ws_client.connect", return_value=cm):
+    provider = SonioxSTTProvider(stt_settings)
+    with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
             channels=1,

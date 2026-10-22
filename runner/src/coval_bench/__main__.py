@@ -296,25 +296,8 @@ def stt_smoke(provider: str, model: str, wav: str) -> None:
         sys.exit(2)
 
     settings = get_settings()
-    kwargs: dict[str, Any] = {
-        "api_key": getattr(settings, f"{provider}_api_key", None),
-        "model": model,
-    }
-    if provider == "google":
-        kwargs["project_id"] = settings.google_project_id
-    elif provider == "baseten":
-        from coval_bench.providers.stt.baseten import endpoint_url
-
-        kwargs["ws_url"] = endpoint_url(settings, model)
-    elif provider == "guava":
-        kwargs["base_url"] = settings.guava_base_url
-        kwargs["domain"] = settings.guava_stt_domain
-    elif provider == "azure":
-        kwargs["region"] = settings.azure_region
-    elif provider == "cloudflare":
-        kwargs["account_id"] = settings.cloudflare_account_id
     try:
-        instance = provider_cls(**kwargs)
+        instance = provider_cls(settings, model)
     except ValueError as exc:
         click.echo(f"Provider configuration error: {exc}", err=True)
         sys.exit(2)

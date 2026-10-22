@@ -14,18 +14,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import time  # monotonic clock — wall-clock can step on NTP sync
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, cast
 
-import structlog
-import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
-
-from coval_bench.providers.base import STTProvider, TranscriptionResult
-from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-
-logger = structlog.get_logger(__name__)
+from coval_bench.config import Settings
+from coval_bench.providers.base import TranscriptionResult
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
+from coval_bench.providers.stt._transcript_utils import finalize_transcript, set_first_token
 
 _WS_BASE = "wss://api.mistral.ai/v1/audio/transcriptions/realtime"
 _DEFAULT_MODEL = "voxtral-mini-transcribe-realtime-2602"
@@ -36,207 +31,126 @@ _SUPPORTED_SAMPLE_RATES = frozenset({8000, 16000, 22050, 44100, 48000})
 _SESSION_CREATED_TIMEOUT_S = 10.0
 
 
-class MistralSTTProvider(STTProvider):
+@dataclass
+class _MistralTranscription(Transcription):
+    # Raw deltas, spaces included; their concatenation is the fallback transcript.
+    deltas: list[str] = field(default_factory=list)
+
+
+class MistralSTTProvider(WebSocketSTTProvider):
     """Mistral Voxtral realtime transcription provider."""
 
-    def __init__(self, api_key: SecretStr, model: str = _DEFAULT_MODEL) -> None:
-        self._api_key = api_key
-        self._model = model
+    def __init__(self, settings: Settings, model: str = _DEFAULT_MODEL) -> None:
+        super().__init__(settings, model)
+        self._api_key = self._require_secret("mistral_api_key")
 
     @property
     def name(self) -> str:
         return f"mistral-{self._model}"
 
-    @property
-    def model(self) -> str:
-        return self._model
+    def _new_transcription(self, result: TranscriptionResult) -> Transcription:
+        return _MistralTranscription(result)
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name)
-        if channels != 1:
-            result.error = f"Mistral realtime requires mono audio; got {channels} channels"
-            return result
-        if sample_width != 2:
-            result.error = (
-                f"Mistral realtime requires 16-bit PCM (pcm_s16le); got sample_width={sample_width}"
-            )
-            return result
+    def _ws_url(self, sample_rate: int) -> str:
+        # Checked here so an unsupported rate fails before any socket is opened.
         if sample_rate not in _SUPPORTED_SAMPLE_RATES:
-            result.error = (
+            raise ValueError(
                 f"Mistral realtime does not support {sample_rate} Hz; "
                 f"supported: {sorted(_SUPPORTED_SAMPLE_RATES)}"
             )
-            return result
-        if realtime_resolution <= 0:
-            result.error = "realtime_resolution must be > 0"
-            return result
+        return f"{_WS_BASE}?model={self._model}"
 
-        total_start = time.monotonic()
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
 
-        try:
-            url = f"{_WS_BASE}?model={self._model}"
-            headers = {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
-            async with ws_client.connect(url, additional_headers=headers) as ws:
-                await self._await_session_created(ws)
-                # The audio format is rejected once audio has started, so it is
-                # set before the first append. target_streaming_delay_ms is left
-                # at the server default so latency reflects out-of-box behaviour.
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "session.update",
-                            "session": {
-                                "audio_format": {
-                                    "encoding": "pcm_s16le",
-                                    "sample_rate": sample_rate,
-                                }
-                            },
-                        }
-                    )
-                )
-                await run_stream(
-                    result,
-                    self._send_audio(
-                        ws,
-                        audio_data,
-                        channels,
-                        sample_width,
-                        sample_rate,
-                        result,
-                        realtime_resolution,
-                    ),
-                    self._receive(ws, result),
-                )
-
-        except Exception as exc:
-            logger.warning(
-                "mistral_measure_ttft_failed",
-                provider="mistral",
-                model=self._model,
-                exc_info=exc,
+    async def _open(self, ws: Any, tx: Transcription, sample_rate: int) -> None:
+        await self._await_session_created(ws)
+        # The audio format is rejected once audio has started, so it is set
+        # before the first append. target_streaming_delay_ms is left at the
+        # server default so latency reflects out-of-box behaviour.
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "session.update",
+                    "session": {
+                        "audio_format": {"encoding": "pcm_s16le", "sample_rate": sample_rate}
+                    },
+                }
             )
-            result.error = str(exc)
-
-        result.total_time = time.monotonic() - total_start
-        return result
+        )
 
     async def _await_session_created(self, ws: Any) -> None:
-        deadline = time.monotonic() + _SESSION_CREATED_TIMEOUT_S
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError("Timed out waiting for session.created")
-            raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
-            if isinstance(raw, bytes):
-                continue
-            msg: dict[str, Any] = json.loads(raw)
-            msg_type = msg.get("type", "")
-            if msg_type == "session.created":
-                return
-            if msg_type == "error":
-                raise RuntimeError(self._error_message(msg))
-
-    async def _send_audio(
-        self,
-        ws: Any,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        result: TranscriptionResult,
-        realtime_resolution: float,
-    ) -> None:
-        byte_rate = sample_width * sample_rate * channels
-        chunk_size = int(byte_rate * realtime_resolution)
         try:
-            async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
-                result.audio_start_time = start
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "input_audio.append",
-                            "audio": base64.b64encode(chunk).decode("ascii"),
-                        }
-                    )
-                )
-            # Flush forces any buffered audio through the model, end signals
-            # end-of-stream; the server answers with transcription.done, which
-            # the receive loop treats as the final.
-            await ws.send(json.dumps({"type": "input_audio.flush"}))
-            await ws.send(json.dumps({"type": "input_audio.end"}))
-        except Exception as exc:
-            logger.warning(
-                "mistral_send_error", provider="mistral", model=self._model, exc_info=exc
+            async with asyncio.timeout(_SESSION_CREATED_TIMEOUT_S):
+                while True:
+                    try:
+                        raw = await ws.recv()
+                    except StopAsyncIteration:
+                        raise RuntimeError("Mistral stream closed before session.created") from None
+                    if isinstance(raw, bytes):
+                        continue
+                    msg: dict[str, Any] = json.loads(raw)
+                    msg_type = msg.get("type", "")
+                    if msg_type == "session.created":
+                        return
+                    if msg_type == "error":
+                        raise RuntimeError(self._error_message(msg))
+        except TimeoutError as exc:
+            raise TimeoutError("Timed out waiting for session.created") from exc
+
+    async def _send_chunk(self, ws: Any, chunk: bytes) -> None:
+        await ws.send(
+            json.dumps(
+                {"type": "input_audio.append", "audio": base64.b64encode(chunk).decode("ascii")}
             )
-            raise
+        )
 
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
-        delta_texts: list[str] = []
-        final_time: float | None = None
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        # Flush forces any buffered audio through the model, end signals
+        # end-of-stream; the server answers with transcription.done.
+        await ws.send(json.dumps({"type": "input_audio.flush"}))
+        await ws.send(json.dumps({"type": "input_audio.end"}))
 
-        try:
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    continue
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        tx = cast(_MistralTranscription, tx)
+        msg_type: str = msg.get("type", "")
 
-                msg: dict[str, Any] = json.loads(raw)
-                now = time.monotonic()
-                msg_type: str = msg.get("type", "")
+        if msg_type == "transcription.text.delta":
+            text = str(msg.get("text", ""))
+            if text:
+                # A standalone " " delta is a word separator and must reach the
+                # joined fallback transcript; it never stamps TTFT or a partial.
+                tx.deltas.append(text)
+            if text.strip():
+                set_first_token(tx.result, text, now=now)
+                tx.result.partial_transcripts.append(text)
+            return False
 
-                if msg_type == "transcription.text.delta":
-                    text = str(msg.get("text", ""))
-                    if text:
-                        # A standalone " " delta is a word separator and must reach the
-                        # joined fallback transcript; it never stamps TTFT or a partial.
-                        delta_texts.append(text)
-                    if text.strip():
-                        if result.ttft_seconds is None and result.audio_start_time is not None:
-                            result.ttft_seconds = now - result.audio_start_time
-                            stripped = text.strip()
-                            result.first_token_content = (
-                                stripped[:30] + "..." if len(stripped) > 30 else stripped
-                            )
-                        result.partial_transcripts.append(text)
-                elif msg_type == "transcription.done":
-                    text = str(msg.get("text", "")).strip()
-                    result.complete_transcript = text or None
-                    # A done with no text after a delta-less session is a dead
-                    # stream, not a final — no audio_to_final from it.
-                    if text or delta_texts:
-                        final_time = now
-                    else:
-                        result.error = "Mistral session produced an empty transcript"
-                    break
-                elif msg_type == "error":
-                    result.error = self._error_message(msg)
-                    break
+        if msg_type == "transcription.done":
+            text = str(msg.get("text", "")).strip()
+            # A done with no text after a delta-less session is a dead stream,
+            # not a final.
+            if text or tx.deltas:
+                tx.final(text, now)
+            else:
+                tx.fail("Mistral session produced an empty transcript")
+            return True
 
-        except Exception as exc:
-            logger.warning(
-                "mistral_receive_error",
-                provider="mistral",
-                model=self._model,
-                exc_info=exc,
-            )
-            if result.error is None and final_time is None:
-                result.error = str(exc)
+        if msg_type == "error":
+            tx.fail(self._error_message(msg))
+            self._log.warning("mistral_stt_error", msg=msg)
+            return True
 
-        if final_time is not None and result.audio_start_time is not None:
-            result.audio_to_final_seconds = final_time - result.audio_start_time
+        return False
 
-        if result.complete_transcript is None and delta_texts:
-            result.complete_transcript = "".join(delta_texts).strip() or None
-
-        if result.complete_transcript:
-            result.transcript_length = len(result.complete_transcript)
-            result.word_count = len(result.complete_transcript.split())
+    def _finish(self, tx: Transcription) -> None:
+        tx = cast(_MistralTranscription, tx)
+        finalize_transcript(
+            tx.result,
+            final_segments=tx.finals or ["".join(tx.deltas)],
+            partial_fallback="none",
+            join="",
+        )
 
     def _error_message(self, msg: dict[str, Any]) -> str:
         detail = msg.get("error")

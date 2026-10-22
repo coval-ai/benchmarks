@@ -19,21 +19,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.inworld import InworldSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import (
+    FakeWebSocket,
+    fake_connect,
+    load_fixture_events,
+    make_settings,
+)
 
 
 def make_provider() -> InworldSTTProvider:
-    return InworldSTTProvider(api_key=SecretStr("test-key-inworld"))
-
-
-def _fake_connect(events: list[Any]) -> Any:
-    ws = FakeWebSocket(events, server_closes=False)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
+    return InworldSTTProvider(make_settings())
 
 
 # ---------------------------------------------------------------------------
@@ -42,13 +40,13 @@ def _fake_connect(events: list[Any]) -> Any:
 
 
 @pytest.mark.asyncio
-async def test_inworld_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_inworld_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("inworld", "events-success")
-    provider = InworldSTTProvider(api_key=fake_api_key)
+    provider = InworldSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.inworld.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -71,17 +69,14 @@ async def test_inworld_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) 
 
 @pytest.mark.asyncio
 async def test_inworld_ends_stream_with_close_only(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """Only closeStream follows the audio; endTurn makes Inworld emit a phantom final."""
     events = load_fixture_events("inworld", "events-success")
-    ws = FakeWebSocket(events, server_closes=False)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    provider = InworldSTTProvider(api_key=fake_api_key)
+    cm = fake_connect(events, server_closes=False)
+    provider = InworldSTTProvider(stt_settings)
 
-    with patch("coval_bench.providers.stt.inworld.ws_client.connect", return_value=cm):
+    with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
             channels=1,
@@ -91,13 +86,13 @@ async def test_inworld_ends_stream_with_close_only(
         )
 
     assert result.error is None
-    control = [json.loads(m) for m in ws._sent if "audioChunk" not in m][1:]
+    control = [json.loads(m) for m in cm.ws._sent if "audioChunk" not in m][1:]
     assert control == [{"closeStream": {}}]
 
 
 @pytest.mark.asyncio
 async def test_inworld_excludes_interim_segments(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """Only ``isFinal`` segments form the transcript; interim ones are dropped.
 
@@ -110,11 +105,11 @@ async def test_inworld_excludes_interim_segments(
         {"result": {"transcription": {"transcript": "worng", "isFinal": False}}},
         {"result": {"transcription": {"transcript": "world", "isFinal": True}}},
     ]
-    provider = InworldSTTProvider(api_key=fake_api_key)
+    provider = InworldSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.inworld.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -131,7 +126,7 @@ async def test_inworld_excludes_interim_segments(
 
 @pytest.mark.asyncio
 async def test_inworld_completes_when_server_keeps_stream_open(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     events: list[Any] = [
         {"result": {"transcription": {"transcript": "hello world", "isFinal": False}}},
@@ -139,11 +134,11 @@ async def test_inworld_completes_when_server_keeps_stream_open(
         {"result": {"transcription": {"transcript": "how are you", "isFinal": True}}},
         {"usage": {"durationSeconds": 3}},
     ]
-    provider = InworldSTTProvider(api_key=fake_api_key)
+    provider = InworldSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.inworld.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -160,15 +155,12 @@ async def test_inworld_completes_when_server_keeps_stream_open(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("resolution", [0.005, 2.0])
-async def test_inworld_clamps_chunk_duration(fake_api_key: SecretStr, resolution: float) -> None:
+async def test_inworld_clamps_chunk_duration(stt_settings: Settings, resolution: float) -> None:
     audio = b"\x00" * 64000
-    ws = FakeWebSocket([], server_closes=False)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect([], server_closes=False)
 
-    provider = InworldSTTProvider(api_key=fake_api_key)
-    with patch("coval_bench.providers.stt.inworld.ws_client.connect", return_value=cm):
+    provider = InworldSTTProvider(stt_settings)
+    with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
         await provider.measure_ttft(
             audio_data=audio,
             channels=1,
@@ -179,7 +171,7 @@ async def test_inworld_clamps_chunk_duration(fake_api_key: SecretStr, resolution
 
     chunk_byte_lengths = [
         len(base64.b64decode(json.loads(msg)["audioChunk"]["content"]))
-        for msg in ws._sent
+        for msg in cm.ws._sent
         if isinstance(msg, str) and "audioChunk" in msg
     ]
     assert sum(chunk_byte_lengths) == len(audio)
@@ -188,15 +180,12 @@ async def test_inworld_clamps_chunk_duration(fake_api_key: SecretStr, resolution
 
 
 @pytest.mark.asyncio
-async def test_inworld_rebalances_sub_20ms_tail_chunk(fake_api_key: SecretStr) -> None:
+async def test_inworld_rebalances_sub_20ms_tail_chunk(stt_settings: Settings) -> None:
     audio = b"\x00" * (16000 * 2 + 320)  # two 16000 B chunks + a 320 B (10 ms) tail
-    ws = FakeWebSocket([], server_closes=False)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect([], server_closes=False)
 
-    provider = InworldSTTProvider(api_key=fake_api_key)
-    with patch("coval_bench.providers.stt.inworld.ws_client.connect", return_value=cm):
+    provider = InworldSTTProvider(stt_settings)
+    with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
         await provider.measure_ttft(
             audio_data=audio,
             channels=1,
@@ -207,7 +196,7 @@ async def test_inworld_rebalances_sub_20ms_tail_chunk(fake_api_key: SecretStr) -
 
     chunk_byte_lengths = [
         len(base64.b64decode(json.loads(msg)["audioChunk"]["content"]))
-        for msg in ws._sent
+        for msg in cm.ws._sent
         if isinstance(msg, str) and "audioChunk" in msg
     ]
     assert chunk_byte_lengths == [16000, 8160, 8160]
@@ -234,12 +223,12 @@ def test_provider_model() -> None:
 
 def test_missing_api_key_raises() -> None:
     with pytest.raises(ValueError, match="inworld_api_key is required"):
-        InworldSTTProvider(api_key=None)
+        InworldSTTProvider(make_settings(inworld_api_key=None))
 
 
 def test_blank_api_key_raises() -> None:
     with pytest.raises(ValueError, match="inworld_api_key is required"):
-        InworldSTTProvider(api_key=SecretStr("   "))
+        InworldSTTProvider(make_settings(inworld_api_key=SecretStr("   ")))
 
 
 # ---------------------------------------------------------------------------
@@ -248,8 +237,8 @@ def test_blank_api_key_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_inworld_wrong_sample_rate(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = InworldSTTProvider(api_key=fake_api_key)
+async def test_inworld_wrong_sample_rate(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = InworldSTTProvider(stt_settings)
     result = await provider.measure_ttft(
         audio_data=audio_pcm_bytes,
         channels=1,
@@ -264,10 +253,10 @@ async def test_inworld_wrong_sample_rate(fake_api_key: SecretStr, audio_pcm_byte
 
 @pytest.mark.asyncio
 async def test_inworld_rejects_non_mono_or_non_16bit(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """The config hardcodes mono 16-bit, so non-matching input is rejected upfront."""
-    provider = InworldSTTProvider(api_key=fake_api_key)
+    provider = InworldSTTProvider(stt_settings)
     result = await provider.measure_ttft(
         audio_data=audio_pcm_bytes,
         channels=2,
@@ -286,13 +275,13 @@ async def test_inworld_rejects_non_mono_or_non_16bit(
 
 
 @pytest.mark.asyncio
-async def test_inworld_error_event(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_inworld_error_event(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("inworld", "events-error")
-    provider = InworldSTTProvider(api_key=fake_api_key)
+    provider = InworldSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.inworld.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -313,13 +302,13 @@ async def test_inworld_error_event(fake_api_key: SecretStr, audio_pcm_bytes: byt
 
 
 @pytest.mark.asyncio
-async def test_inworld_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_inworld_empty_stream(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """A stream that never yields a final transcription is a failure, not an empty success."""
-    provider = InworldSTTProvider(api_key=fake_api_key)
+    provider = InworldSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.inworld.ws_client.connect",
-        return_value=_fake_connect([]),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect([]),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -341,12 +330,12 @@ async def test_inworld_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: by
 
 
 @pytest.mark.asyncio
-async def test_inworld_connection_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_inworld_connection_error(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """A connect failure surfaces as result.error, not a silent empty success."""
-    provider = InworldSTTProvider(api_key=fake_api_key)
+    provider = InworldSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.inworld.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         side_effect=OSError("connection refused"),
     ):
         result = await provider.measure_ttft(
@@ -365,7 +354,7 @@ async def test_inworld_connection_error(fake_api_key: SecretStr, audio_pcm_bytes
 
 @pytest.mark.asyncio
 async def test_inworld_surfaces_send_failure(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """A send failure inside the streaming task is surfaced, not swallowed by gather."""
 
@@ -378,8 +367,8 @@ async def test_inworld_surfaces_send_failure(
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
 
-    provider = InworldSTTProvider(api_key=fake_api_key)
-    with patch("coval_bench.providers.stt.inworld.ws_client.connect", return_value=cm):
+    provider = InworldSTTProvider(stt_settings)
+    with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
             channels=1,

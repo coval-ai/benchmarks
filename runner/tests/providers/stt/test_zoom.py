@@ -12,28 +12,17 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import jwt
 import pytest
 from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.providers.stt.zoom import ZoomSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket
+from tests.providers.stt.conftest import fake_connect, make_settings
 
 _TEST_SECRET = "test-secret-zoom-0000000000000000"  # noqa: S105 - not a real credential
-
-
-def make_provider(api_key: SecretStr) -> ZoomSTTProvider:
-    return ZoomSTTProvider(api_key=api_key, api_secret=SecretStr(_TEST_SECRET))
-
-
-def _fake_connect(events: list[Any], sent: list[Any] | None = None) -> Any:
-    ws = FakeWebSocket(events, on_send=sent.append if sent is not None else None)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
 
 
 _SUCCESS_EVENTS: list[Any] = [
@@ -58,13 +47,13 @@ _SUCCESS_EVENTS: list[Any] = [
 
 
 @pytest.mark.asyncio
-async def test_zoom_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_zoom_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     sent: list[Any] = []
-    provider = make_provider(fake_api_key)
+    provider = ZoomSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.zoom.ws_client.connect",
-        return_value=_fake_connect(_SUCCESS_EVENTS, sent),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(_SUCCESS_EVENTS, sent),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -88,7 +77,7 @@ async def test_zoom_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> 
 
 
 @pytest.mark.asyncio
-async def test_zoom_ignores_delta_events(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_zoom_ignores_delta_events(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """Deltas never arrive under the working config; if one does, it must not
     count as a first token — a set TTFT would mask a missing-final failure."""
     events: list[Any] = [
@@ -96,11 +85,11 @@ async def test_zoom_ignores_delta_events(fake_api_key: SecretStr, audio_pcm_byte
         {"type": "transcription.completed", "transcript": "hello world"},
         {"type": "session.closed"},
     ]
-    provider = make_provider(fake_api_key)
+    provider = ZoomSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.zoom.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -118,18 +107,18 @@ async def test_zoom_ignores_delta_events(fake_api_key: SecretStr, audio_pcm_byte
 
 @pytest.mark.asyncio
 async def test_zoom_non_fatal_error_does_not_end_the_run(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     events: list[Any] = [
         {"type": "error", "error": {"code": "some_hint", "message": "heads up", "fatal": False}},
         {"type": "transcription.completed", "transcript": "hello world"},
         {"type": "session.closed"},
     ]
-    provider = make_provider(fake_api_key)
+    provider = ZoomSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.zoom.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -145,19 +134,19 @@ async def test_zoom_non_fatal_error_does_not_end_the_run(
 
 @pytest.mark.asyncio
 async def test_zoom_fatal_error_stops_the_send(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
-    """A fatal error closes the socket, so the sender stops instead of pacing
+    """A fatal error aborts the stream, so the sender stops instead of pacing
     out the rest of the clip; the fatal message survives the send failure."""
     sent: list[Any] = []
     events: list[Any] = [
         {"type": "error", "error": {"code": "unauthorized", "message": "bad token", "fatal": True}}
     ]
-    provider = make_provider(fake_api_key)
+    provider = ZoomSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.zoom.ws_client.connect",
-        return_value=_fake_connect(events, sent),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events, sent),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -172,16 +161,16 @@ async def test_zoom_fatal_error_stops_the_send(
     assert json.dumps({"type": "session.close"}) not in sent
 
 
-def test_zoom_requires_both_credentials(fake_api_key: SecretStr) -> None:
-    with pytest.raises(ValueError, match="zoom_api_key"):
-        ZoomSTTProvider(api_key=None, api_secret=SecretStr("s"))
-    with pytest.raises(ValueError, match="zoom_api_secret"):
-        ZoomSTTProvider(api_key=fake_api_key, api_secret=None)
+def test_zoom_requires_both_credentials() -> None:
+    with pytest.raises(ValueError, match="zoom_api_key is required"):
+        ZoomSTTProvider(make_settings(zoom_api_key=None))
+    with pytest.raises(ValueError, match="zoom_api_secret is required"):
+        ZoomSTTProvider(make_settings(zoom_api_secret=None))
 
 
 @pytest.mark.asyncio
-async def test_zoom_rejects_non_16k_mono_pcm16(fake_api_key: SecretStr) -> None:
-    provider = make_provider(fake_api_key)
+async def test_zoom_rejects_non_16k_mono_pcm16(stt_settings: Settings) -> None:
+    provider = ZoomSTTProvider(stt_settings)
 
     result = await provider.measure_ttft(
         audio_data=b"\x00\x00", channels=1, sample_width=2, sample_rate=8000
@@ -194,13 +183,15 @@ async def test_zoom_rejects_non_16k_mono_pcm16(fake_api_key: SecretStr) -> None:
     assert result.error is not None and "mono" in result.error
 
 
-def test_zoom_jwt_claims(fake_api_key: SecretStr) -> None:
-    provider = make_provider(fake_api_key)
+def test_zoom_jwt_claims() -> None:
+    settings = make_settings(zoom_api_secret=SecretStr(_TEST_SECRET))
+    provider = ZoomSTTProvider(settings)
+    assert settings.zoom_api_key is not None
 
     claims = jwt.decode(
         provider._auth_token(),
         _TEST_SECRET,
         algorithms=["HS256"],
-        issuer=fake_api_key.get_secret_value(),
+        issuer=settings.zoom_api_key.get_secret_value(),
     )
     assert claims["exp"] - claims["iat"] == 7200

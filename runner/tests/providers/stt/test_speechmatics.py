@@ -8,26 +8,17 @@ All tests use FakeWebSocket — no live network calls are made.
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.providers.stt.speechmatics import SpeechmaticsProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
 
 
 def make_provider(model: str = "default") -> SpeechmaticsProvider:
-    return SpeechmaticsProvider(api_key=SecretStr("test-key-speechmatics"), model=model)
-
-
-def _fake_connect(events: list[Any]) -> Any:
-    ws = FakeWebSocket(events)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
+    return SpeechmaticsProvider(make_settings(), model=model)
 
 
 # ---------------------------------------------------------------------------
@@ -36,13 +27,13 @@ def _fake_connect(events: list[Any]) -> Any:
 
 
 @pytest.mark.asyncio
-async def test_speechmatics_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_speechmatics_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("speechmatics", "events-success")
-    provider = SpeechmaticsProvider(api_key=fake_api_key)
+    provider = SpeechmaticsProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.speechmatics.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -66,13 +57,13 @@ async def test_speechmatics_success(fake_api_key: SecretStr, audio_pcm_bytes: by
 
 
 @pytest.mark.asyncio
-async def test_speechmatics_enhanced(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_speechmatics_enhanced(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("speechmatics", "events-success")
-    provider = SpeechmaticsProvider(api_key=fake_api_key, model="enhanced")
+    provider = SpeechmaticsProvider(stt_settings, model="enhanced")
 
     with patch(
-        "coval_bench.providers.stt.speechmatics.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -92,13 +83,13 @@ async def test_speechmatics_enhanced(fake_api_key: SecretStr, audio_pcm_bytes: b
 
 
 @pytest.mark.asyncio
-async def test_speechmatics_linden_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_speechmatics_linden_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("speechmatics", "events-agent-success")
-    provider = SpeechmaticsProvider(api_key=fake_api_key, model="linden-1")
+    provider = SpeechmaticsProvider(stt_settings, model="linden-1")
 
     with patch(
-        "coval_bench.providers.stt.speechmatics.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -229,17 +220,17 @@ def test_provider_name_linden() -> None:
 
 
 @pytest.mark.asyncio
-async def test_speechmatics_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_speechmatics_empty_stream(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     # Provide RecognitionStarted so the handshake completes, then nothing
     events = [
         {"message": "RecognitionStarted", "id": "x"},
         {"message": "EndOfTranscript"},
     ]
-    provider = SpeechmaticsProvider(api_key=fake_api_key)
+    provider = SpeechmaticsProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.speechmatics.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -259,16 +250,16 @@ async def test_speechmatics_empty_stream(fake_api_key: SecretStr, audio_pcm_byte
 
 
 @pytest.mark.asyncio
-async def test_speechmatics_error_event(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_speechmatics_error_event(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = [
         {"message": "RecognitionStarted", "id": "x"},
         {"message": "Error", "reason": "Authentication failed"},
     ]
-    provider = SpeechmaticsProvider(api_key=fake_api_key)
+    provider = SpeechmaticsProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.speechmatics.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,

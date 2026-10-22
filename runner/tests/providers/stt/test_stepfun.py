@@ -14,27 +14,18 @@ from __future__ import annotations
 import base64
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.providers.stt.stepfun import StepfunSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
 
-_CONNECT = "coval_bench.providers.stt.stepfun.ws_client.connect"
+_CONNECT = "coval_bench.providers.stt._streaming.ws_client.connect"
 _MODEL = "stt-model-under-test"
 _UPDATED = {"type": "session.updated", "session": {}}
-
-
-def _fake_connect(events: list[Any], *, captured: dict[str, Any] | None = None) -> Any:
-    ws = FakeWebSocket(events)
-    if captured is not None:
-        captured["ws"] = ws
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
 
 
 async def _measure(provider: StepfunSTTProvider, audio: bytes, **overrides: Any) -> Any:
@@ -50,17 +41,18 @@ async def _measure(provider: StepfunSTTProvider, audio: bytes, **overrides: Any)
 
 
 @pytest.mark.asyncio
-async def test_stepfun_success_and_wire_shape(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
-) -> None:
-    provider = StepfunSTTProvider(api_key=fake_api_key, model=_MODEL)
+async def test_stepfun_success_and_wire_shape(audio_pcm_bytes: bytes) -> None:
+    provider = StepfunSTTProvider(
+        make_settings(stepfun_api_key=SecretStr("test-key-stepfun")), model=_MODEL
+    )
     captured: dict[str, Any] = {}
 
     def connect_side_effect(
         url: str, additional_headers: dict[str, str] | None = None, **_: Any
     ) -> Any:
-        captured.update(url=url, headers=dict(additional_headers or {}))
-        return _fake_connect(load_fixture_events("stepfun"), captured=captured)
+        cm = fake_connect(load_fixture_events("stepfun"))
+        captured.update(url=url, headers=dict(additional_headers or {}), ws=cm.ws)
+        return cm
 
     with patch(_CONNECT, side_effect=connect_side_effect):
         result = await _measure(provider, audio_pcm_bytes)
@@ -75,7 +67,7 @@ async def test_stepfun_success_and_wire_shape(
     assert "hello world how" in result.partial_transcripts
 
     assert captured["url"] == "wss://api.stepfun.ai/v1/realtime/asr/stream"
-    assert captured["headers"] == {"Authorization": f"Bearer {fake_api_key.get_secret_value()}"}
+    assert captured["headers"] == {"Authorization": "Bearer test-key-stepfun"}
 
     sent = [json.loads(m) for m in captured["ws"]._sent if isinstance(m, str)]
     assert all(m["event_id"] for m in sent)
@@ -104,11 +96,11 @@ async def test_stepfun_success_and_wire_shape(
     ids=["error-event", "setup-error"],
 )
 async def test_stepfun_failures_surface_as_result_error(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes, events: list[Any], expected: str
+    stt_settings: Settings, audio_pcm_bytes: bytes, events: list[Any], expected: str
 ) -> None:
-    provider = StepfunSTTProvider(api_key=fake_api_key, model=_MODEL)
+    provider = StepfunSTTProvider(stt_settings, model=_MODEL)
 
-    with patch(_CONNECT, return_value=_fake_connect(events)):
+    with patch(_CONNECT, return_value=fake_connect(events)):
         result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is not None
@@ -119,13 +111,13 @@ async def test_stepfun_failures_surface_as_result_error(
 
 @pytest.mark.asyncio
 async def test_stepfun_session_ready_timeout(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
-    provider = StepfunSTTProvider(api_key=fake_api_key, model=_MODEL)
+    provider = StepfunSTTProvider(stt_settings, model=_MODEL)
 
     with (
         patch("coval_bench.providers.stt.stepfun._READY_TIMEOUT_S", 0.05),
-        patch(_CONNECT, return_value=_fake_connect([])),
+        patch(_CONNECT, return_value=fake_connect([])),
     ):
         result = await _measure(provider, audio_pcm_bytes)
 
@@ -135,7 +127,7 @@ async def test_stepfun_session_ready_timeout(
 
 @pytest.mark.asyncio
 async def test_stepfun_closed_without_completed_keeps_longest_partial(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     delta = "conversation.item.input_audio_transcription.delta"
     events = [
@@ -143,9 +135,9 @@ async def test_stepfun_closed_without_completed_keeps_longest_partial(
         {"type": delta, "item_id": "item_001", "text": "", "stash": "hello"},
         {"type": delta, "item_id": "item_001", "text": "hello ", "stash": "world"},
     ]
-    provider = StepfunSTTProvider(api_key=fake_api_key, model=_MODEL)
+    provider = StepfunSTTProvider(stt_settings, model=_MODEL)
 
-    with patch(_CONNECT, return_value=_fake_connect(events)):
+    with patch(_CONNECT, return_value=fake_connect(events)):
         result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error == "ws_closed_without_completed"
@@ -154,9 +146,9 @@ async def test_stepfun_closed_without_completed_keeps_longest_partial(
 
 @pytest.mark.asyncio
 async def test_stepfun_rejects_wrong_audio_format(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
-    provider = StepfunSTTProvider(api_key=fake_api_key, model=_MODEL)
+    provider = StepfunSTTProvider(stt_settings, model=_MODEL)
 
     wrong_rate = await _measure(provider, audio_pcm_bytes, sample_rate=8000)
     assert wrong_rate.error is not None
@@ -168,7 +160,7 @@ async def test_stepfun_rejects_wrong_audio_format(
 
 
 def test_stepfun_construction_guards() -> None:
-    provider = StepfunSTTProvider(api_key=SecretStr("k"), model=_MODEL)
+    provider = StepfunSTTProvider(make_settings(), model=_MODEL)
     assert (provider.name, provider.model) == ("stepfun", _MODEL)
     with pytest.raises(ValueError, match="stepfun_api_key is required"):
-        StepfunSTTProvider(api_key=None, model=_MODEL)
+        StepfunSTTProvider(make_settings(stepfun_api_key=None), model=_MODEL)

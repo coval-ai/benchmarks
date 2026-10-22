@@ -11,23 +11,13 @@ Close: {"type": "Terminate"}
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
 import re
-import time  # monotonic clock — wall-clock can step on NTP sync
 from typing import Any
 from urllib.parse import urlencode
 
-import structlog
-import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
-
-from coval_bench.providers.base import STTProvider, TranscriptionResult
-from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-
-logger = structlog.get_logger(__name__)
+from coval_bench.config import Settings
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 # Maps user-facing model names to the speech_model value required by the API.
 # format_turns is omitted (default=false) — the formatting pass adds latency that
@@ -49,7 +39,6 @@ _END_OF_TURN_CONFIDENCE_THRESHOLD = 1.0
 # After ForceEndpoint, wait this long for the forced final before sending Terminate,
 # so the close never races the final (the WS close-gate bug class). Falls through on
 # timeout — the outer per-item timeout still bounds the run.
-_FINAL_WAIT_S = 5.0
 
 # Vendor-recommended voice-agent configuration for Pro models, applied on top of
 # the base connection params. mode=min_latency is the documented accuracy/latency
@@ -67,161 +56,55 @@ def _speech_model(model: str) -> str:
     return _SPEECH_MODEL_MAP.get(model) or model.replace(".", "-")
 
 
-class AssemblyAIProvider(STTProvider):
+class AssemblyAIProvider(WebSocketSTTProvider):
     """AssemblyAI v3 streaming STT provider."""
+
+    _SAMPLE_RATE = 16000
 
     def _model_supported(self, model: str) -> bool:
         return model in _SPEECH_MODEL_MAP or _is_pro(model)
 
-    def __init__(self, api_key: SecretStr, model: str = "universal-streaming") -> None:
+    def __init__(self, settings: Settings, model: str = "universal-streaming") -> None:
         if not self._model_supported(model):
             raise ValueError(
                 f"Invalid AssemblyAI model {model!r}. "
                 f"Valid: {sorted(_SPEECH_MODEL_MAP)} or universal-N.M-pro"
             )
-        self._api_key = api_key
-        self._model = model
+        super().__init__(settings, model)
+        self._api_key = self._require_secret("assemblyai_api_key")
 
     @property
     def name(self) -> str:
         return f"assemblyai-{self._model}"
 
-    @property
-    def model(self) -> str:
-        return self._model
+    def _ws_url(self, sample_rate: int) -> str:
+        url = f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={_speech_model(self._model)}"
+        if _is_pro(self._model):
+            url += f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
+            url += "&" + urlencode(_PRO_EXTRA_PARAMS)
+        return url
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name)
-        if sample_rate != 16000:
-            result.error = f"AssemblyAI requires 16 kHz PCM input; got {sample_rate} Hz"
-            return result
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": self._api_key.get_secret_value()}
 
-        total_start = time.monotonic()
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        if _is_pro(self._model):
+            await self._send_and_wait(ws, json.dumps({"type": "ForceEndpoint"}), tx)
+        await ws.send(json.dumps({"type": "Terminate"}))
 
-        try:
-            url = f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={_speech_model(self._model)}"
-            if _is_pro(self._model):
-                url += f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
-                url += "&" + urlencode(_PRO_EXTRA_PARAMS)
-            headers = {"Authorization": self._api_key.get_secret_value()}
-            final_event = asyncio.Event()
-            async with ws_client.connect(url, additional_headers=headers) as ws:
-                await run_stream(
-                    result,
-                    self._send_audio(
-                        ws,
-                        audio_data,
-                        channels,
-                        sample_width,
-                        sample_rate,
-                        result,
-                        realtime_resolution,
-                        final_event,
-                    ),
-                    self._receive(ws, result, final_event),
-                )
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        msg_type: str = msg.get("type", "")
+        if msg_type in ("Begin", "Termination"):
+            return False
 
-        except Exception as exc:
-            logger.warning(
-                "assemblyai_measure_ttft_failed",
-                provider="assemblyai",
-                model=self._model,
-                exc_info=exc,
-            )
-            result.error = str(exc)
-
-        result.total_time = time.monotonic() - total_start
-        return result
-
-    async def _send_audio(
-        self,
-        ws: Any,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        result: TranscriptionResult,
-        realtime_resolution: float,
-        final_event: asyncio.Event,
-    ) -> None:
-        byte_rate = sample_width * sample_rate * channels
-        chunk_size = int(byte_rate * realtime_resolution)
-        try:
-            async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
-                result.audio_start_time = start
-                await ws.send(chunk)
-            if _is_pro(self._model):
-                final_event.clear()
-                await ws.send(json.dumps({"type": "ForceEndpoint"}))
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
-            await ws.send(json.dumps({"type": "Terminate"}))
-        except Exception as exc:
-            logger.warning(
-                "assemblyai_send_error", provider="assemblyai", model=self._model, exc_info=exc
-            )
-            raise
-
-    async def _receive(
-        self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
-    ) -> None:
-        complete_turns: list[str] = []
-        last_final_time: float | None = None
-
-        try:
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    continue
-
-                msg: dict[str, Any] = json.loads(raw)
-                now = time.monotonic()
-                msg_type: str = msg.get("type", "")
-
-                if msg_type in ("Begin", "Termination"):
-                    continue
-
-                transcript = self._extract_transcript(msg)
-                if transcript:
-                    # TTFT fires on the first Turn regardless of end_of_turn. We want
-                    # time-to-first-word, not time-to-first-completed-sentence.
-                    if result.ttft_seconds is None and result.audio_start_time is not None:
-                        result.ttft_seconds = now - result.audio_start_time
-                        result.first_token_content = (
-                            transcript[:30] + "..." if len(transcript) > 30 else transcript
-                        )
-                    result.partial_transcripts.append(transcript)
-
-                if msg_type == "Turn" and msg.get("end_of_turn") and transcript:
-                    complete_turns.append(transcript)
-                    last_final_time = now
-                    final_event.set()
-
-        except Exception as exc:
-            logger.warning(
-                "assemblyai_receive_error",
-                provider="assemblyai",
-                model=self._model,
-                exc_info=exc,
-            )
-            if result.error is None and last_final_time is None:
-                result.error = str(exc)
-
-        if last_final_time is not None and result.audio_start_time is not None:
-            result.audio_to_final_seconds = last_final_time - result.audio_start_time
-
-        if complete_turns:
-            result.complete_transcript = " ".join(complete_turns).strip() or None
-
-        if result.complete_transcript:
-            result.transcript_length = len(result.complete_transcript)
-            result.word_count = len(result.complete_transcript.split())
+        transcript = self._extract_transcript(msg)
+        if transcript:
+            # TTFT fires on the first Turn regardless of end_of_turn: time-to-first-word,
+            # not time-to-first-completed-sentence.
+            tx.partial(transcript, now)
+        if msg_type == "Turn" and msg.get("end_of_turn") and transcript:
+            tx.final(transcript, now)
+        return False
 
     def _extract_transcript(self, msg: dict[str, Any]) -> str:
         if msg.get("type") != "Turn":

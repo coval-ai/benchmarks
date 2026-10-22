@@ -12,16 +12,18 @@ import json
 import wave
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from click.testing import CliRunner
 from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.base import TranscriptionResult
+from coval_bench.providers.stt._streaming import Transcription
 from coval_bench.providers.stt.guava import GuavaSTTProvider, ws_url_from_base
-from tests.providers.stt.conftest import FakeWebSocket
+from tests.providers.stt.conftest import fake_connect, make_settings
 
 _BASE_URL = "https://guava.example.internal"
 
@@ -33,32 +35,24 @@ _SMALL_PCM = b"\x01\x02" * 1100
 _DOMAIN = "test-domain"
 
 
-def make_provider(api_key: SecretStr | None = None) -> GuavaSTTProvider:
-    return GuavaSTTProvider(
-        api_key=api_key or SecretStr("test-key"), base_url=_BASE_URL, domain=_DOMAIN
-    )
-
-
-def _fake_connect(events: list[Any], sent: list[Any] | None = None) -> Any:
-    ws = FakeWebSocket(events, on_send=None if sent is None else sent.append)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
+def make_provider(**overrides: Any) -> GuavaSTTProvider:
+    values: dict[str, Any] = {"guava_base_url": _BASE_URL, "guava_stt_domain": _DOMAIN}
+    values.update(overrides)
+    return GuavaSTTProvider(make_settings(**values))
 
 
 @pytest.mark.asyncio
-async def test_guava_success(fake_api_key: SecretStr) -> None:
+async def test_guava_success() -> None:
     events: list[Any] = [
         {"type": "asr_partial", "transcript": "hello", "ts_ms": 100},
         {"type": "asr_partial", "transcript": "hello world", "ts_ms": 700},
         {"type": "asr_final", "transcript": "hello world", "ts_ms": 900},
     ]
-    provider = make_provider(fake_api_key)
+    provider = make_provider()
 
     with patch(
-        "coval_bench.providers.stt.guava.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
 
@@ -74,16 +68,16 @@ async def test_guava_success(fake_api_key: SecretStr) -> None:
 
 
 @pytest.mark.asyncio
-async def test_guava_uses_final_over_partial(fake_api_key: SecretStr) -> None:
+async def test_guava_uses_final_over_partial() -> None:
     events: list[Any] = [
         {"type": "asr_partial", "transcript": "hello there", "ts_ms": 300},
         {"type": "asr_final", "transcript": "hello their", "ts_ms": 900},
     ]
-    provider = make_provider(fake_api_key)
+    provider = make_provider()
 
     with patch(
-        "coval_bench.providers.stt.guava.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
 
@@ -91,27 +85,22 @@ async def test_guava_uses_final_over_partial(fake_api_key: SecretStr) -> None:
     assert result.complete_transcript == "hello their"
 
 
-@pytest.mark.asyncio
-async def test_guava_final_timing_is_not_replaced_by_partial() -> None:
-    result = TranscriptionResult(provider="guava", audio_start_time=100.0)
-    ws = FakeWebSocket(
-        [
-            {"type": "asr_partial", "transcript": "early guess"},
-            {"type": "asr_final", "transcript": "committed result"},
-        ]
-    )
-    with patch("coval_bench.providers.stt.guava.time.monotonic", side_effect=[101.0, 103.0]):
-        await make_provider()._receive(ws, result)
-    assert result.ttft_seconds == 1.0
-    assert result.audio_to_final_seconds == 3.0
-    assert result.complete_transcript == "committed result"
+def test_guava_final_timing_is_not_replaced_by_partial() -> None:
+    provider = make_provider()
+    tx = Transcription(TranscriptionResult(provider="guava", audio_start_time=100.0))
+    provider._on_message({"type": "asr_partial", "transcript": "early guess"}, 101.0, tx)
+    provider._on_message({"type": "asr_final", "transcript": "committed result"}, 103.0, tx)
+    provider._finish(tx)
+    assert tx.result.ttft_seconds == 1.0
+    assert tx.result.audio_to_final_seconds == 3.0
+    assert tx.result.complete_transcript == "committed result"
 
 
 @pytest.mark.asyncio
 async def test_guava_partial_only_close_is_failure() -> None:
     with patch(
-        "coval_bench.providers.stt.guava.ws_client.connect",
-        return_value=_fake_connect([{"type": "asr_partial", "transcript": "uncommitted"}]),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect([{"type": "asr_partial", "transcript": "uncommitted"}]),
     ):
         result = await make_provider().measure_ttft(_SMALL_PCM, 1, 2, 16000)
     assert result.error is not None
@@ -121,17 +110,17 @@ async def test_guava_partial_only_close_is_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_guava_accumulates_multi_segment_finals(fake_api_key: SecretStr) -> None:
+async def test_guava_accumulates_multi_segment_finals() -> None:
     """Multiple finals concatenate in arrival order."""
     events: list[Any] = [
         {"type": "asr_final", "transcript": "hello", "ts_ms": 400},
         {"type": "asr_final", "transcript": "world", "ts_ms": 900},
     ]
-    provider = make_provider(fake_api_key)
+    provider = make_provider()
 
     with patch(
-        "coval_bench.providers.stt.guava.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
 
@@ -141,15 +130,15 @@ async def test_guava_accumulates_multi_segment_finals(fake_api_key: SecretStr) -
 
 
 @pytest.mark.asyncio
-async def test_guava_sends_start_binary_and_eos(fake_api_key: SecretStr) -> None:
+async def test_guava_sends_start_binary_and_eos() -> None:
     """Opens with a start frame, streams PCM as binary, ends with eos."""
     events: list[Any] = [{"type": "asr_final", "transcript": "ok", "ts_ms": 500}]
     sent: list[Any] = []
-    provider = make_provider(fake_api_key)
+    provider = make_provider()
 
     with patch(
-        "coval_bench.providers.stt.guava.ws_client.connect",
-        return_value=_fake_connect(events, sent),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events, sent),
     ):
         await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
 
@@ -161,30 +150,31 @@ async def test_guava_sends_start_binary_and_eos(fake_api_key: SecretStr) -> None
 
 
 @pytest.mark.asyncio
-async def test_guava_sends_bearer_when_key_present(fake_api_key: SecretStr) -> None:
+async def test_guava_sends_bearer_when_key_present(stt_settings: Settings) -> None:
     headers: dict[str, Any] = {}
 
     def _connect(url: str, **kwargs: Any) -> Any:
         headers.update({"additional_headers": kwargs.get("additional_headers")})
-        return _fake_connect([{"type": "asr_final", "transcript": "ok", "ts_ms": 1}])
+        return fake_connect([{"type": "asr_final", "transcript": "ok", "ts_ms": 1}])
 
-    provider = make_provider(fake_api_key)
-    with patch("coval_bench.providers.stt.guava.ws_client.connect", side_effect=_connect):
+    provider = make_provider()
+    with patch("coval_bench.providers.stt._streaming.ws_client.connect", side_effect=_connect):
         await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
 
+    assert stt_settings.guava_api_key is not None
     assert headers["additional_headers"] == {
-        "Authorization": f"Bearer {fake_api_key.get_secret_value()}"
+        "Authorization": f"Bearer {stt_settings.guava_api_key.get_secret_value()}"
     }
 
 
 def test_missing_api_key_raises() -> None:
     with pytest.raises(ValueError, match="guava_api_key is required"):
-        GuavaSTTProvider(api_key=None, base_url=_BASE_URL)
+        make_provider(guava_api_key=None)
 
 
 def test_blank_api_key_raises() -> None:
     with pytest.raises(ValueError, match="guava_api_key is required"):
-        GuavaSTTProvider(api_key=SecretStr("   "), base_url=_BASE_URL)
+        make_provider(guava_api_key=SecretStr("   "))
 
 
 def test_provider_name() -> None:
@@ -197,16 +187,16 @@ def test_provider_model() -> None:
 
 def test_missing_base_url_raises() -> None:
     with pytest.raises(ValueError, match="guava_base_url is required"):
-        GuavaSTTProvider(api_key=SecretStr("k"), base_url=None, domain=_DOMAIN)
+        make_provider(guava_base_url=None)
 
 
 @pytest.mark.asyncio
 async def test_missing_domain_uses_server_default() -> None:
-    provider = GuavaSTTProvider(api_key=SecretStr("k"), base_url=_BASE_URL)
+    provider = make_provider(guava_stt_domain=None)
     sent: list[Any] = []
     with patch(
-        "coval_bench.providers.stt.guava.ws_client.connect",
-        return_value=_fake_connect([{"type": "asr_final", "transcript": "ok"}], sent),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect([{"type": "asr_final", "transcript": "ok"}], sent),
     ):
         result = await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000)
     assert result.error is None
@@ -221,31 +211,29 @@ def test_ws_url_from_base() -> None:
 
 
 @pytest.mark.asyncio
-async def test_guava_wrong_sample_rate(fake_api_key: SecretStr) -> None:
-    provider = make_provider(fake_api_key)
-    result = await provider.measure_ttft(_SMALL_PCM, 1, 2, 8000)
+async def test_guava_wrong_sample_rate() -> None:
+    result = await make_provider().measure_ttft(_SMALL_PCM, 1, 2, 8000)
     assert result.error is not None
     assert "16 kHz" in result.error
     assert result.ttft_seconds is None
 
 
 @pytest.mark.asyncio
-async def test_guava_rejects_non_mono(fake_api_key: SecretStr) -> None:
-    provider = make_provider(fake_api_key)
-    result = await provider.measure_ttft(_SMALL_PCM, 2, 2, 16000)
+async def test_guava_rejects_non_mono() -> None:
+    result = await make_provider().measure_ttft(_SMALL_PCM, 2, 2, 16000)
     assert result.error is not None
     assert "mono 16-bit" in result.error
     assert result.ttft_seconds is None
 
 
 @pytest.mark.asyncio
-async def test_guava_error_event(fake_api_key: SecretStr) -> None:
+async def test_guava_error_event() -> None:
     events: list[Any] = [{"type": "error", "message": "Rate limit exceeded"}]
-    provider = make_provider(fake_api_key)
+    provider = make_provider()
 
     with patch(
-        "coval_bench.providers.stt.guava.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
 
@@ -255,13 +243,13 @@ async def test_guava_error_event(fake_api_key: SecretStr) -> None:
 
 
 @pytest.mark.asyncio
-async def test_guava_stream_ends_without_final(fake_api_key: SecretStr) -> None:
+async def test_guava_stream_ends_without_final() -> None:
     """A stream that closes with no final surfaces an error, not a silent pass."""
-    provider = make_provider(fake_api_key)
+    provider = make_provider()
 
     with patch(
-        "coval_bench.providers.stt.guava.ws_client.connect",
-        return_value=_fake_connect([]),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect([]),
     ):
         result = await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
 
@@ -271,11 +259,11 @@ async def test_guava_stream_ends_without_final(fake_api_key: SecretStr) -> None:
 
 
 @pytest.mark.asyncio
-async def test_guava_connection_error(fake_api_key: SecretStr) -> None:
-    provider = make_provider(fake_api_key)
+async def test_guava_connection_error() -> None:
+    provider = make_provider()
 
     with patch(
-        "coval_bench.providers.stt.guava.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         side_effect=OSError("connection refused"),
     ):
         result = await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
@@ -287,7 +275,6 @@ async def test_guava_connection_error(fake_api_key: SecretStr) -> None:
 
 def test_guava_smoke_passes_configured_domain(tmp_path: Path) -> None:
     from coval_bench.__main__ import cli
-    from coval_bench.config import Settings
 
     audio = tmp_path / "input.wav"
     with wave.open(str(audio), "wb") as wav:

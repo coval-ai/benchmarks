@@ -3,114 +3,47 @@
 
 """STT provider registry.
 
-Usage::
+Every public module in this package defines exactly one :class:`STTProvider`
+subclass and is registered under its module name, so adding a provider is
+adding a file. Usage::
 
     from coval_bench.providers.stt import STT_PROVIDERS
 
-    for name, cls in STT_PROVIDERS.items():
-        provider = cls(api_key=settings.deepgram_api_key, model="nova-3")
-        result = await provider.measure_ttft(...)
+    provider = STT_PROVIDERS["deepgram"](settings, model="nova-3")
+    result = await provider.measure_ttft(...)
 """
 
 from __future__ import annotations
 
+import importlib
+import inspect
+import pkgutil
+
 from coval_bench.providers.base import STTProvider
-from coval_bench.providers.stt.assemblyai import AssemblyAIProvider
-from coval_bench.providers.stt.azure import AzureSTTProvider
-from coval_bench.providers.stt.baseten import BasetenSTTProvider
-from coval_bench.providers.stt.cartesia import CartesiaSTTProvider
-from coval_bench.providers.stt.cloudflare import CloudflareSTTProvider
-from coval_bench.providers.stt.deepgram import DeepgramProvider
-from coval_bench.providers.stt.elevenlabs import ElevenLabsSTTProvider
-from coval_bench.providers.stt.gemini import GeminiSTTProvider
-from coval_bench.providers.stt.gladia import GladiaSTTProvider
-from coval_bench.providers.stt.gradium import GradiumSTTProvider
-from coval_bench.providers.stt.guava import GuavaSTTProvider
-from coval_bench.providers.stt.inworld import InworldSTTProvider
-from coval_bench.providers.stt.meta import MetaSTTProvider
-from coval_bench.providers.stt.mistral import MistralSTTProvider
-from coval_bench.providers.stt.modulate import ModulateSTTProvider
-from coval_bench.providers.stt.nari import NariSTTProvider
-from coval_bench.providers.stt.openai import OpenAISTTProvider
-from coval_bench.providers.stt.reson8 import Reson8STTProvider
-from coval_bench.providers.stt.revai import RevAISTTProvider
-from coval_bench.providers.stt.smallest import SmallestSTTProvider
-from coval_bench.providers.stt.soniox import SonioxSTTProvider
-from coval_bench.providers.stt.speechmatics import SpeechmaticsProvider
-from coval_bench.providers.stt.stepfun import StepfunSTTProvider
-from coval_bench.providers.stt.together import TogetherSTTProvider
-from coval_bench.providers.stt.xai import XaiSTTProvider
-from coval_bench.providers.stt.zoom import ZoomSTTProvider
 
-# Google is optional — gated on the ``google-stt`` extra
-try:
-    from coval_bench.providers.stt.google import GoogleSTTProvider
 
-    GOOGLE_AVAILABLE: bool = True
-except ImportError:
-    GoogleSTTProvider = None  # type: ignore[assignment,misc]
-    GOOGLE_AVAILABLE = False
+def _discover() -> dict[str, type[STTProvider]]:
+    registry: dict[str, type[STTProvider]] = {}
+    for module_info in pkgutil.iter_modules(__path__):
+        if module_info.name.startswith("_"):
+            continue
+        module = importlib.import_module(f"{__name__}.{module_info.name}")
+        classes = [
+            cls
+            for _, cls in inspect.getmembers(module, inspect.isclass)
+            if cls.__module__ == module.__name__
+            and issubclass(cls, STTProvider)
+            and not inspect.isabstract(cls)
+        ]
+        if len(classes) != 1:
+            raise RuntimeError(
+                f"{module.__name__} must define exactly one STTProvider subclass, "
+                f"found {[c.__name__ for c in classes]}"
+            )
+        registry[module_info.name] = classes[0]
+    return registry
 
-STT_PROVIDERS: dict[str, type[STTProvider]] = {
-    "deepgram": DeepgramProvider,
-    "cartesia": CartesiaSTTProvider,
-    "cloudflare": CloudflareSTTProvider,
-    "assemblyai": AssemblyAIProvider,
-    "azure": AzureSTTProvider,
-    "baseten": BasetenSTTProvider,
-    "elevenlabs": ElevenLabsSTTProvider,
-    "gemini": GeminiSTTProvider,
-    "gladia": GladiaSTTProvider,
-    "gradium": GradiumSTTProvider,
-    "guava": GuavaSTTProvider,
-    "inworld": InworldSTTProvider,
-    "meta": MetaSTTProvider,
-    "mistral": MistralSTTProvider,
-    "modulate": ModulateSTTProvider,
-    "nari": NariSTTProvider,
-    "openai": OpenAISTTProvider,
-    "reson8": Reson8STTProvider,
-    "revai": RevAISTTProvider,
-    "smallest": SmallestSTTProvider,
-    "soniox": SonioxSTTProvider,
-    "speechmatics": SpeechmaticsProvider,
-    "stepfun": StepfunSTTProvider,
-    "together": TogetherSTTProvider,
-    "xai": XaiSTTProvider,
-    "zoom": ZoomSTTProvider,
-}
 
-if GoogleSTTProvider is not None:
-    STT_PROVIDERS["google"] = GoogleSTTProvider
+STT_PROVIDERS: dict[str, type[STTProvider]] = _discover()
 
-__all__ = [
-    "STT_PROVIDERS",
-    "GOOGLE_AVAILABLE",
-    "DeepgramProvider",
-    "CartesiaSTTProvider",
-    "CloudflareSTTProvider",
-    "AssemblyAIProvider",
-    "AzureSTTProvider",
-    "BasetenSTTProvider",
-    "ElevenLabsSTTProvider",
-    "GeminiSTTProvider",
-    "GladiaSTTProvider",
-    "GradiumSTTProvider",
-    "GuavaSTTProvider",
-    "InworldSTTProvider",
-    "MetaSTTProvider",
-    "MistralSTTProvider",
-    "ModulateSTTProvider",
-    "NariSTTProvider",
-    "OpenAISTTProvider",
-    "Reson8STTProvider",
-    "RevAISTTProvider",
-    "SmallestSTTProvider",
-    "SonioxSTTProvider",
-    "SpeechmaticsProvider",
-    "StepfunSTTProvider",
-    "TogetherSTTProvider",
-    "XaiSTTProvider",
-    "ZoomSTTProvider",
-    "GoogleSTTProvider",
-]
+__all__ = ["STT_PROVIDERS"]

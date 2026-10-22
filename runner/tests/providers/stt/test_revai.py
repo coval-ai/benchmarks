@@ -13,26 +13,23 @@ items. The transcript is the concatenation of the ``text`` elements from every
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.revai import RevAISTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import (
+    FakeWebSocket,
+    fake_connect,
+    load_fixture_events,
+    make_settings,
+)
 
 
 def make_provider() -> RevAISTTProvider:
-    return RevAISTTProvider(api_key=SecretStr("test-key-revai"))
-
-
-def _fake_connect(events: list[Any]) -> Any:
-    ws = FakeWebSocket(events)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
+    return RevAISTTProvider(make_settings())
 
 
 # ---------------------------------------------------------------------------
@@ -41,14 +38,14 @@ def _fake_connect(events: list[Any]) -> Any:
 
 
 @pytest.mark.asyncio
-async def test_revai_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_revai_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("revai", "events-success")
-    provider = RevAISTTProvider(api_key=fake_api_key)
+    provider = RevAISTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.revai.ws_client.connect",
-        return_value=_fake_connect(events),
-    ):
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
+    ) as connect:
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
             channels=1,
@@ -67,10 +64,15 @@ async def test_revai_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) ->
     wer = compute_wer("hello world how are you", result.complete_transcript)
     assert wer.wer_percentage == pytest.approx(0.0)
 
+    url = connect.call_args.args[0]
+    assert url.startswith("wss://api.rev.ai/speechtotext/v1/stream?")
+    assert "access_token=test-api-key-00000000000000000000" in url
+    assert "transcriber=machine_v2" in url
+
 
 @pytest.mark.asyncio
 async def test_revai_ttft_fires_on_first_partial(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """TTFT is time-to-first-word: it must fire on a partial, before any final."""
     events: list[Any] = [
@@ -78,11 +80,11 @@ async def test_revai_ttft_fires_on_first_partial(
         {"type": "partial", "elements": [{"type": "text", "value": "hello"}]},
         {"type": "final", "elements": [{"type": "text", "value": "hello world"}]},
     ]
-    provider = RevAISTTProvider(api_key=fake_api_key)
+    provider = RevAISTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.revai.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -98,7 +100,7 @@ async def test_revai_ttft_fires_on_first_partial(
 
 @pytest.mark.asyncio
 async def test_revai_excludes_partials_from_transcript(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """Only ``final`` messages form the transcript; partials are dropped."""
     events: list[Any] = [
@@ -108,11 +110,11 @@ async def test_revai_excludes_partials_from_transcript(
         {"type": "partial", "elements": [{"type": "text", "value": "worng"}]},
         {"type": "final", "elements": [{"type": "text", "value": "world"}]},
     ]
-    provider = RevAISTTProvider(api_key=fake_api_key)
+    provider = RevAISTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.revai.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -129,7 +131,7 @@ async def test_revai_excludes_partials_from_transcript(
 
 @pytest.mark.asyncio
 async def test_revai_tail_partial_uses_latest_not_longest(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """A downward-revised trailing partial (no final) recovers the latest guess.
 
@@ -141,11 +143,11 @@ async def test_revai_tail_partial_uses_latest_not_longest(
         {"type": "partial", "elements": [{"type": "text", "value": "hello world foo"}]},
         {"type": "partial", "elements": [{"type": "text", "value": "hello world"}]},
     ]
-    provider = RevAISTTProvider(api_key=fake_api_key)
+    provider = RevAISTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.revai.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -160,15 +162,14 @@ async def test_revai_tail_partial_uses_latest_not_longest(
 
 
 @pytest.mark.asyncio
-async def test_revai_sends_eos_sentinel(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    """End-of-audio is signalled with an ``EOS`` text frame after the PCM chunks."""
-    ws = FakeWebSocket([{"type": "connected"}])
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-
-    provider = RevAISTTProvider(api_key=fake_api_key)
-    with patch("coval_bench.providers.stt.revai.ws_client.connect", return_value=cm):
+async def test_revai_sends_eos_sentinel(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    """Trailing silence, then an ``EOS`` text frame, follow the PCM chunks."""
+    sent: list[Any] = []
+    provider = RevAISTTProvider(stt_settings)
+    with patch(
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect([{"type": "connected"}], sent),
+    ):
         await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
             channels=1,
@@ -177,7 +178,10 @@ async def test_revai_sends_eos_sentinel(fake_api_key: SecretStr, audio_pcm_bytes
             realtime_resolution=0.5,
         )
 
-    assert ws._sent[-1] == "EOS"
+    assert sent[-1] == "EOS"
+    audio = [m for m in sent if isinstance(m, bytes)]
+    assert b"".join(audio).startswith(audio_pcm_bytes)
+    assert len(b"".join(audio)) > len(audio_pcm_bytes)
 
 
 # ---------------------------------------------------------------------------
@@ -200,12 +204,12 @@ def test_provider_model() -> None:
 
 def test_invalid_model_raises() -> None:
     with pytest.raises(ValueError, match="Invalid Rev AI model"):
-        RevAISTTProvider(api_key=SecretStr("k"), model="machine_v3")
+        RevAISTTProvider(make_settings(), model="machine_v3")
 
 
 def test_missing_api_key_raises() -> None:
     with pytest.raises(ValueError, match="revai_api_key is required"):
-        RevAISTTProvider(api_key=None)
+        RevAISTTProvider(make_settings(revai_api_key=None))
 
 
 # ---------------------------------------------------------------------------
@@ -215,9 +219,9 @@ def test_missing_api_key_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_revai_rejects_non_mono_or_non_16bit(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
-    provider = RevAISTTProvider(api_key=fake_api_key)
+    provider = RevAISTTProvider(stt_settings)
     result = await provider.measure_ttft(
         audio_data=audio_pcm_bytes,
         channels=2,
@@ -236,12 +240,12 @@ async def test_revai_rejects_non_mono_or_non_16bit(
 
 
 @pytest.mark.asyncio
-async def test_revai_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = RevAISTTProvider(api_key=fake_api_key)
+async def test_revai_empty_stream(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = RevAISTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.revai.ws_client.connect",
-        return_value=_fake_connect([]),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect([]),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -256,12 +260,12 @@ async def test_revai_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: byte
 
 
 @pytest.mark.asyncio
-async def test_revai_connection_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_revai_connection_error(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """A connect failure surfaces as result.error, not a silent empty success."""
-    provider = RevAISTTProvider(api_key=fake_api_key)
+    provider = RevAISTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.revai.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         side_effect=OSError("connection refused"),
     ):
         result = await provider.measure_ttft(
@@ -279,20 +283,18 @@ async def test_revai_connection_error(fake_api_key: SecretStr, audio_pcm_bytes: 
 
 
 @pytest.mark.asyncio
-async def test_revai_surfaces_send_failure(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_revai_surfaces_send_failure(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """A send failure inside the streaming task is surfaced, not swallowed by gather."""
 
     def _raise_on_audio(msg: object) -> None:
         if isinstance(msg, (bytes, bytearray)):
             raise RuntimeError("send boom")
 
-    ws = FakeWebSocket([], on_send=_raise_on_audio)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect([])
+    cm.__aenter__.return_value = FakeWebSocket([], on_send=_raise_on_audio)
 
-    provider = RevAISTTProvider(api_key=fake_api_key)
-    with patch("coval_bench.providers.stt.revai.ws_client.connect", return_value=cm):
+    provider = RevAISTTProvider(stt_settings)
+    with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
             channels=1,

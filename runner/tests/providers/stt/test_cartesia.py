@@ -12,14 +12,14 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.providers.stt.cartesia import CartesiaSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events, make_settings
 
 
 def make_provider() -> CartesiaSTTProvider:
-    return CartesiaSTTProvider(api_key=SecretStr("test-key-cartesia"))
+    return CartesiaSTTProvider(make_settings())
 
 
 def _fake_connect(events: list[Any], sent: list[Any] | None = None) -> Any:
@@ -36,12 +36,12 @@ def _fake_connect(events: list[Any], sent: list[Any] | None = None) -> Any:
 
 
 @pytest.mark.asyncio
-async def test_cartesia_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_cartesia_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("cartesia", "events-success")
-    provider = CartesiaSTTProvider(api_key=fake_api_key)
+    provider = CartesiaSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.cartesia.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect(events),
     ):
         result = await provider.measure_ttft(
@@ -50,7 +50,6 @@ async def test_cartesia_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes)
             sample_width=2,
             sample_rate=16000,
             realtime_resolution=0.5,
-            audio_duration=3.0,
         )
 
     assert result.error is None
@@ -62,7 +61,7 @@ async def test_cartesia_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes)
 
 
 @pytest.mark.asyncio
-async def test_cartesia_keeps_space_deltas(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_cartesia_keeps_space_deltas(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """A standalone " " delta is a word boundary, not an empty delta to skip."""
     events: list[Any] = [
         {"type": "transcript", "text": "hello", "is_final": True},
@@ -70,10 +69,10 @@ async def test_cartesia_keeps_space_deltas(fake_api_key: SecretStr, audio_pcm_by
         {"type": "transcript", "text": "world", "is_final": True},
         {"type": "done"},
     ]
-    provider = CartesiaSTTProvider(api_key=fake_api_key)
+    provider = CartesiaSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.cartesia.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect(events),
     ):
         result = await provider.measure_ttft(
@@ -82,7 +81,6 @@ async def test_cartesia_keeps_space_deltas(fake_api_key: SecretStr, audio_pcm_by
             sample_width=2,
             sample_rate=16000,
             realtime_resolution=0.5,
-            audio_duration=3.0,
         )
 
     assert result.error is None
@@ -109,27 +107,29 @@ def test_provider_model() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stereo_rejected(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = CartesiaSTTProvider(api_key=fake_api_key)
-    with pytest.raises(ValueError, match="mono"):
-        await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=2,
-            sample_width=2,
-            sample_rate=16000,
-        )
+async def test_stereo_rejected(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = CartesiaSTTProvider(stt_settings)
+    result = await provider.measure_ttft(
+        audio_data=audio_pcm_bytes,
+        channels=2,
+        sample_width=2,
+        sample_rate=16000,
+    )
+    assert result.error is not None
+    assert "mono" in result.error
 
 
 @pytest.mark.asyncio
-async def test_non_16bit_rejected(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = CartesiaSTTProvider(api_key=fake_api_key)
-    with pytest.raises(ValueError, match="16-bit PCM"):
-        await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=4,
-            sample_rate=16000,
-        )
+async def test_non_16bit_rejected(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = CartesiaSTTProvider(stt_settings)
+    result = await provider.measure_ttft(
+        audio_data=audio_pcm_bytes,
+        channels=1,
+        sample_width=4,
+        sample_rate=16000,
+    )
+    assert result.error is not None
+    assert "16-bit PCM" in result.error
 
 
 # ---------------------------------------------------------------------------
@@ -138,13 +138,13 @@ async def test_non_16bit_rejected(fake_api_key: SecretStr, audio_pcm_bytes: byte
 
 
 @pytest.mark.asyncio
-async def test_finalize_and_close_sent(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_finalize_and_close_sent(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("cartesia", "events-success")
     sent: list[Any] = []
-    provider = CartesiaSTTProvider(api_key=fake_api_key)
+    provider = CartesiaSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.cartesia.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect(events, sent=sent),
     ):
         await provider.measure_ttft(
@@ -166,12 +166,12 @@ async def test_finalize_and_close_sent(fake_api_key: SecretStr, audio_pcm_bytes:
 
 
 @pytest.mark.asyncio
-async def test_connect_url_and_auth(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_connect_url_and_auth(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("cartesia", "events-success")
     connect_mock = MagicMock(return_value=_fake_connect(events))
-    provider = CartesiaSTTProvider(api_key=fake_api_key)
+    provider = CartesiaSTTProvider(stt_settings)
 
-    with patch("coval_bench.providers.stt.cartesia.ws_client.connect", connect_mock):
+    with patch("coval_bench.providers.stt._streaming.ws_client.connect", connect_mock):
         await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
             channels=1,
@@ -187,7 +187,8 @@ async def test_connect_url_and_auth(fake_api_key: SecretStr, audio_pcm_bytes: by
     assert "cartesia_version" not in url  # version is a header, not a query param
 
     headers = connect_mock.call_args.kwargs["additional_headers"]
-    assert headers["Authorization"] == f"Bearer {fake_api_key.get_secret_value()}"
+    assert stt_settings.cartesia_api_key is not None
+    assert headers["Authorization"] == f"Bearer {stt_settings.cartesia_api_key.get_secret_value()}"
     assert headers["cartesia-version"] == "2025-11-04"
 
 
@@ -198,16 +199,16 @@ async def test_connect_url_and_auth(fake_api_key: SecretStr, audio_pcm_bytes: by
 
 @pytest.mark.asyncio
 async def test_reads_text_field_not_transcript(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     events: list[Any] = [
         {"type": "transcript", "is_final": True, "transcript": "wrong field", "request_id": "r"},
         {"type": "done", "request_id": "r"},
     ]
-    provider = CartesiaSTTProvider(api_key=fake_api_key)
+    provider = CartesiaSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.cartesia.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect(events),
     ):
         result = await provider.measure_ttft(
@@ -228,11 +229,11 @@ async def test_reads_text_field_not_transcript(
 
 
 @pytest.mark.asyncio
-async def test_cartesia_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = CartesiaSTTProvider(api_key=fake_api_key)
+async def test_cartesia_empty_stream(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = CartesiaSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.cartesia.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect([]),
     ):
         result = await provider.measure_ttft(
@@ -253,14 +254,14 @@ async def test_cartesia_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: b
 
 
 @pytest.mark.asyncio
-async def test_no_done_marker_terminates(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_no_done_marker_terminates(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events: list[Any] = [
         {"type": "transcript", "is_final": True, "text": "hello world", "request_id": "r"},
     ]
-    provider = CartesiaSTTProvider(api_key=fake_api_key)
+    provider = CartesiaSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.cartesia.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect(events),
     ):
         result = await provider.measure_ttft(
@@ -282,16 +283,16 @@ async def test_no_done_marker_terminates(fake_api_key: SecretStr, audio_pcm_byte
 
 @pytest.mark.asyncio
 async def test_audio_to_final_none_on_partial_only(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     events: list[Any] = [
         {"type": "transcript", "is_final": False, "text": "hello", "request_id": "r"},
         {"type": "done", "request_id": "r"},
     ]
-    provider = CartesiaSTTProvider(api_key=fake_api_key)
+    provider = CartesiaSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.cartesia.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect(events),
     ):
         result = await provider.measure_ttft(
@@ -315,14 +316,14 @@ async def test_audio_to_final_none_on_partial_only(
 
 
 @pytest.mark.asyncio
-async def test_error_event_sets_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_error_event_sets_error(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events: list[Any] = [
         {"type": "error", "status_code": 400, "title": "Bad", "message": "boom"},
     ]
-    provider = CartesiaSTTProvider(api_key=fake_api_key)
+    provider = CartesiaSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.cartesia.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect(events),
     ):
         result = await provider.measure_ttft(
@@ -338,12 +339,12 @@ async def test_error_event_sets_error(fake_api_key: SecretStr, audio_pcm_bytes: 
 
 
 @pytest.mark.asyncio
-async def test_malformed_frame_sets_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_malformed_frame_sets_error(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """A non-JSON frame must surface as result.error, not a silent clean run."""
-    provider = CartesiaSTTProvider(api_key=fake_api_key)
+    provider = CartesiaSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.cartesia.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         return_value=_fake_connect(["not-json{"]),
     ):
         result = await provider.measure_ttft(

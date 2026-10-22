@@ -17,15 +17,16 @@ import asyncio
 import concurrent.futures
 import time  # monotonic clock — wall-clock can step on NTP sync
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-import structlog
-from pydantic import SecretStr
-
+from coval_bench.config import Settings
 from coval_bench.providers.base import STTProvider, TranscriptionResult
 from coval_bench.providers.stt._pacing import paced_chunks_sync
-
-logger = structlog.get_logger(__name__)
+from coval_bench.providers.stt._transcript_utils import (
+    add_partial_transcript,
+    finalize_transcript,
+    set_first_token,
+)
 
 # Optional gRPC dependency
 try:
@@ -36,10 +37,6 @@ try:
     GOOGLE_AVAILABLE = True
 except ImportError:
     GOOGLE_AVAILABLE = False
-
-if TYPE_CHECKING:
-    # These type stubs may not be present; used only for static analysis.
-    pass
 
 _RECOGNIZER_PATTERN = "projects/{project}/locations/{location}/recognizers/_"
 
@@ -55,24 +52,13 @@ class GoogleSTTProvider(STTProvider):
     Requires:      Application Default Credentials (the runner service account in Cloud Run).
     """
 
-    def __init__(
-        self,
-        api_key: SecretStr,
-        model: str = "default",
-        project_id: str | None = None,
-    ) -> None:
+    def __init__(self, settings: Settings, model: str = "default") -> None:
         if not GOOGLE_AVAILABLE:
             raise ImportError(
                 "google-cloud-speech is not installed. Install it with: uv sync --extra google-stt"
             )
-        if project_id is None:
-            raise ValueError(
-                "GoogleSTTProvider requires project_id (set Settings.google_project_id)"
-            )
-        # api_key is unused for Google; auth is via ADC
-        _ = api_key
-        self._model = model
-        self._project_id = project_id
+        super().__init__(settings, model)
+        self._project_id = self._require_setting("google_project_id")
         self._location = _MODEL_LOCATIONS.get(self._get_model_name(), _DEFAULT_LOCATION)
         self._client: Any = SpeechClient(
             client_options=ClientOptions(api_endpoint=f"{self._location}-speech.googleapis.com")
@@ -84,10 +70,6 @@ class GoogleSTTProvider(STTProvider):
             return "google"
         return f"google-{self._model}"
 
-    @property
-    def model(self) -> str:
-        return self._model
-
     def _get_model_name(self) -> str:
         """Return the v2 model name; 'default' maps to chirp_2."""
         return "chirp_2" if self._model == "default" else self._model
@@ -95,108 +77,66 @@ class GoogleSTTProvider(STTProvider):
     def _get_recognizer_name(self) -> str:
         return _RECOGNIZER_PATTERN.format(project=self._project_id, location=self._location)
 
-    async def measure_ttft(
+    async def _transcribe(
         self,
         audio_data: bytes,
-        channels: int,
-        sample_width: int,
         sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name)
-
+        realtime_resolution: float,
+        result: TranscriptionResult,
+    ) -> None:
         config: Any = cloud_speech.RecognitionConfig(
             explicit_decoding_config=cloud_speech.ExplicitDecodingConfig(
                 encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
                 sample_rate_hertz=sample_rate,
-                audio_channel_count=channels,
+                audio_channel_count=1,
             ),
             language_codes=["en-US"],
             model=self._get_model_name(),
-            features=cloud_speech.RecognitionFeatures(
-                enable_automatic_punctuation=True,
-            ),
+            features=cloud_speech.RecognitionFeatures(enable_automatic_punctuation=True),
         )
         streaming_config: Any = cloud_speech.StreamingRecognitionConfig(
             config=config,
-            streaming_features=cloud_speech.StreamingRecognitionFeatures(
-                interim_results=True,
-            ),
+            streaming_features=cloud_speech.StreamingRecognitionFeatures(interim_results=True),
         )
 
+        def _request_iterator() -> Generator[Any, None, None]:
+            # First request carries the config
+            yield cloud_speech.StreamingRecognizeRequest(
+                recognizer=self._get_recognizer_name(), streaming_config=streaming_config
+            )
+            byte_rate = sample_rate * 2
+            chunk_size = int(byte_rate * realtime_resolution)
+            for chunk, start in paced_chunks_sync(audio_data, chunk_size, byte_rate):
+                if result.audio_start_time is None:
+                    result.audio_start_time = start
+                yield cloud_speech.StreamingRecognizeRequest(audio=chunk)
+
         def _run_sync() -> None:
-            final_transcripts: list[str] = []
+            finals: list[str] = []
             last_final_time: float | None = None
-
-            def _request_iterator() -> Generator[Any, None, None]:
-                # First request carries the config
-                yield cloud_speech.StreamingRecognizeRequest(
-                    recognizer=self._get_recognizer_name(),
-                    streaming_config=streaming_config,
-                )
-                byte_rate = sample_width * sample_rate * channels
-                chunk_size = int(byte_rate * realtime_resolution)
-                for chunk, start in paced_chunks_sync(audio_data, chunk_size, byte_rate):
-                    if result.audio_start_time is None:
-                        result.audio_start_time = start
-                    yield cloud_speech.StreamingRecognizeRequest(audio=chunk)
-
             try:
                 responses = self._client.streaming_recognize(requests=_request_iterator())
                 for response in responses:
                     now = time.monotonic()
                     transcript = self._extract_transcript(response)
                     if transcript:
-                        if result.ttft_seconds is None and result.audio_start_time is not None:
-                            result.ttft_seconds = now - result.audio_start_time
-                            result.first_token_content = transcript
-                        result.partial_transcripts.append(transcript)
+                        set_first_token(result, transcript, now=now)
+                        add_partial_transcript(result, transcript)
+                    for item in getattr(response, "results", None) or []:
+                        if not getattr(item, "is_final", False):
+                            continue
+                        last_final_time = now
+                        if item.alternatives:
+                            finals.append(str(item.alternatives[0].transcript))
+            finally:
+                # Commits received finals even when the stream raises mid-clip.
+                if last_final_time is not None and result.audio_start_time is not None:
+                    result.audio_to_final_seconds = last_final_time - result.audio_start_time
+                finalize_transcript(result, final_segments=finals, partial_fallback="none")
 
-                    if hasattr(response, "results") and response.results:
-                        saw_final = False
-                        for result_item in response.results:
-                            if getattr(result_item, "is_final", False):
-                                item_transcript = (
-                                    str(result_item.alternatives[0].transcript)
-                                    if result_item.alternatives
-                                    else ""
-                                )
-                                if item_transcript:
-                                    final_transcripts.append(item_transcript)
-                                saw_final = True
-                        if saw_final:
-                            last_final_time = now
-            except Exception as exc:
-                logger.warning(
-                    "google_streaming_recognize_failed",
-                    provider="google",
-                    model=self._model,
-                    exc_info=exc,
-                )
-                raise
-
-            if last_final_time is not None and result.audio_start_time is not None:
-                result.audio_to_final_seconds = last_final_time - result.audio_start_time
-
-            if final_transcripts:
-                result.complete_transcript = " ".join(final_transcripts).strip() or None
-                if result.complete_transcript:
-                    result.transcript_length = len(result.complete_transcript)
-                    result.word_count = len(result.complete_transcript.split())
-
-        total_start = time.monotonic()
-        try:
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                await loop.run_in_executor(executor, _run_sync)
-        except Exception as exc:
-            logger.warning(
-                "google_measure_ttft_failed", provider="google", model=self._model, exc_info=exc
-            )
-            result.error = str(exc)
-
-        result.total_time = time.monotonic() - total_start
-        return result
+        loop = asyncio.get_running_loop()
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            await loop.run_in_executor(executor, _run_sync)
 
     def _extract_transcript(self, response: Any) -> str:
         try:

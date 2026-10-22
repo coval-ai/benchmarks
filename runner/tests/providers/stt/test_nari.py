@@ -15,27 +15,18 @@ from __future__ import annotations
 import base64
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.providers.stt.nari import NariSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
 
-_CONNECT = "coval_bench.providers.stt.nari.ws_client.connect"
+_CONNECT = "coval_bench.providers.stt._streaming.ws_client.connect"
 _CONFIGURED = {"type": "session.configured", "session": {"id": "s"}}
-
-
-def _fake_connect(events: list[Any], *, captured: dict[str, Any] | None = None) -> Any:
-    ws = FakeWebSocket(events)
-    if captured is not None:
-        captured["ws"] = ws
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
 
 
 async def _measure(provider: NariSTTProvider, audio: bytes, **overrides: Any) -> Any:
@@ -51,15 +42,16 @@ async def _measure(provider: NariSTTProvider, audio: bytes, **overrides: Any) ->
 
 
 @pytest.mark.asyncio
-async def test_nari_success_and_wire_shape(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = NariSTTProvider(api_key=fake_api_key)
+async def test_nari_success_and_wire_shape(audio_pcm_bytes: bytes) -> None:
+    provider = NariSTTProvider(make_settings(nari_api_key=SecretStr("test-key-nari")))
     captured: dict[str, Any] = {}
 
     def connect_side_effect(
         url: str, additional_headers: dict[str, str] | None = None, **_: Any
     ) -> Any:
-        captured.update(url=url, headers=dict(additional_headers or {}))
-        return _fake_connect(load_fixture_events("nari"), captured=captured)
+        cm = fake_connect(load_fixture_events("nari"))
+        captured.update(url=url, headers=dict(additional_headers or {}), ws=cm.ws)
+        return cm
 
     with patch(_CONNECT, side_effect=connect_side_effect):
         result = await _measure(provider, audio_pcm_bytes)
@@ -80,7 +72,7 @@ async def test_nari_success_and_wire_shape(fake_api_key: SecretStr, audio_pcm_by
         "/v1/realtime",
     )
     assert parse_qs(parsed.query) == {"intent": ["transcription"]}
-    assert captured["headers"] == {"Authorization": f"Bearer {fake_api_key.get_secret_value()}"}
+    assert captured["headers"] == {"Authorization": "Bearer test-key-nari"}
 
     sent = [json.loads(m) for m in captured["ws"]._sent if isinstance(m, str)]
     assert sent[0] == {
@@ -96,11 +88,11 @@ async def test_nari_success_and_wire_shape(fake_api_key: SecretStr, audio_pcm_by
 
 @pytest.mark.asyncio
 async def test_nari_joins_auto_split_items_in_order(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
-    provider = NariSTTProvider(api_key=fake_api_key)
+    provider = NariSTTProvider(stt_settings)
 
-    with patch(_CONNECT, return_value=_fake_connect(load_fixture_events("nari", "events-split"))):
+    with patch(_CONNECT, return_value=fake_connect(load_fixture_events("nari", "events-split"))):
         result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is None
@@ -120,11 +112,11 @@ async def test_nari_joins_auto_split_items_in_order(
     ids=["error-event", "setup-error", "commit-empty"],
 )
 async def test_nari_failures_surface_as_result_error(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes, events: list[Any], expected: str
+    stt_settings: Settings, audio_pcm_bytes: bytes, events: list[Any], expected: str
 ) -> None:
-    provider = NariSTTProvider(api_key=fake_api_key)
+    provider = NariSTTProvider(stt_settings)
 
-    with patch(_CONNECT, return_value=_fake_connect(events)):
+    with patch(_CONNECT, return_value=fake_connect(events)):
         result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is not None
@@ -134,12 +126,12 @@ async def test_nari_failures_surface_as_result_error(
 
 
 @pytest.mark.asyncio
-async def test_nari_session_ready_timeout(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = NariSTTProvider(api_key=fake_api_key)
+async def test_nari_session_ready_timeout(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = NariSTTProvider(stt_settings)
 
     with (
         patch("coval_bench.providers.stt.nari._READY_TIMEOUT_S", 0.05),
-        patch(_CONNECT, return_value=_fake_connect([])),
+        patch(_CONNECT, return_value=fake_connect([])),
     ):
         result = await _measure(provider, audio_pcm_bytes)
 
@@ -149,16 +141,16 @@ async def test_nari_session_ready_timeout(fake_api_key: SecretStr, audio_pcm_byt
 
 @pytest.mark.asyncio
 async def test_nari_closed_without_completed_keeps_longest_partial(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     events = [
         _CONFIGURED,
         {"type": "transcript.partial", "item_id": "item_001", "transcript": "hello"},
         {"type": "transcript.partial", "item_id": "item_001", "transcript": "hello world"},
     ]
-    provider = NariSTTProvider(api_key=fake_api_key)
+    provider = NariSTTProvider(stt_settings)
 
-    with patch(_CONNECT, return_value=_fake_connect(events)):
+    with patch(_CONNECT, return_value=fake_connect(events)):
         result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error == "ws_closed_without_completed"
@@ -167,9 +159,9 @@ async def test_nari_closed_without_completed_keeps_longest_partial(
 
 @pytest.mark.asyncio
 async def test_nari_rejects_wrong_audio_format(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
-    provider = NariSTTProvider(api_key=fake_api_key)
+    provider = NariSTTProvider(stt_settings)
 
     wrong_rate = await _measure(provider, audio_pcm_bytes, sample_rate=8000)
     assert wrong_rate.error is not None
@@ -181,7 +173,7 @@ async def test_nari_rejects_wrong_audio_format(
 
 
 def test_nari_construction_guards() -> None:
-    provider = NariSTTProvider(api_key=SecretStr("k"))
+    provider = NariSTTProvider(make_settings())
     assert (provider.name, provider.model) == ("nari", "qwen3-asr-fast")
     with pytest.raises(ValueError, match="nari_api_key is required"):
-        NariSTTProvider(api_key=None)
+        NariSTTProvider(make_settings(nari_api_key=None))

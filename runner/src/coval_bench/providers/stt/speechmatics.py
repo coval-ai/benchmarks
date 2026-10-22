@@ -13,40 +13,30 @@ Close: {"message": "EndOfStream", "last_seq_no": N}
 from __future__ import annotations
 
 import json
-import time  # monotonic clock — wall-clock can step on NTP sync
 from typing import Any
 
-import structlog
-import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
-
-from coval_bench.providers.base import STTProvider, TranscriptionResult
-from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-
-logger = structlog.get_logger(__name__)
+from coval_bench.config import Settings
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 _WS_URL = "wss://global.rt.speechmatics.com/v2"
 _AGENT_WS_URL = "wss://preview.rt.speechmatics.com/v2/agent"
 
 
-class SpeechmaticsProvider(STTProvider):
+class SpeechmaticsProvider(WebSocketSTTProvider):
     """Speechmatics real-time STT provider."""
 
-    def __init__(self, api_key: SecretStr, model: str = "default") -> None:
-        self._api_key = api_key
-        self._model = model
+    def __init__(self, settings: Settings, model: str = "default") -> None:
+        super().__init__(settings, model)
+        self._api_key = self._require_secret("speechmatics_api_key")
         self._is_agent = model == "linden-1"
+        # AddAudio count for EndOfStream; one clip per instance, reset on each _open.
+        self._seq_no = 0
 
     @property
     def name(self) -> str:
         if self._model == "default":
             return "speechmatics"
         return f"speechmatics-{self._model}"
-
-    @property
-    def model(self) -> str:
-        return self._model
 
     def _build_start_recognition_config(self, sample_rate: int) -> dict[str, Any]:
         transcription_config: dict[str, Any] = {
@@ -71,57 +61,15 @@ class SpeechmaticsProvider(STTProvider):
             },
         }
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name)
-        total_start = time.monotonic()
+    def _ws_url(self, sample_rate: int) -> str:
+        return _AGENT_WS_URL if self._is_agent else _WS_URL
 
-        try:
-            headers = {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
-            ws_url = _AGENT_WS_URL if self._is_agent else _WS_URL
-            async with ws_client.connect(ws_url, additional_headers=headers) as ws:
-                # Send StartRecognition before streaming audio
-                start_config = self._build_start_recognition_config(sample_rate)
-                await ws.send(json.dumps(start_config))
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
 
-                # Wait for RecognitionStarted before sending audio
-                await self._wait_for_recognition_started(ws, result)
-
-                result.audio_start_time = time.monotonic()
-
-                await run_stream(
-                    result,
-                    self._send_audio(
-                        ws,
-                        audio_data,
-                        channels,
-                        sample_width,
-                        sample_rate,
-                        result,
-                        realtime_resolution,
-                    ),
-                    self._receive(ws, result),
-                )
-
-        except Exception as exc:
-            logger.warning(
-                "speechmatics_measure_ttft_failed",
-                provider="speechmatics",
-                model=self._model,
-                exc_info=exc,
-            )
-            result.error = str(exc)
-
-        result.total_time = time.monotonic() - total_start
-        return result
-
-    async def _wait_for_recognition_started(self, ws: Any, result: TranscriptionResult) -> None:
+    async def _open(self, ws: Any, tx: Transcription, sample_rate: int) -> None:
+        self._seq_no = 0
+        await ws.send(json.dumps(self._build_start_recognition_config(sample_rate)))
         async for raw in ws:
             if isinstance(raw, bytes):
                 continue
@@ -131,87 +79,32 @@ class SpeechmaticsProvider(STTProvider):
             if msg.get("message") == "Error":
                 raise RuntimeError(f"Speechmatics error: {msg.get('reason', 'Unknown error')}")
 
-    async def _send_audio(
-        self,
-        ws: Any,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        result: TranscriptionResult,
-        realtime_resolution: float,
-    ) -> None:
-        byte_rate = sample_width * sample_rate * channels
-        chunk_size = int(byte_rate * realtime_resolution)
-        seq_no = 0
-        try:
-            async for chunk, _ in paced_chunks(
-                audio_data, chunk_size, byte_rate, start=result.audio_start_time
-            ):
-                await ws.send(chunk)
-                seq_no += 1
-            await ws.send(json.dumps({"message": "EndOfStream", "last_seq_no": seq_no}))
-        except Exception as exc:
-            logger.warning(
-                "speechmatics_send_error", provider="speechmatics", model=self._model, exc_info=exc
-            )
-            raise
+    async def _send_chunk(self, ws: Any, chunk: bytes) -> None:
+        await ws.send(chunk)
+        self._seq_no += 1
 
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
-        final_transcripts: list[str] = []
-        last_final_time: float | None = None
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        await ws.send(json.dumps({"message": "EndOfStream", "last_seq_no": self._seq_no}))
 
-        try:
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    continue
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        msg_type: str = msg.get("message", "")
+        if msg_type in ("AudioAdded", "Warning", "Info"):
+            return False
+        if msg_type == "EndOfTranscript":
+            return True
+        if msg_type == "Error":
+            reason: str = msg.get("reason", "Unknown error")
+            if "EndOfStream" not in reason and "schema" not in reason.lower():
+                tx.fail(reason)
+            return False
 
-                msg: dict[str, Any] = json.loads(raw)
-                now = time.monotonic()
-                msg_type: str = msg.get("message", "")
-
-                if msg_type == "AudioAdded":
-                    continue
-                if msg_type == "EndOfTranscript":
-                    break
-                if msg_type == "Error":
-                    reason: str = msg.get("reason", "Unknown error")
-                    if "EndOfStream" not in reason and "schema" not in reason.lower():
-                        result.error = reason
-                    continue
-                if msg_type in ("Warning", "Info"):
-                    continue
-
-                transcript = self._extract_transcript(msg)
-                if transcript:
-                    if result.ttft_seconds is None and result.audio_start_time is not None:
-                        result.ttft_seconds = now - result.audio_start_time
-                        result.first_token_content = transcript
-                    result.partial_transcripts.append(transcript)
-
-                final_type = "AddSegment" if self._is_agent else "AddTranscript"
-                if msg_type == final_type:
-                    final_transcripts.append(transcript)
-                    last_final_time = now
-
-        except Exception as exc:
-            logger.warning(
-                "speechmatics_receive_error",
-                provider="speechmatics",
-                model=self._model,
-                exc_info=exc,
-            )
-            if result.error is None and last_final_time is None:
-                result.error = str(exc)
-
-        if last_final_time is not None and result.audio_start_time is not None:
-            result.audio_to_final_seconds = last_final_time - result.audio_start_time
-
-        if final_transcripts:
-            result.complete_transcript = " ".join(final_transcripts).strip() or None
-            if result.complete_transcript:
-                result.transcript_length = len(result.complete_transcript)
-                result.word_count = len(result.complete_transcript.split())
+        transcript = self._extract_transcript(msg)
+        if transcript:
+            tx.partial(transcript, now)
+        final_type = "AddSegment" if self._is_agent else "AddTranscript"
+        if msg_type == final_type:
+            tx.final(transcript, now)
+        return False
 
     def _extract_transcript(self, msg: dict[str, Any]) -> str:
         msg_type: str = msg.get("message", "")

@@ -10,6 +10,8 @@ from typing import Literal
 
 from coval_bench.providers.base import TranscriptionResult
 
+PartialFallback = Literal["last", "longest", "none"]
+
 
 def set_first_token(
     result: TranscriptionResult,
@@ -39,18 +41,28 @@ def finalize_transcript(
     *,
     explicit_transcript: str | None = None,
     final_segments: Sequence[str] | None = None,
-    partial_fallback: Literal["last", "longest"] = "longest",
+    partial_fallback: PartialFallback = "longest",
+    join: str = " ",
 ) -> None:
-    """Set ``complete_transcript`` and derived stats with a safe fallback policy."""
+    """Set ``complete_transcript`` and derived stats with a safe fallback policy.
+
+    ``join`` is the separator between final segments; providers whose segments
+    carry their own leading spaces pass ``""``. With ``partial_fallback="none"``
+    a clip without a final keeps ``complete_transcript`` None so WER scores it
+    as failed rather than from a fragment.
+    """
     transcript: str | None = None
 
     if explicit_transcript is not None and explicit_transcript.strip():
         transcript = explicit_transcript.strip()
     else:
-        cleaned_finals = [segment.strip() for segment in final_segments or [] if segment.strip()]
-        if cleaned_finals:
-            transcript = " ".join(cleaned_finals).strip() or None
+        if join:
+            cleaned_finals = [seg.strip() for seg in final_segments or [] if seg.strip()]
         else:
+            cleaned_finals = [seg for seg in final_segments or [] if seg]
+        if cleaned_finals:
+            transcript = join.join(cleaned_finals).strip() or None
+        elif partial_fallback != "none":
             cleaned_partials = [
                 partial.strip() for partial in result.partial_transcripts if partial.strip()
             ]

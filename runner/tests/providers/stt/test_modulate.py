@@ -12,28 +12,20 @@ concatenation of every ``utterance.text`` in arrival order.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.modulate import ModulateSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
 
 _MULTILINGUAL = "velma-2-stt-streaming"
 
 
 def make_provider(model: str = "velma-2-stt-streaming-english-v2") -> ModulateSTTProvider:
-    return ModulateSTTProvider(api_key=SecretStr("test-key-modulate"), model=model)
-
-
-def _fake_connect(events: list[Any]) -> Any:
-    ws = FakeWebSocket(events)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
+    return ModulateSTTProvider(make_settings(), model=model)
 
 
 # ---------------------------------------------------------------------------
@@ -42,13 +34,13 @@ def _fake_connect(events: list[Any]) -> Any:
 
 
 @pytest.mark.asyncio
-async def test_modulate_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_modulate_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("modulate", "events-success")
-    provider = ModulateSTTProvider(api_key=fake_api_key)
+    provider = ModulateSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.modulate.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -71,7 +63,7 @@ async def test_modulate_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes)
 
 @pytest.mark.asyncio
 async def test_modulate_ttft_fires_on_first_partial(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """TTFT is time-to-first-word: it fires on a partial, before any final."""
     events: list[Any] = [
@@ -79,11 +71,11 @@ async def test_modulate_ttft_fires_on_first_partial(
         {"type": "utterance", "utterance": {"text": "hello world"}},
         {"type": "done", "duration_ms": 2000},
     ]
-    provider = ModulateSTTProvider(api_key=fake_api_key)
+    provider = ModulateSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.modulate.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -99,7 +91,7 @@ async def test_modulate_ttft_fires_on_first_partial(
 
 @pytest.mark.asyncio
 async def test_modulate_excludes_partials_from_transcript(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """Only ``utterance`` messages form the transcript; partials are dropped."""
     events: list[Any] = [
@@ -107,11 +99,11 @@ async def test_modulate_excludes_partials_from_transcript(
         {"type": "utterance", "utterance": {"text": "hello world"}},
         {"type": "done", "duration_ms": 2000},
     ]
-    provider = ModulateSTTProvider(api_key=fake_api_key)
+    provider = ModulateSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.modulate.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -128,7 +120,7 @@ async def test_modulate_excludes_partials_from_transcript(
 
 @pytest.mark.asyncio
 async def test_modulate_multilingual_concatenates_utterances(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """Multiple per-utterance finals are concatenated in arrival order."""
     events: list[Any] = [
@@ -137,11 +129,11 @@ async def test_modulate_multilingual_concatenates_utterances(
         {"type": "utterance", "utterance": {"text": "comment ca va", "speaker": 1}},
         {"type": "done", "duration_ms": 4000},
     ]
-    provider = ModulateSTTProvider(api_key=fake_api_key, model=_MULTILINGUAL)
+    provider = ModulateSTTProvider(stt_settings, model=_MULTILINGUAL)
 
     with patch(
-        "coval_bench.providers.stt.modulate.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -157,16 +149,15 @@ async def test_modulate_multilingual_concatenates_utterances(
 
 @pytest.mark.asyncio
 async def test_modulate_sends_empty_eos_frame(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """End-of-audio is signalled with an empty text frame after the PCM chunks."""
-    ws = FakeWebSocket([{"type": "done", "duration_ms": 100}])
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-
-    provider = ModulateSTTProvider(api_key=fake_api_key)
-    with patch("coval_bench.providers.stt.modulate.ws_client.connect", return_value=cm):
+    sent: list[Any] = []
+    provider = ModulateSTTProvider(stt_settings)
+    with patch(
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect([{"type": "done", "duration_ms": 100}], sent),
+    ):
         await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
             channels=1,
@@ -175,22 +166,22 @@ async def test_modulate_sends_empty_eos_frame(
             realtime_resolution=0.5,
         )
 
-    assert ws._sent[-1] == ""
+    assert sent[-1] == ""
 
 
 @pytest.mark.asyncio
-async def test_modulate_multilingual_url_requests_partials(fake_api_key: SecretStr) -> None:
+async def test_modulate_multilingual_url_requests_partials(stt_settings: Settings) -> None:
     """The multilingual endpoint asks for partials and disables diarization."""
-    provider = ModulateSTTProvider(api_key=fake_api_key, model=_MULTILINGUAL)
-    url = provider._build_websocket_url(16000)
+    provider = ModulateSTTProvider(stt_settings, model=_MULTILINGUAL)
+    url = provider._ws_url(16000)
     assert "velma-2-stt-streaming?" in url
     assert "partial_results=true" in url
     assert "speaker_diarization=false" in url
 
 
-def test_modulate_english_url_omits_partials(fake_api_key: SecretStr) -> None:
-    provider = ModulateSTTProvider(api_key=fake_api_key)
-    url = provider._build_websocket_url(16000)
+def test_modulate_english_url_omits_partials(stt_settings: Settings) -> None:
+    provider = ModulateSTTProvider(stt_settings)
+    url = provider._ws_url(16000)
     assert "velma-2-stt-streaming-english-v2?" in url
     assert "partial_results" not in url
 
@@ -216,7 +207,7 @@ def test_provider_model() -> None:
 
 def test_missing_api_key_raises() -> None:
     with pytest.raises(ValueError, match="modulate_api_key is required"):
-        ModulateSTTProvider(api_key=None)
+        ModulateSTTProvider(make_settings(modulate_api_key=None))
 
 
 # ---------------------------------------------------------------------------
@@ -226,9 +217,9 @@ def test_missing_api_key_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_modulate_rejects_non_mono_or_non_16bit(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
-    provider = ModulateSTTProvider(api_key=fake_api_key)
+    provider = ModulateSTTProvider(stt_settings)
     result = await provider.measure_ttft(
         audio_data=audio_pcm_bytes,
         channels=2,
@@ -248,14 +239,14 @@ async def test_modulate_rejects_non_mono_or_non_16bit(
 
 @pytest.mark.asyncio
 async def test_modulate_server_error_surfaces(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     events: list[Any] = [{"type": "error", "error": "unsupported audio format"}]
-    provider = ModulateSTTProvider(api_key=fake_api_key)
+    provider = ModulateSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.modulate.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -270,12 +261,12 @@ async def test_modulate_server_error_surfaces(
 
 
 @pytest.mark.asyncio
-async def test_modulate_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    provider = ModulateSTTProvider(api_key=fake_api_key)
+async def test_modulate_empty_stream(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
+    provider = ModulateSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.modulate.ws_client.connect",
-        return_value=_fake_connect([]),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect([]),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -290,12 +281,12 @@ async def test_modulate_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: b
 
 
 @pytest.mark.asyncio
-async def test_modulate_connection_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_modulate_connection_error(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """A connect failure surfaces as result.error, not a silent empty success."""
-    provider = ModulateSTTProvider(api_key=fake_api_key)
+    provider = ModulateSTTProvider(stt_settings)
 
     with patch(
-        "coval_bench.providers.stt.modulate.ws_client.connect",
+        "coval_bench.providers.stt._streaming.ws_client.connect",
         side_effect=OSError("connection refused"),
     ):
         result = await provider.measure_ttft(
@@ -314,21 +305,20 @@ async def test_modulate_connection_error(fake_api_key: SecretStr, audio_pcm_byte
 
 @pytest.mark.asyncio
 async def test_modulate_surfaces_send_failure(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """A send failure inside the streaming task is surfaced, not swallowed by gather."""
+    from tests.providers.stt.conftest import FakeWebSocket
 
     def _raise_on_audio(msg: object) -> None:
         if isinstance(msg, (bytes, bytearray)):
             raise RuntimeError("send boom")
 
-    ws = FakeWebSocket([], on_send=_raise_on_audio)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect([])
+    cm.__aenter__.return_value = FakeWebSocket([], on_send=_raise_on_audio)
 
-    provider = ModulateSTTProvider(api_key=fake_api_key)
-    with patch("coval_bench.providers.stt.modulate.ws_client.connect", return_value=cm):
+    provider = ModulateSTTProvider(stt_settings)
+    with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
             channels=1,

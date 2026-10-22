@@ -17,30 +17,22 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from pydantic import SecretStr
 
+from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.gemini import GeminiSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
+from tests.providers.stt.conftest import FakeWebSocket, fake_connect, load_fixture_events
 
-_CONNECT = "coval_bench.providers.stt.gemini.ws_client.connect"
-
-
-def _fake_connect(events: list[Any]) -> tuple[Any, FakeWebSocket]:
-    ws = FakeWebSocket(events)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm, ws
+_CONNECT = "coval_bench.providers.stt._streaming.ws_client.connect"
 
 
 async def _measure(
     provider: GeminiSTTProvider, events: list[Any], audio: bytes
 ) -> tuple[Any, FakeWebSocket]:
-    cm, ws = _fake_connect(events)
+    cm = fake_connect(events)
     with patch(_CONNECT, return_value=cm):
         result = await provider.measure_ttft(
             audio_data=audio,
@@ -49,13 +41,13 @@ async def _measure(
             sample_rate=16000,
             realtime_resolution=0.5,
         )
-    return result, ws
+    return result, cm.ws
 
 
 @pytest.mark.asyncio
-async def test_gemini_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_gemini_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("gemini", "events-success")
-    provider = GeminiSTTProvider(api_key=fake_api_key)
+    provider = GeminiSTTProvider(stt_settings)
 
     result, ws = await _measure(provider, events, audio_pcm_bytes)
 
@@ -77,15 +69,13 @@ async def test_gemini_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -
 
 
 @pytest.mark.asyncio
-async def test_gemini_decodes_binary_frames(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
-) -> None:
+async def test_gemini_decodes_binary_frames(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     """The live API sends JSON in binary frames; they must decode, not be skipped."""
     events: list[Any] = [
         json.dumps(event).encode("utf-8")
         for event in load_fixture_events("gemini", "events-success")
     ]
-    provider = GeminiSTTProvider(api_key=fake_api_key)
+    provider = GeminiSTTProvider(stt_settings)
 
     result, _ = await _measure(provider, events, audio_pcm_bytes)
 
@@ -96,7 +86,7 @@ async def test_gemini_decodes_binary_frames(
 
 @pytest.mark.asyncio
 async def test_gemini_completion_before_final(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """Transcriptions have no ordering guarantee vs other server content: a
     ``generationComplete`` arriving ahead of its final must not end the session
@@ -107,7 +97,7 @@ async def test_gemini_completion_before_final(
         {"serverContent": {"generationComplete": True}},
         {"serverContent": {"inputTranscription": {"text": "hello world"}}},
     ]
-    provider = GeminiSTTProvider(api_key=fake_api_key)
+    provider = GeminiSTTProvider(stt_settings)
 
     result, _ = await _measure(provider, events, audio_pcm_bytes)
 
@@ -117,12 +107,12 @@ async def test_gemini_completion_before_final(
 
 
 @pytest.mark.asyncio
-async def test_gemini_stream_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_gemini_stream_error(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events: list[Any] = [
         {"setupComplete": {}},
         {"error": {"message": "quota exceeded"}},
     ]
-    provider = GeminiSTTProvider(api_key=fake_api_key)
+    provider = GeminiSTTProvider(stt_settings)
 
     result, _ = await _measure(provider, events, audio_pcm_bytes)
 
@@ -131,9 +121,9 @@ async def test_gemini_stream_error(fake_api_key: SecretStr, audio_pcm_bytes: byt
 
 
 @pytest.mark.asyncio
-async def test_gemini_setup_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_gemini_setup_error(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events: list[Any] = [{"error": {"message": "invalid model"}}]
-    provider = GeminiSTTProvider(api_key=fake_api_key)
+    provider = GeminiSTTProvider(stt_settings)
 
     result, _ = await _measure(provider, events, audio_pcm_bytes)
 

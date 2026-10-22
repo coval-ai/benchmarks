@@ -13,34 +13,30 @@ Close: {"type": "CloseStream"}
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
-import time  # monotonic clock — wall-clock can step on NTP sync
-from typing import Any
+import time
+from dataclasses import dataclass, field
+from typing import Any, cast
 
-import structlog
-import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
-
-from coval_bench.providers.base import STTProvider, TranscriptionResult
-from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-
-logger = structlog.get_logger(__name__)
-
-# After Finalize, wait this long for the forced final before sending CloseStream,
-# so the close can't race the final (the WS close-gate bug class). Falls through on
-# timeout — the outer per-item timeout still bounds the run.
-_FINAL_WAIT_S = 5.0
+from coval_bench.config import Settings
+from coval_bench.providers.base import TranscriptionResult
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 
-class DeepgramProvider(STTProvider):
+@dataclass
+class _DeepgramTranscription(Transcription):
+    # Longest interim not yet covered by a final; appended to the nova transcript.
+    pending_partial: str = ""
+    # Flux transcript is cumulative within a turn and resets per turn.
+    flux_turns: dict[int, str] = field(default_factory=dict)
+
+
+class DeepgramProvider(WebSocketSTTProvider):
     """Deepgram streaming STT provider."""
 
-    def __init__(self, api_key: SecretStr, model: str = "default") -> None:
-        self._api_key = api_key
-        self._model = model
+    def __init__(self, settings: Settings, model: str = "default") -> None:
+        super().__init__(settings, model)
+        self._api_key = self._require_secret("deepgram_api_key")
 
     @property
     def name(self) -> str:
@@ -49,19 +45,17 @@ class DeepgramProvider(STTProvider):
         return f"deepgram-{self._model}"
 
     @property
-    def model(self) -> str:
-        return self._model
+    def _is_flux(self) -> bool:
+        return self._model.startswith("flux-")
 
-    # ------------------------------------------------------------------
-    # URL building
-    # ------------------------------------------------------------------
+    def _new_result(self) -> TranscriptionResult:
+        return TranscriptionResult(provider=self.name, vad_events_count=0)
 
-    def _build_websocket_url(self, sample_rate: int, channels: int) -> str:
-        if self._model.startswith("flux-"):
-            if channels != 1:
-                raise ValueError(
-                    f"Flux models require mono audio (channels=1), got channels={channels}"
-                )
+    def _new_transcription(self, result: TranscriptionResult) -> Transcription:
+        return _DeepgramTranscription(result)
+
+    def _ws_url(self, sample_rate: int) -> str:
+        if self._is_flux:
             # v2/listen 400s on v1-only query params (channels/interim_results/no_delay).
             return (
                 "wss://api.deepgram.com/v2/listen"
@@ -75,7 +69,7 @@ class DeepgramProvider(STTProvider):
             f"wss://api.deepgram.com/v1/listen"
             f"?sample_rate={sample_rate}"
             f"&encoding=linear16"
-            f"&channels={channels}"
+            f"&channels=1"
             f"&interim_results=true"
             f"&vad_events=true"
             f"&no_delay=true"
@@ -89,260 +83,113 @@ class DeepgramProvider(STTProvider):
             url += f"&model={self._model}"
         return url
 
-    # ------------------------------------------------------------------
-    # Public interface
-    # ------------------------------------------------------------------
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Token {self._api_key.get_secret_value()}"}
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name, vad_events_count=0)
-        total_start = time.monotonic()
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        if self._is_flux:
+            tx.result.finalization_start_time = time.monotonic()
+            if not await self._send_and_wait(ws, json.dumps({"type": "ForceEndTurn"}), tx):
+                tx.result.finalization_timed_out = True
+        else:
+            # nova finalizes on our signal (endpointing disabled): wait for the forced
+            # final before closing so the close can't race it.
+            await self._send_and_wait(ws, json.dumps({"type": "Finalize"}), tx)
+        await ws.send(json.dumps({"type": "CloseStream"}))
 
-        try:
-            url = self._build_websocket_url(sample_rate, channels)
-            headers = {"Authorization": f"Token {self._api_key.get_secret_value()}"}
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        tx = cast(_DeepgramTranscription, tx)
+        result = tx.result
+        msg_type: str = msg.get("type", "")
 
-            final_event = asyncio.Event()
-            async with ws_client.connect(url, additional_headers=headers) as ws:
-                await run_stream(
-                    result,
-                    self._send_audio(
-                        ws,
-                        audio_data,
-                        channels,
-                        sample_width,
-                        sample_rate,
-                        result,
-                        realtime_resolution,
-                        final_event,
-                    ),
-                    self._receive(ws, result, final_event),
-                )
+        if msg_type == "SpeechStarted":
+            if result.audio_start_time is not None and result.vad_first_detected is None:
+                result.vad_first_detected = now - result.audio_start_time
+                result.vad_first_event_content = str(msg)
+            result.vad_events_count = (result.vad_events_count or 0) + 1
+            return False
 
-        except Exception as exc:
-            logger.warning(
-                "deepgram_measure_ttft_failed", provider="deepgram", model=self._model, exc_info=exc
-            )
-            result.error = str(exc)
+        if msg_type in ("UtteranceEnd", "Metadata", "Connected"):
+            return False
 
-        result.total_time = time.monotonic() - total_start
-        return result
+        if msg_type == "Warning":
+            code = str(msg.get("code", ""))
+            if code == "FORCE_END_TURN_NO_ACTIVE_TURN":
+                result.finalization_warning_code = code
+                tx.final_event.set()
+            return False
 
-    # ------------------------------------------------------------------
-    # Send helpers
-    # ------------------------------------------------------------------
-
-    async def _send_audio(
-        self,
-        ws: Any,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        result: TranscriptionResult,
-        realtime_resolution: float,
-        final_event: asyncio.Event,
-    ) -> None:
-        byte_rate = sample_width * sample_rate * channels
-        chunk_size = int(byte_rate * realtime_resolution)
-        try:
-            async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
-                result.audio_start_time = start
-                await ws.send(chunk)
-            if self._model.startswith("flux-"):
-                final_event.clear()
-                result.finalization_start_time = time.monotonic()
-                await ws.send(json.dumps({"type": "ForceEndTurn"}))
-                try:
-                    await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
-                except TimeoutError:
-                    result.finalization_timed_out = True
-            else:
-                # nova finalizes on our signal (endpointing disabled): send Finalize, then
-                # wait for the forced final before closing so the close can't race it.
-                # Clear first: nova can emit an is_final segment mid-stream, which would
-                # leave the latch set and make the wait a no-op.
-                final_event.clear()
-                await ws.send(json.dumps({"type": "Finalize"}))
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
-            await ws.send(json.dumps({"type": "CloseStream"}))
-        except Exception as exc:
-            logger.warning(
-                "deepgram_send_error", provider="deepgram", model=self._model, exc_info=exc
-            )
-            raise
-
-    # ------------------------------------------------------------------
-    # Receive helpers
-    # ------------------------------------------------------------------
-
-    async def _receive(
-        self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
-    ) -> None:
-        final_segments: list[str] = []
-        pending_partial: str = ""
-        flux_turns: dict[int, str] = {}
-        last_final_time: float | None = None
-
-        try:
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    continue
-
-                msg: dict[str, Any] = json.loads(raw)
-                now = time.monotonic()
-                msg_type: str = msg.get("type", "")
-
-                # VAD events
-                if msg_type == "SpeechStarted":
-                    if result.audio_start_time is not None:
-                        elapsed = now - result.audio_start_time
-                        if result.vad_first_detected is None:
-                            result.vad_first_detected = elapsed
-                            result.vad_first_event_content = str(msg)
-                    result.vad_events_count = (result.vad_events_count or 0) + 1
-                    continue
-
-                if msg_type in ("UtteranceEnd", "Metadata", "Connected"):
-                    continue
-
-                if msg_type == "Warning":
-                    code = str(msg.get("code", ""))
-                    if code == "FORCE_END_TURN_NO_ACTIVE_TURN":
-                        result.finalization_warning_code = code
-                        final_event.set()
-                    continue
-
-                # Flux transcript is cumulative within a turn and resets per
-                # turn, so key by turn_index and concatenate turns.
-                if msg_type == "TurnInfo":
-                    is_end_of_turn = msg.get("event") == "EndOfTurn"
-                    transcript = str(msg.get("transcript", "")).strip()
-                    if not transcript:
-                        words: list[dict[str, Any]] = msg.get("words", [])
-                        parts = []
-                        for w in words:
-                            text = (
-                                str(w.get("punctuated_word", "")).strip()
-                                or str(w.get("word", "")).strip()
-                            )
-                            if text:
-                                parts.append(text)
-                        transcript = " ".join(parts)
-                    if transcript:
-                        if result.ttft_seconds is None and result.audio_start_time is not None:
-                            result.ttft_seconds = now - result.audio_start_time
-                            result.first_token_content = (
-                                transcript[:30] + "..." if len(transcript) > 30 else transcript
-                            )
-                        result.partial_transcripts.append(transcript)
-                        flux_turns[int(msg.get("turn_index", 0))] = transcript
-                    if is_end_of_turn:
-                        last_final_time = now
-                        trigger = str(msg.get("trigger", "")) or None
-                        result.finalization_trigger = trigger
-                        audio_window_end = msg.get("audio_window_end")
-                        if isinstance(audio_window_end, (int, float)):
-                            result.final_audio_window_end_seconds = float(audio_window_end)
-                        if result.finalization_start_time is not None:
-                            result.finalization_latency_seconds = max(
-                                0.0, now - result.finalization_start_time
-                            )
-                        final_event.set()
-                    continue
-
-                transcript = self._extract_transcript(msg)
-                if not transcript:
-                    continue
-
-                # TTFT
-                if result.ttft_seconds is None and result.audio_start_time is not None:
-                    result.ttft_seconds = now - result.audio_start_time
-                    result.first_token_content = (
-                        transcript[:30] + "..." if len(transcript) > 30 else transcript
+        if msg_type == "TurnInfo":
+            transcript = str(msg.get("transcript", "")).strip() or _words_text(msg.get("words", []))
+            if transcript:
+                tx.partial(transcript, now)
+                tx.flux_turns[int(msg.get("turn_index", 0))] = transcript
+            if msg.get("event") == "EndOfTurn":
+                result.finalization_trigger = str(msg.get("trigger", "")) or None
+                audio_window_end = msg.get("audio_window_end")
+                if isinstance(audio_window_end, (int, float)):
+                    result.final_audio_window_end_seconds = float(audio_window_end)
+                if result.finalization_start_time is not None:
+                    result.finalization_latency_seconds = max(
+                        0.0, now - result.finalization_start_time
                     )
+                tx.final("", now)
+            return False
 
-                result.partial_transcripts.append(transcript)
+        transcript = self._extract_transcript(msg)
+        if not transcript:
+            return False
+        tx.partial(transcript, now)
+        if msg.get("is_final"):
+            tx.final(transcript, now)
+            tx.pending_partial = ""
+        elif len(transcript) > len(tx.pending_partial):
+            tx.pending_partial = transcript
+        return False
 
-                # Full transcript is the concatenation of ALL is_final segments;
-                # speech_final alone drops the is_final-only pieces between pauses.
-                if msg.get("is_final"):
-                    final_segments.append(transcript)
-                    pending_partial = ""
-                    last_final_time = now
-                    final_event.set()
-                else:
-                    # Keep the longest interim as the not-yet-finalized tail.
-                    if len(transcript) > len(pending_partial):
-                        pending_partial = transcript
-
-        except Exception as exc:
-            logger.warning(
-                "deepgram_receive_error", provider="deepgram", model=self._model, exc_info=exc
-            )
-            if result.error is None and last_final_time is None:
-                result.error = str(exc)
-
-        if last_final_time is not None and result.audio_start_time is not None:
-            result.audio_to_final_seconds = last_final_time - result.audio_start_time
-
-        is_flux = self._model.startswith("flux-")
+    def _finish(self, tx: Transcription) -> None:
+        tx = cast(_DeepgramTranscription, tx)
+        result = tx.result
         final_trigger = result.finalization_trigger
         if (
-            is_flux
-            and last_final_time is not None
+            self._is_flux
+            and result.audio_to_final_seconds is not None
             and final_trigger != "manual"
             and result.error is None
         ):
             result.error = f"Flux EndOfTurn was not manually triggered (trigger={final_trigger!r})"
 
-        # Build complete transcript
-        if is_flux and final_trigger == "manual":
-            joined = " ".join(flux_turns[i] for i in sorted(flux_turns)).strip()
+        if self._is_flux and final_trigger == "manual":
+            joined = " ".join(tx.flux_turns[i] for i in sorted(tx.flux_turns)).strip()
             result.complete_transcript = joined or None
-        elif final_segments or pending_partial:
-            parts = list(final_segments)
-            if pending_partial:
-                parts.append(pending_partial)
+        elif tx.finals or tx.pending_partial:
+            # Every is_final segment, plus the not-yet-finalized tail.
+            parts = list(tx.finals)
+            if tx.pending_partial:
+                parts.append(tx.pending_partial)
             result.complete_transcript = " ".join(parts).strip() or None
 
         if result.complete_transcript:
             result.transcript_length = len(result.complete_transcript)
             result.word_count = len(result.complete_transcript.split())
 
-    # ------------------------------------------------------------------
-    # Transcript extraction
-    # ------------------------------------------------------------------
-
     def _extract_transcript(self, msg: dict[str, Any]) -> str:
-        # Used for nova-2/nova-3/default (v1/listen Results messages):
-        #   {"type": "Results", "channel": {"alternatives": [{"transcript": "..."}]}}
-        # flux-general-en uses v2/listen TurnInfo messages, which carry a
-        # top-level "transcript" + "words" — handled inline in _receive.
+        # v1/listen Results: {"type": "Results", "channel": {"alternatives": [...]}}
         try:
             channel: dict[str, Any] = msg.get("channel", {})
             alternatives: list[dict[str, Any]] = channel.get("alternatives", [])
             if not alternatives:
                 return ""
             alt = alternatives[0]
-            words: list[dict[str, Any]] = alt.get("words", [])
-            if words:
-                parts = []
-                for w in words:
-                    text = (
-                        str(w.get("punctuated_word", "")).strip() or str(w.get("word", "")).strip()
-                    )
-                    if text:
-                        parts.append(text)
-                if parts:
-                    return " ".join(parts)
-            return str(alt.get("transcript", "")).strip()
+            return _words_text(alt.get("words", [])) or str(alt.get("transcript", "")).strip()
         except (KeyError, IndexError, TypeError):
             return ""
+
+
+def _words_text(words: list[dict[str, Any]]) -> str:
+    parts = []
+    for w in words:
+        text = str(w.get("punctuated_word", "")).strip() or str(w.get("word", "")).strip()
+        if text:
+            parts.append(text)
+    return " ".join(parts)

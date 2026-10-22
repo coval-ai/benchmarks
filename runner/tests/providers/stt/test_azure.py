@@ -12,27 +12,25 @@ from __future__ import annotations
 import asyncio
 import json
 import struct
-import time
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from pydantic import SecretStr
 
-from coval_bench.providers.base import TranscriptionResult
+from coval_bench.config import Settings
 from coval_bench.providers.stt.azure import (
     AzureSTTProvider,
     _audio_message,
     _parse_message,
     _wav_header,
 )
-from tests.providers.stt.conftest import FakeWebSocket
+from tests.providers.stt.conftest import fake_connect, make_settings
 
 REGION = "eastus"
 
 
 def make_provider(model: str = "default") -> AzureSTTProvider:
-    return AzureSTTProvider(api_key=SecretStr("test-key-azure"), model=model, region=REGION)
+    return AzureSTTProvider(make_settings(azure_region=REGION), model=model)
 
 
 def _frame(path: str, body: dict[str, Any] | None = None) -> str:
@@ -50,20 +48,12 @@ def _phrase(text: str, status: str = "Success") -> dict[str, Any]:
     }
 
 
-def _fake_connect(events: list[Any], on_send: Any = None) -> Any:
-    ws = FakeWebSocket(events, on_send=on_send)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
-
-
 async def _run(
-    provider: AzureSTTProvider, events: list[Any], audio: bytes, on_send: Any = None
+    provider: AzureSTTProvider, events: list[Any], audio: bytes, sent: list[Any] | None = None
 ) -> Any:
     with patch(
-        "coval_bench.providers.stt.azure.ws_client.connect",
-        return_value=_fake_connect(events, on_send=on_send),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events, sent),
     ):
         return await provider.measure_ttft(
             audio_data=audio,
@@ -170,30 +160,25 @@ async def test_azure_empty_stream(audio_pcm_bytes: bytes) -> None:
     assert result.ttft_seconds is None
 
 
-class _CancelAfterEvents:
-    """Async-iterable WS fake that replays events, then raises CancelledError."""
-
-    def __init__(self, events: list[str]) -> None:
-        self._events = list(events)
-
-    def __aiter__(self) -> _CancelAfterEvents:
-        return self
-
-    async def __anext__(self) -> str:
-        if self._events:
-            return self._events.pop(0)
-        raise asyncio.CancelledError
-
-
 @pytest.mark.asyncio
-async def test_azure_receive_commits_finals_on_cancellation() -> None:
-    """A cancellation after a final still commits the transcript (finally block)."""
-    result = TranscriptionResult(provider="azure")
-    result.audio_start_time = time.monotonic()
-    ws = _CancelAfterEvents([_frame("speech.phrase", _phrase("hello world"))])
+async def test_azure_commits_finals_on_cancellation(audio_pcm_bytes: bytes) -> None:
+    """Cancelling the clip after a final still commits the transcript (finally block)."""
+    provider = make_provider()
+    result = provider._new_result()
+    events = [_frame("speech.phrase", _phrase("hello world"))]
 
-    with pytest.raises(asyncio.CancelledError):
-        await make_provider()._receive(ws, result)
+    with patch(
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events, server_closes=False),
+    ):
+        task = asyncio.create_task(provider._transcribe(audio_pcm_bytes, 16000, 0.5, result))
+        for _ in range(1000):
+            if result.audio_to_final_seconds is not None:
+                break
+            await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
     assert result.complete_transcript == "hello world"
     assert result.audio_to_final_seconds is not None
@@ -210,7 +195,7 @@ async def test_azure_sends_speech_config_then_ends_with_empty_audio(
 ) -> None:
     sent: list[Any] = []
     events = [_frame("turn.start"), _frame("speech.phrase", _phrase("hi")), _frame("turn.end")]
-    await _run(make_provider(), events, audio_pcm_bytes, on_send=sent.append)
+    await _run(make_provider(), events, audio_pcm_bytes, sent=sent)
 
     # First message is the speech.config text frame.
     assert isinstance(sent[0], str)
@@ -223,14 +208,18 @@ async def test_azure_sends_speech_config_then_ends_with_empty_audio(
     header_len = struct.unpack(">H", last[:2])[0]
     assert len(last) == 2 + header_len
     assert b"Path:audio" in last[2 : 2 + header_len]
+    # The first payload opens with the RIFF header.
+    first = binary[0]
+    first_header_len = struct.unpack(">H", first[:2])[0]
+    assert first[2 + first_header_len : 2 + first_header_len + 4] == b"RIFF"
 
 
 @pytest.mark.asyncio
 async def test_azure_url_uses_region_and_conversation_mode(audio_pcm_bytes: bytes) -> None:
     events = [_frame("turn.end")]
     with patch(
-        "coval_bench.providers.stt.azure.ws_client.connect",
-        return_value=_fake_connect(events),
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(events),
     ) as mock_connect:
         await make_provider().measure_ttft(audio_pcm_bytes, 1, 2, 16000, 0.5)
 
@@ -276,15 +265,15 @@ def test_wav_header_is_canonical_pcm() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_provider_name() -> None:
-    assert make_provider().name == "azure"
+def test_provider_name(stt_settings: Settings) -> None:
+    assert AzureSTTProvider(stt_settings).name == "azure"
 
 
 def test_missing_region_raises() -> None:
-    with pytest.raises(ValueError, match="requires region"):
-        AzureSTTProvider(api_key=SecretStr("k"))
+    with pytest.raises(ValueError, match="azure_region is required"):
+        AzureSTTProvider(make_settings(azure_region=None))
 
 
 def test_missing_api_key_raises() -> None:
-    with pytest.raises(ValueError, match="requires api_key"):
-        AzureSTTProvider(api_key=None, region=REGION)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="azure_api_key is required"):
+        AzureSTTProvider(make_settings(azure_api_key=None))

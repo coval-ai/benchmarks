@@ -15,37 +15,18 @@ import asyncio
 import base64
 import contextlib
 import json
-import time
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, cast
 
-import structlog
-import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
-
-from coval_bench.providers.base import STTProvider, TranscriptionResult
-from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-from coval_bench.providers.stt._transcript_utils import (
-    add_partial_transcript,
-    finalize_transcript,
-    set_first_token,
-)
-
-logger = structlog.get_logger(__name__)
+from coval_bench.config import Settings
+from coval_bench.providers.base import TranscriptionResult
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 _WS_URL = (
     "wss://generativelanguage.googleapis.com/ws/"
     "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 )
 _SETUP_TIMEOUT_S = 30.0
-
-# The server never ends the session itself (verified live 2026-08): it holds the
-# socket open after ``audioStreamEnd``, and ``generationComplete`` fires per
-# utterance, not per session. Transcriptions also stream independently of other
-# server content with no ordering guarantee, so the sender waits this long for
-# BOTH the post-stream-end final and its completion before closing — a close on
-# the completion alone could race a reordered final and truncate the transcript.
-_FINAL_WAIT_S = 5.0
 
 
 def _decode_event(raw: str | bytes) -> dict[str, Any]:
@@ -55,24 +36,30 @@ def _decode_event(raw: str | bytes) -> dict[str, Any]:
     return event
 
 
-class GeminiSTTProvider(STTProvider):
+@dataclass
+class _GeminiTranscription(Transcription):
+    complete_seen: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+class GeminiSTTProvider(WebSocketSTTProvider):
     """Gemini Live API streaming transcription provider."""
 
-    def __init__(
-        self, api_key: SecretStr | None, model: str = "gemini-3.5-transcribe-live"
-    ) -> None:
-        if api_key is None:
-            raise ValueError("gemini_api_key is required for the Gemini STT provider")
-        self._api_key = api_key
-        self._model = model
+    # The Live API sends JSON in binary frames.
+    _SKIP_BINARY_FRAMES = False
+
+    _PARTIAL_FALLBACK = "longest"
+    _SAMPLE_RATE = 16000
+
+    def __init__(self, settings: Settings, model: str = "gemini-3.5-transcribe-live") -> None:
+        super().__init__(settings, model)
+        self._api_key = self._require_secret("gemini_api_key")
 
     @property
     def name(self) -> str:
         return "gemini"
 
-    @property
-    def model(self) -> str:
-        return self._model
+    def _new_transcription(self, result: TranscriptionResult) -> Transcription:
+        return _GeminiTranscription(result)
 
     def _build_setup(self) -> dict[str, Any]:
         return {
@@ -86,59 +73,10 @@ class GeminiSTTProvider(STTProvider):
             }
         }
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name)
-        if sample_rate != 16000:
-            result.error = f"Gemini Live requires 16 kHz PCM input; got {sample_rate} Hz"
-            return result
-        if channels != 1 or sample_width != 2:
-            result.error = (
-                "Gemini Live requires mono 16-bit PCM input; "
-                f"got channels={channels}, sample_width={sample_width}"
-            )
-            return result
+    def _ws_url(self, sample_rate: int) -> str:
+        return f"{_WS_URL}?key={self._api_key.get_secret_value()}"
 
-        total_start = time.monotonic()
-
-        try:
-            url = f"{_WS_URL}?key={self._api_key.get_secret_value()}"
-            async with ws_client.connect(url) as ws:
-                await self._wait_for_setup_complete(ws)
-
-                final_seen = asyncio.Event()
-                complete_seen = asyncio.Event()
-                await run_stream(
-                    result,
-                    self._send_audio(
-                        ws,
-                        audio_data,
-                        sample_rate,
-                        result,
-                        realtime_resolution,
-                        final_seen,
-                        complete_seen,
-                    ),
-                    self._receive(ws, result, final_seen, complete_seen),
-                )
-
-        except Exception as exc:
-            logger.warning(
-                "gemini_measure_ttft_failed", provider="gemini", model=self._model, exc_info=exc
-            )
-            if result.error is None:
-                result.error = str(exc)
-
-        result.total_time = time.monotonic() - total_start
-        return result
-
-    async def _wait_for_setup_complete(self, ws: Any) -> None:
+    async def _open(self, ws: Any, tx: Transcription, sample_rate: int) -> None:
         await ws.send(json.dumps(self._build_setup()))
         try:
             async with asyncio.timeout(_SETUP_TIMEOUT_S):
@@ -158,92 +96,54 @@ class GeminiSTTProvider(STTProvider):
         except TimeoutError as exc:
             raise RuntimeError(f"Did not receive setupComplete within {_SETUP_TIMEOUT_S}s") from exc
 
-    async def _send_audio(
-        self,
-        ws: Any,
-        audio_data: bytes,
-        sample_rate: int,
-        result: TranscriptionResult,
-        realtime_resolution: float,
-        final_seen: asyncio.Event,
-        complete_seen: asyncio.Event,
-    ) -> None:
-        bytes_per_second = sample_rate * 2  # 16-bit mono
-        chunk_size = int(bytes_per_second * realtime_resolution)
-        try:
-            async for chunk, start in paced_chunks(audio_data, chunk_size, bytes_per_second):
-                result.audio_start_time = start
-                await ws.send(
-                    json.dumps(
-                        {
-                            "realtimeInput": {
-                                "audio": {
-                                    "data": base64.b64encode(chunk).decode("ascii"),
-                                    "mimeType": f"audio/pcm;rate={sample_rate}",
-                                }
-                            }
+    async def _send_chunk(self, ws: Any, chunk: bytes) -> None:
+        await ws.send(
+            json.dumps(
+                {
+                    "realtimeInput": {
+                        "audio": {
+                            "data": base64.b64encode(chunk).decode("ascii"),
+                            "mimeType": f"audio/pcm;rate={self._SAMPLE_RATE}",
                         }
-                    )
-                )
-            # Events seen mid-audio belong to earlier utterances; only ones
-            # arriving after this clear can be the stream-end flush.
-            final_seen.clear()
-            complete_seen.clear()
-            await ws.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
-            with contextlib.suppress(TimeoutError):
-                async with asyncio.timeout(_FINAL_WAIT_S):
-                    await final_seen.wait()
-                    await complete_seen.wait()
-            await ws.close()
-        except Exception as exc:
-            logger.warning("gemini_send_error", provider="gemini", model=self._model, exc_info=exc)
-            raise
-
-    async def _receive(
-        self,
-        ws: Any,
-        result: TranscriptionResult,
-        final_seen: asyncio.Event,
-        complete_seen: asyncio.Event,
-    ) -> None:
-        final_parts: list[str] = []
-
-        try:
-            async for raw in ws:
-                msg = _decode_event(raw)
-                now = time.monotonic()
-
-                if "error" in msg:
-                    result.error = str(msg["error"].get("message", "Gemini error"))
-                    logger.warning(
-                        "gemini_stt_error", provider="gemini", model=self._model, msg=msg
-                    )
-                    break
-
-                server_content: dict[str, Any] = msg.get("serverContent") or {}
-
-                interim_event = server_content.get("interimInputTranscription") or {}
-                interim = str(interim_event.get("text", ""))
-                if interim.strip():
-                    set_first_token(result, interim, now=now)
-                    add_partial_transcript(result, interim)
-
-                final = str((server_content.get("inputTranscription") or {}).get("text", ""))
-                if final.strip():
-                    set_first_token(result, final, now=now)
-                    final_parts.append(final)
-                    if result.audio_start_time is not None:
-                        result.audio_to_final_seconds = now - result.audio_start_time
-                    final_seen.set()
-
-                if server_content.get("generationComplete"):
-                    complete_seen.set()
-
-        except Exception as exc:
-            logger.warning(
-                "gemini_receive_error", provider="gemini", model=self._model, exc_info=exc
+                    }
+                }
             )
-            if result.error is None and result.audio_to_final_seconds is None:
-                result.error = str(exc)
+        )
 
-        finalize_transcript(result, final_segments=final_parts, partial_fallback="longest")
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        tx = cast(_GeminiTranscription, tx)
+        # Events seen mid-audio belong to earlier utterances; only ones
+        # arriving after this clear can be the stream-end flush.
+        tx.final_event.clear()
+        tx.complete_seen.clear()
+        await ws.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(self._FINAL_WAIT_S):
+                await tx.final_event.wait()
+                await tx.complete_seen.wait()
+        await ws.close()
+
+    def _decode(self, raw: str | bytes) -> Any:
+        return _decode_event(raw)
+
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        tx = cast(_GeminiTranscription, tx)
+        if "error" in msg:
+            tx.fail(str(msg["error"].get("message", "Gemini error")))
+            self._log.warning("gemini_stt_error", msg=msg)
+            return True
+
+        server_content: dict[str, Any] = msg.get("serverContent") or {}
+
+        interim_event = server_content.get("interimInputTranscription") or {}
+        interim = str(interim_event.get("text", ""))
+        if interim.strip():
+            tx.partial(interim, now)
+
+        final = str((server_content.get("inputTranscription") or {}).get("text", ""))
+        if final.strip():
+            tx.final(final, now)
+
+        if server_content.get("generationComplete"):
+            tx.complete_seen.set()
+        return False

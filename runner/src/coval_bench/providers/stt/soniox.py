@@ -6,170 +6,69 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import Any
 
-import structlog
-import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
-
-from coval_bench.providers.base import STTProvider, TranscriptionResult
-from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-
-logger = structlog.get_logger(__name__)
+from coval_bench.config import Settings
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 _WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 
 
-class SonioxSTTProvider(STTProvider):
+class SonioxSTTProvider(WebSocketSTTProvider):
     """Soniox streaming STT provider."""
 
-    def __init__(self, api_key: SecretStr | None, model: str = "stt-rt-v5") -> None:
-        if api_key is None:
-            raise ValueError("soniox_api_key is required for the Soniox STT provider")
-        self._api_key = api_key
-        self._model = model
+    # Tokens carry their own leading spaces.
+    _FINAL_JOIN = ""
+    _SAMPLE_RATE = 16000
+
+    def __init__(self, settings: Settings, model: str = "stt-rt-v5") -> None:
+        super().__init__(settings, model)
+        self._api_key = self._require_secret("soniox_api_key")
 
     @property
     def name(self) -> str:
         return "soniox"
 
-    @property
-    def model(self) -> str:
-        return self._model
+    def _ws_url(self, sample_rate: int) -> str:
+        return _WS_URL
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name)
-        if sample_rate != 16000:
-            result.error = f"Soniox requires 16 kHz PCM input; got {sample_rate} Hz"
-            return result
-        if channels != 1 or sample_width != 2:
-            result.error = (
-                "Soniox requires mono 16-bit PCM input; "
-                f"got channels={channels}, sample_width={sample_width}"
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
+
+    async def _open(self, ws: Any, tx: Transcription, sample_rate: int) -> None:
+        await ws.send(
+            json.dumps(
+                {
+                    "model": self._model,
+                    "audio_format": "pcm_s16le",
+                    "sample_rate": sample_rate,
+                    "num_channels": 1,
+                    "language_hints": ["en"],
+                }
             )
-            return result
+        )
 
-        total_start = time.monotonic()
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        # End-of-audio is an empty *text* frame; a zero-length binary frame is
+        # ignored, so the server never finalizes (stalls to its idle timeout).
+        await ws.send("")
 
-        try:
-            headers = {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
-            async with ws_client.connect(_WS_URL, additional_headers=headers) as ws:
-                await ws.send(
-                    json.dumps(
-                        {
-                            "model": self._model,
-                            "audio_format": "pcm_s16le",
-                            "sample_rate": sample_rate,
-                            "num_channels": 1,
-                            "language_hints": ["en"],
-                        }
-                    )
-                )
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        if msg.get("error_code") or msg.get("error_message"):
+            code = msg.get("error_code")
+            tx.fail(str(msg.get("error_message") or f"Soniox STT error (code {code})"))
+            self._log.warning("soniox_stt_error", msg=msg)
+            return True
 
-                await run_stream(
-                    result,
-                    self._send_audio(ws, audio_data, sample_rate, result, realtime_resolution),
-                    self._receive(ws, result),
-                )
+        for token in msg.get("tokens") or []:
+            text = str(token.get("text", ""))
+            if not text:
+                continue
+            # Standalone " " tokens carry no content for TTFT or partials but
+            # must reach the transcript.
+            if token.get("is_final"):
+                tx.final(text, now)
+            else:
+                tx.partial(text, now)
 
-        except Exception as exc:
-            logger.warning(
-                "soniox_measure_ttft_failed", provider="soniox", model=self._model, exc_info=exc
-            )
-            result.error = str(exc)
-
-        result.total_time = time.monotonic() - total_start
-        return result
-
-    async def _send_audio(
-        self,
-        ws: Any,
-        audio_data: bytes,
-        sample_rate: int,
-        result: TranscriptionResult,
-        realtime_resolution: float,
-    ) -> None:
-        bytes_per_second = sample_rate * 2  # 16-bit mono
-        chunk_size = int(bytes_per_second * realtime_resolution)
-        try:
-            async for chunk, start in paced_chunks(audio_data, chunk_size, bytes_per_second):
-                result.audio_start_time = start
-                await ws.send(chunk)
-            # End-of-audio is an empty *text* frame; a zero-length binary frame is
-            # ignored, so the server never finalizes (stalls to its idle timeout).
-            await ws.send("")
-        except Exception as exc:
-            logger.warning("soniox_send_error", provider="soniox", model=self._model, exc_info=exc)
-            raise
-
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
-        final_parts: list[str] = []
-
-        try:
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    continue
-
-                msg: dict[str, Any] = json.loads(raw)
-                now = time.monotonic()
-
-                if msg.get("error_code") or msg.get("error_message"):
-                    code = msg.get("error_code")
-                    result.error = str(
-                        msg.get("error_message") or f"Soniox STT error (code {code})"
-                    )
-                    logger.warning(
-                        "soniox_stt_error", provider="soniox", model=self._model, msg=msg
-                    )
-                    break
-
-                tokens: list[dict[str, Any]] = msg.get("tokens") or []
-                for token in tokens:
-                    text = str(token.get("text", ""))
-                    if not text:
-                        continue
-                    # Soniox emits standalone " " tokens between words; they carry
-                    # no content for TTFT or partials but must reach the transcript.
-                    snippet = text.strip()
-                    if (
-                        snippet
-                        and result.ttft_seconds is None
-                        and result.audio_start_time is not None
-                    ):
-                        result.ttft_seconds = now - result.audio_start_time
-                        result.first_token_content = (
-                            snippet[:30] + "..." if len(snippet) > 30 else snippet
-                        )
-                    if token.get("is_final"):
-                        final_parts.append(text)
-                        if result.audio_start_time is not None:
-                            result.audio_to_final_seconds = now - result.audio_start_time
-                    elif snippet:
-                        result.partial_transcripts.append(snippet)
-
-                if msg.get("finished"):
-                    break
-
-        except Exception as exc:
-            logger.warning(
-                "soniox_receive_error", provider="soniox", model=self._model, exc_info=exc
-            )
-            if result.error is None and result.audio_to_final_seconds is None:
-                result.error = str(exc)
-
-        if final_parts:
-            # Soniox tokens carry their own leading spaces — concatenate, don't " ".join.
-            result.complete_transcript = "".join(final_parts).strip() or None
-
-        if result.complete_transcript:
-            result.transcript_length = len(result.complete_transcript)
-            result.word_count = len(result.complete_transcript.split())
+        return bool(msg.get("finished"))

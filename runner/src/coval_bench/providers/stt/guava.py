@@ -17,24 +17,16 @@ Server messages (JSON, keyed by ``type``):
 from __future__ import annotations
 
 import json
-import time
+from contextlib import AbstractAsyncContextManager
 from typing import Any
 
-import structlog
 import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
 
-from coval_bench.providers.base import STTProvider, TranscriptionResult
-from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-
-logger = structlog.get_logger(__name__)
+from coval_bench.config import Settings
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 _WS_PATH = "/audio/transcriptions"
-_SAMPLE_RATE = 16000
-
 _MAX_WS_SIZE = 16 * 1024 * 1024
-_NO_FINAL_ERROR = "Guava stream ended before a final transcription was received"
 
 
 def ws_url_from_base(base_url: str) -> str:
@@ -47,146 +39,53 @@ def ws_url_from_base(base_url: str) -> str:
     return base + _WS_PATH
 
 
-class GuavaSTTProvider(STTProvider):
+class GuavaSTTProvider(WebSocketSTTProvider):
     """Guava STT provider"""
 
-    def __init__(
-        self,
-        api_key: SecretStr | None,
-        model: str = "daytona-stt",
-        base_url: str | None = None,
-        domain: str | None = None,
-    ) -> None:
-        if not base_url:
-            raise ValueError("guava_base_url is required for the Guava STT provider")
-        if api_key is None or not api_key.get_secret_value().strip():
-            raise ValueError("guava_api_key is required for the Guava STT provider")
-        self._api_key = api_key
-        self._model = model
-        self._ws_url = ws_url_from_base(base_url)
+    _SAMPLE_RATE = 16000
+    _NO_FINAL_ERROR = "Guava stream ended before a final transcription was received"
+
+    def __init__(self, settings: Settings, model: str = "daytona-stt") -> None:
+        super().__init__(settings, model)
+        self._url = ws_url_from_base(self._require_setting("guava_base_url"))
+        self._api_key = self._require_secret("guava_api_key")
+        domain = settings.guava_stt_domain
         self._domain = domain.strip() if domain else None
 
     @property
     def name(self) -> str:
         return "guava"
 
-    @property
-    def model(self) -> str:
-        return self._model
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name)
-        if sample_rate != _SAMPLE_RATE:
-            result.error = f"Guava requires 16 kHz PCM input; got {sample_rate} Hz"
-            return result
-        if channels != 1 or sample_width != 2:
-            result.error = (
-                "Guava requires mono 16-bit PCM input; "
-                f"got channels={channels}, sample_width={sample_width}"
-            )
-            return result
+    async def _connect(self, sample_rate: int) -> AbstractAsyncContextManager[Any]:
+        return ws_client.connect(
+            self._url, additional_headers=self._headers(), max_size=_MAX_WS_SIZE
+        )
 
-        total_start = time.monotonic()
-        headers = {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
+    async def _open(self, ws: Any, tx: Transcription, sample_rate: int) -> None:
+        start_message: dict[str, Any] = {"type": "start", "partial_transcripts": True}
+        if self._domain:
+            start_message["domain"] = self._domain
+        await ws.send(json.dumps(start_message))
 
-        try:
-            async with ws_client.connect(
-                self._ws_url,
-                additional_headers=headers or None,
-                max_size=_MAX_WS_SIZE,
-            ) as ws:
-                start_message: dict[str, Any] = {"type": "start", "partial_transcripts": True}
-                if self._domain:
-                    start_message["domain"] = self._domain
-                await ws.send(json.dumps(start_message))
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        # The server finalizes and closes after this.
+        await ws.send(json.dumps({"type": "eos"}))
 
-                await run_stream(
-                    result,
-                    self._send_audio(ws, audio_data, sample_rate, result, realtime_resolution),
-                    self._receive(ws, result),
-                    no_final_error=_NO_FINAL_ERROR,
-                )
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        msg_type = msg.get("type")
+        if msg_type == "error":
+            tx.fail(str(msg.get("message") or msg))
+            self._log.warning("guava_stt_error", msg=msg)
+            return True
+        if msg_type not in ("asr_partial", "asr_final"):
+            return False
 
-        except Exception as exc:
-            logger.warning(
-                "guava_measure_ttft_failed", provider="guava", model=self._model, exc_info=exc
-            )
-            result.error = str(exc)
-
-        result.total_time = time.monotonic() - total_start
-        return result
-
-    async def _send_audio(
-        self,
-        ws: Any,
-        audio_data: bytes,
-        sample_rate: int,
-        result: TranscriptionResult,
-        realtime_resolution: float,
-    ) -> None:
-        byte_rate = sample_rate * 2  # 16-bit mono
-        chunk_size = int(byte_rate * realtime_resolution)
-        try:
-            async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
-                # Stop early if _receive already recorded a protocol/auth error.
-                if result.error is not None:
-                    break
-                result.audio_start_time = start
-                await ws.send(chunk)
-            # End of audio: the server finalizes and closes after this.
-            await ws.send(json.dumps({"type": "eos"}))
-        except Exception as exc:
-            logger.warning("guava_send_error", provider="guava", model=self._model, exc_info=exc)
-            raise
-
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
-        # Finals accumulate in arrival order.
-        final_parts: list[str] = []
-
-        try:
-            async for raw in ws:
-                if isinstance(raw, (bytes, bytearray)):
-                    continue  # transcripts are JSON; ignore any binary frames
-
-                msg: dict[str, Any] = json.loads(raw)
-                now = time.monotonic()
-
-                msg_type = msg.get("type")
-                if msg_type == "error":
-                    result.error = str(msg.get("message") or msg)
-                    logger.warning("guava_stt_error", provider="guava", model=self._model, msg=msg)
-                    break
-                if msg_type not in ("asr_partial", "asr_final"):
-                    continue
-
-                text = str(msg.get("transcript", "")).strip()
-                if text and result.ttft_seconds is None and result.audio_start_time is not None:
-                    result.ttft_seconds = now - result.audio_start_time
-                    result.first_token_content = text[:30] + "..." if len(text) > 30 else text
-
-                if msg_type == "asr_final":
-                    if text:
-                        final_parts.append(text)
-                    if result.audio_start_time is not None:
-                        result.audio_to_final_seconds = now - result.audio_start_time
-                elif text:
-                    result.partial_transcripts.append(text)
-
-        except Exception as exc:
-            logger.warning("guava_receive_error", provider="guava", model=self._model, exc_info=exc)
-            if result.error is None and result.audio_to_final_seconds is None:
-                result.error = str(exc)
-
-        if final_parts:
-            result.complete_transcript = " ".join(final_parts).strip() or None
-
-        if result.complete_transcript:
-            result.transcript_length = len(result.complete_transcript)
-            result.word_count = len(result.complete_transcript.split())
+        text = str(msg.get("transcript", "")).strip()
+        if msg_type == "asr_final":
+            tx.final(text, now)
+        else:
+            tx.partial(text, now)
+        return False

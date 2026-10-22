@@ -11,201 +11,101 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
 import json
-import time
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, cast
 
-import structlog
-import websockets.asyncio.client as ws_client
-from pydantic import SecretStr
-
-from coval_bench.providers.base import STTProvider, TranscriptionResult
-from coval_bench.providers.stt._pacing import paced_chunks
-from coval_bench.providers.stt._stream import run_stream
-
-logger = structlog.get_logger(__name__)
+from coval_bench.config import Settings
+from coval_bench.providers.base import TranscriptionResult
+from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 _WS_URL = "wss://api.inworld.ai/stt/v1/transcribe:streamBidirectional"
 
 # Inworld rejects chunks outside 20-1000 ms with "invalid audio chunk duration".
 _MIN_CHUNK_MS = 20
-
-# The server never closes after closeStream; the sender closes client-side once
-# the trailing usage frame (sent after all finals) arrives, or after this wait.
-_CLOSE_WAIT_S = 5.0
+_MIN_CHUNK_BYTES = 16000 * 2 * _MIN_CHUNK_MS // 1000
 
 
-class InworldSTTProvider(STTProvider):
+@dataclass
+class _InworldTranscription(Transcription):
+    # Set on the trailing usage frame; the sender closes on it.
+    done: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+class InworldSTTProvider(WebSocketSTTProvider):
     """Inworld AI streaming STT provider."""
 
-    def __init__(self, api_key: SecretStr | None, model: str = "inworld-stt-1") -> None:
-        if api_key is None or not api_key.get_secret_value().strip():
-            raise ValueError("inworld_api_key is required for the Inworld STT provider")
-        self._api_key = api_key
-        self._model = model
+    _SAMPLE_RATE = 16000
+    _MIN_TAIL_BYTES = _MIN_CHUNK_BYTES
+    _NO_FINAL_ERROR = "Inworld stream ended before a final transcription was received"
+
+    def __init__(self, settings: Settings, model: str = "inworld-stt-1") -> None:
+        super().__init__(settings, model)
+        self._api_key = self._require_secret("inworld_api_key")
 
     @property
     def name(self) -> str:
         return "inworld"
 
-    @property
-    def model(self) -> str:
-        return self._model
+    def _new_transcription(self, result: TranscriptionResult) -> Transcription:
+        return _InworldTranscription(result)
 
-    async def measure_ttft(
-        self,
-        audio_data: bytes,
-        channels: int,
-        sample_width: int,
-        sample_rate: int,
-        realtime_resolution: float = 0.1,
-    ) -> TranscriptionResult:
-        result = TranscriptionResult(provider=self.name)
-        if sample_rate != 16000:
-            result.error = f"Inworld requires 16 kHz PCM input; got {sample_rate} Hz"
-            return result
-        if channels != 1 or sample_width != 2:
-            result.error = (
-                "Inworld requires mono 16-bit PCM input; "
-                f"got channels={channels}, sample_width={sample_width}"
+    def _ws_url(self, sample_rate: int) -> str:
+        return _WS_URL
+
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Basic {self._api_key.get_secret_value()}"}
+
+    async def _open(self, ws: Any, tx: Transcription, sample_rate: int) -> None:
+        # Inworld routes by a "{provider}/{model}" id; we own the inworld/ namespace.
+        await ws.send(
+            json.dumps(
+                {
+                    "transcribeConfig": {
+                        "modelId": f"inworld/{self._model}",
+                        "audioEncoding": "LINEAR16",
+                        "sampleRateHertz": sample_rate,
+                        "numberOfChannels": 1,
+                        "language": "en-US",
+                    }
+                }
             )
-            return result
+        )
 
-        total_start = time.monotonic()
-        headers = {"Authorization": f"Basic {self._api_key.get_secret_value()}"}
+    def _chunk_size(self, byte_rate: int, realtime_resolution: float) -> int:
+        # Inworld accepts 20-1000 ms chunks.
+        return min(max(int(byte_rate * realtime_resolution), _MIN_CHUNK_BYTES), byte_rate)
 
-        try:
-            async with ws_client.connect(_WS_URL, additional_headers=headers) as ws:
-                # Inworld routes by a "{provider}/{model}" id; we own the inworld/ namespace.
-                await ws.send(
-                    json.dumps(
-                        {
-                            "transcribeConfig": {
-                                "modelId": f"inworld/{self._model}",
-                                "audioEncoding": "LINEAR16",
-                                "sampleRateHertz": sample_rate,
-                                "numberOfChannels": 1,
-                                "language": "en-US",
-                            }
-                        }
-                    )
-                )
+    async def _send_chunk(self, ws: Any, chunk: bytes) -> None:
+        await ws.send(json.dumps({"audioChunk": {"content": base64.b64encode(chunk).decode()}}))
 
-                done_event = asyncio.Event()
-                await run_stream(
-                    result,
-                    self._send_audio(
-                        ws, audio_data, sample_rate, result, realtime_resolution, done_event
-                    ),
-                    self._receive(ws, result, done_event),
-                    no_final_error="Inworld stream ended before a final transcription was received",
-                )
+    async def _end_audio(self, ws: Any, tx: Transcription) -> None:
+        tx = cast(_InworldTranscription, tx)
+        # No endTurn: server-side turn detection is on, and endTurn + closeStream
+        # makes Inworld append a phantom final segment.
+        await self._send_and_wait(ws, json.dumps({"closeStream": {}}), tx, event=tx.done)
+        await ws.close()
 
-        except Exception as exc:
-            logger.warning(
-                "inworld_measure_ttft_failed", provider="inworld", model=self._model, exc_info=exc
-            )
-            result.error = str(exc)
+    def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        tx = cast(_InworldTranscription, tx)
+        if msg.get("error"):
+            tx.fail(str(msg["error"]))
+            self._log.warning("inworld_stt_error", msg=msg)
+            return True
+        if "usage" in msg:
+            tx.done.set()
+            return True
 
-        result.total_time = time.monotonic() - total_start
-        return result
+        transcription = msg.get("result", {}).get("transcription")
+        if not transcription:
+            return False
+        text = str(transcription.get("transcript", "")).strip()
+        if not text:
+            return False
 
-    async def _send_audio(
-        self,
-        ws: Any,
-        audio_data: bytes,
-        sample_rate: int,
-        result: TranscriptionResult,
-        realtime_resolution: float,
-        done_event: asyncio.Event,
-    ) -> None:
-        bytes_per_second = sample_rate * 2  # 16-bit mono
-        min_chunk_bytes = bytes_per_second * _MIN_CHUNK_MS // 1000
-        chunk_size = int(bytes_per_second * realtime_resolution)
-        chunk_size = min(max(chunk_size, min_chunk_bytes), bytes_per_second)
-        try:
-            async for chunk, start in paced_chunks(
-                audio_data, chunk_size, bytes_per_second, min_tail_bytes=min_chunk_bytes
-            ):
-                # Stop early if _receive already recorded a protocol/auth error;
-                # the server closes the socket on its error path.
-                if result.error is not None:
-                    return
-                result.audio_start_time = start
-                await ws.send(
-                    json.dumps({"audioChunk": {"content": base64.b64encode(chunk).decode()}})
-                )
-            # No endTurn: server-side turn detection is on, and endTurn + closeStream
-            # makes Inworld append a phantom final segment.
-            await ws.send(json.dumps({"closeStream": {}}))
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(done_event.wait(), timeout=_CLOSE_WAIT_S)
-            await ws.close()
-        except Exception as exc:
-            logger.warning(
-                "inworld_send_error", provider="inworld", model=self._model, exc_info=exc
-            )
-            raise
-
-    async def _receive(
-        self, ws: Any, result: TranscriptionResult, done_event: asyncio.Event
-    ) -> None:
-        final_parts: list[str] = []
-
-        try:
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    continue
-
-                msg: dict[str, Any] = json.loads(raw)
-                now = time.monotonic()
-
-                if msg.get("error"):
-                    result.error = str(msg["error"])
-                    logger.warning(
-                        "inworld_stt_error", provider="inworld", model=self._model, msg=msg
-                    )
-                    break
-
-                if "usage" in msg:
-                    break
-
-                transcription = msg.get("result", {}).get("transcription")
-                if not transcription:
-                    continue
-
-                text = str(transcription.get("transcript", ""))
-                if not text.strip():
-                    continue
-
-                if result.ttft_seconds is None and result.audio_start_time is not None:
-                    result.ttft_seconds = now - result.audio_start_time
-                    snippet = text.strip()
-                    result.first_token_content = (
-                        snippet[:30] + "..." if len(snippet) > 30 else snippet
-                    )
-
-                if transcription.get("isFinal"):
-                    final_parts.append(text.strip())
-                    if result.audio_start_time is not None:
-                        result.audio_to_final_seconds = now - result.audio_start_time
-                else:
-                    result.partial_transcripts.append(text.strip())
-
-        except Exception as exc:
-            logger.warning(
-                "inworld_receive_error", provider="inworld", model=self._model, exc_info=exc
-            )
-            if result.error is None and result.audio_to_final_seconds is None:
-                result.error = str(exc)
-
-        done_event.set()
-
-        if final_parts:
-            # Inworld emits whole-phrase final segments; join with spaces.
-            result.complete_transcript = " ".join(final_parts).strip() or None
-
-        if result.complete_transcript:
-            result.transcript_length = len(result.complete_transcript)
-            result.word_count = len(result.complete_transcript.split())
+        # Inworld emits whole-phrase final segments; the template joins them with spaces.
+        if transcription.get("isFinal"):
+            tx.final(text, now)
+        else:
+            tx.partial(text, now)
+        return False
