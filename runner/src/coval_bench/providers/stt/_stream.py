@@ -23,10 +23,12 @@ async def run_stream(
 
     A raised exception cancels the other task. A sender failure always fails the
     clip, since a socket that drops mid-clip leaves the transcript cut off even
-    after an earlier final. A receiver failure is only stamped when no final
-    landed. ``no_final_error`` is stamped when both tasks finish cleanly without
-    a final; stamping it here rather than in a receiver keeps a mid-stream close
-    from masking a sender exception. Cancelling the caller cancels both tasks.
+    after an earlier final. So does a receiver failure that cancelled a sender
+    still mid-clip; a receiver failure after the send completed is only stamped
+    when no final landed. ``no_final_error`` is stamped when both tasks finish
+    cleanly without a final; stamping it here rather than in a receiver keeps a
+    mid-stream close from masking a sender exception. Cancelling the caller
+    cancels both tasks.
     """
     tasks = (asyncio.create_task(send), asyncio.create_task(recv))
     try:
@@ -40,13 +42,19 @@ async def run_stream(
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
-    if result.error is None and isinstance(outcomes[0], Exception):
-        result.error = str(outcomes[0])
-    if result.error is None and result.audio_to_final_seconds is None:
-        for outcome in outcomes:
-            if isinstance(outcome, Exception):
-                result.error = str(outcome)
-                break
-        else:
-            if no_final_error is not None:
-                result.error = no_final_error
+    send_outcome, recv_outcome = outcomes
+    if result.error is None and isinstance(send_outcome, Exception):
+        result.error = str(send_outcome)
+    if (
+        result.error is None
+        and isinstance(recv_outcome, Exception)
+        and (tasks[0].cancelled() or result.audio_to_final_seconds is None)
+    ):
+        result.error = str(recv_outcome)
+    elif (
+        result.error is None
+        and not isinstance(recv_outcome, Exception)
+        and result.audio_to_final_seconds is None
+        and no_final_error is not None
+    ):
+        result.error = no_final_error

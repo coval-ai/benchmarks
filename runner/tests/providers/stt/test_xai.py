@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -19,7 +19,8 @@ from pydantic import SecretStr
 
 from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
-from coval_bench.providers.stt.xai import XaiSTTProvider
+from coval_bench.providers.base import TranscriptionResult
+from coval_bench.providers.stt.xai import XaiSTTProvider, _XaiTranscription
 from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
 
 _CONNECT = "coval_bench.providers.stt._streaming.ws_client.connect"
@@ -469,3 +470,28 @@ async def test_xai_handshake_closes_before_ready(
     assert "transcript.created" in result.error
     assert result.complete_transcript is None
     assert result.ttft_seconds is None
+
+
+@pytest.mark.asyncio
+async def test_xai_close_waits_for_transcript_done_not_speech_final(
+    stt_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A speech_final landing after audio.done must not release the close early."""
+    monkeypatch.setattr(XaiSTTProvider, "_FINAL_WAIT_S", 5.0)
+    provider = XaiSTTProvider(stt_settings)
+    tx = provider._new_transcription(TranscriptionResult(provider="xai"))
+    ws = MagicMock()
+    ws.send = AsyncMock()
+    ws.close = AsyncMock()
+
+    async def late_events() -> None:
+        await asyncio.sleep(0.01)
+        tx.final_event.set()  # a speech_final partial
+        await asyncio.sleep(0.05)
+        assert ws.close.await_count == 0
+        assert isinstance(tx, _XaiTranscription)
+        tx.done.set()
+
+    await asyncio.gather(provider._end_audio(ws, tx), late_events())
+
+    ws.close.assert_awaited_once()

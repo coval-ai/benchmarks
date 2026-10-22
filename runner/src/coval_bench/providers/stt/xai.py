@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 from urllib.parse import urlencode
 
@@ -39,6 +39,9 @@ def _merge_done_with_finals(final_segments: list[str], done_transcript: str) -> 
 @dataclass
 class _XaiTranscription(Transcription):
     done_received: bool = False
+    # transcript.done only; speech_final partials set the shared final latch too,
+    # and one landing after audio.done must not release the close.
+    done: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 class XaiSTTProvider(WebSocketSTTProvider):
@@ -92,8 +95,8 @@ class XaiSTTProvider(WebSocketSTTProvider):
             raise RuntimeError(f"xAI did not signal ready within {_READY_TIMEOUT_S:.0f}s") from exc
 
     async def _end_audio(self, ws: Any, tx: Transcription) -> None:
-        # The latch here is transcript.done, so the close can't race it.
-        await self._send_and_wait(ws, json.dumps({"type": "audio.done"}), tx)
+        tx = cast(_XaiTranscription, tx)
+        await self._send_and_wait(ws, json.dumps({"type": "audio.done"}), tx, event=tx.done)
         await ws.close()
 
     def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
@@ -122,7 +125,7 @@ class XaiSTTProvider(WebSocketSTTProvider):
                 tx.finals[:] = _merge_done_with_finals(tx.finals, done)
                 if " ".join(" ".join(tx.finals).split()) != before:
                     tx.final("", now)
-            tx.final_event.set()
+            tx.done.set()
             return True
 
         if event_type == "error":
