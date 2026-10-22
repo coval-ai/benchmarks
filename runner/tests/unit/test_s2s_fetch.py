@@ -507,6 +507,8 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
                     "gemini-3.8-live": "b7",
                     "grok-voice-3.0": "b8",
                     "dialog-rsn-1": "b9",
+                    "eleven_realtime_v1_mini": "b10",
+                    "eleven_realtime_v1_max": "b11",
                 },
             )
         },
@@ -525,6 +527,8 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
         ("google", "gemini-3.8-live"),
         ("xai", "grok-voice-3.0"),
         ("polyai", "dialog-rsn-1"),
+        ("elevenlabs", "eleven_realtime_v1_mini"),
+        ("elevenlabs", "eleven_realtime_v1_max"),
     }
 
 

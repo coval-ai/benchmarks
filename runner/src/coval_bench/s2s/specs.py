@@ -124,6 +124,8 @@ SCENARIO_MODELS: tuple[tuple[str, str], ...] = (
     ("stepfun", "stepaudio-3-realtime-preview"),
     ("alibaba", "qwen3.8-omni-flash-realtime"),
     ("polyai", "dialog-rsn-1"),
+    ("elevenlabs", "eleven_realtime_v1_mini"),
+    ("elevenlabs", "eleven_realtime_v1_max"),
 )
 
 
