@@ -109,6 +109,45 @@ jobs:
           /tmp/gitleaks detect --source . --no-banner --redact --verbose
 
   # ---------------------------------------------------------------------------
+  # API types — run the generator the release publishes with, so a create_app()
+  # import that breaks offline fails the PR rather than the release.
+  # ---------------------------------------------------------------------------
+  api-types:
+    name: API types
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        working-directory: runner
+        run: uv sync --frozen --no-dev
+
+      - name: Generate API types
+        run: bash scripts/generate_types.sh "${RUNNER_TEMP}/generated"
+
+  # ---------------------------------------------------------------------------
   # Docker build — confirm each Dockerfile builds; no push. One runner per
   # image, in parallel with the tests. The gha cache is scoped per image so
   # the three builds don't overwrite each other, and mode=min exports only the

@@ -84,3 +84,6 @@ runner/src/coval_bench/scenarios/*/_private/
 # Local scratch audio from arena runs. Large, regenerable, and easy to sweep
 # into a commit by accident.
 runner/arena-audio/
+
+# scripts/generate_types.sh default output
+generated/

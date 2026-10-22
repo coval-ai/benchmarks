@@ -1,0 +1,35 @@
+name: Publish Benchmarks API Types
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Benchmarks API environment whose deployed SHA publishes types.
+        required: true
+        type: string
+      ref:
+        description: Full benchmarks commit SHA deployed to the API.
+        required: true
+        type: string
+    secrets:
+      RELEASE_APP_ID:
+        required: true
+      RELEASE_APP_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish benchmarks API generated artifact
+    uses: coval-ai/ci-cd-switchboard/.github/workflows/publish-generated-artifact.yml@main
+    with:
+      artifact_id: benchmarks_api_types
+      environment: ${{ inputs.environment }}
+      source_sha: ${{ inputs.ref }}
+      predecessor_verified: true
+      switchboard_ref: main
+    secrets:
+      RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
