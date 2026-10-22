@@ -627,9 +627,8 @@ async def fetch_and_write_v2v(
             expected = _expected_sample_models(settings, dataset_id)
             missing = expected - {r.key for r in dataset_runs}
             if missing:
-                # Error level on purpose: this is the alert that a model is
-                # absent from the window, so no day in it can publish a sample.
-                logger.error(
+                # The sample still publishes without these models.
+                logger.warning(
                     "samples_provider_missing", dataset=dataset_id, missing=model_labels(missing)
                 )
             await publish_tick_sample(

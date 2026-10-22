@@ -4,14 +4,14 @@
 """Publish one multi-turn conversation sample per fetch tick.
 
 Each dataset is its own partition under ``PREFIX``: a tick picks ONE (scenario,
-persona) present for every model benchmarked on that dataset, uploads each
+persona) shared by the most models benchmarked on that dataset, uploads each
 model's full-conversation recording plus its per-agent transcript into the
 samples bucket, and writes a ``manifest.json`` keyed by the timeline bucket
 timestamp. Ticks published before partitioning sit at the root and stay readable
-until the TTL prunes them. Only a fully-complete sample (audio + transcript for
-every model) is published; otherwise the tick is skipped. The dashboard reads the
-manifests directly (public bucket, no API hop); a rolling ``index.json`` lists
-the available ticks newest-first. The bucket's 30-day TTL prunes old ticks.
+until the TTL prunes them. A model missing its run, audio or transcript is left
+out of the tick rather than blocking it. The API reads the manifests and signs
+each recording; a rolling ``index.json`` lists the available ticks newest-first.
+The bucket's 30-day TTL prunes old ticks.
 
 Sampling failures never fail the fetch — the metric rows are the product.
 """
@@ -42,6 +42,9 @@ PREFIX = "s2s-samples"
 _TICK_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _INDEX_MAX_ENTRIES = 60
 _DOWNLOAD_TIMEOUT = 120.0
+# Publish once a conversation has this many models; settle for the floor otherwise.
+_TARGET_RECORDINGS = 2
+_MIN_RECORDINGS = 1
 
 
 def sample_prefix(dataset_id: str | None) -> str:
@@ -77,6 +80,9 @@ class SampleRun:
     def key(self) -> tuple[str, str]:
         """Identity of the benchmarked model: a provider may carry several."""
         return (self.provider, self.model)
+
+
+_Staged = tuple[SampleRun, str, bytes, list[dict[str, Any]]]
 
 
 def model_labels(keys: Iterable[tuple[str, str]]) -> list[str]:
@@ -253,9 +259,9 @@ async def publish_tick_sample(
     ``dataset_id`` names the partition the tick lands in; every model in ``runs``
     is expected to have been benchmarked on it.
 
-    ``expected_models`` is the configured ``(provider, model)`` set a sample must
-    cover. Pass it: without it completeness is judged against whichever models
-    turned up, so a day one model sat out would publish a lopsided comparison.
+    ``expected_models`` is the configured ``(provider, model)`` set a sample
+    should cover; a model outside it is ignored and one missing from it is
+    logged, so a day one model sat out still publishes the rest.
 
     Never raises: any failure is logged and the tick is simply skipped.
     """
@@ -300,9 +306,8 @@ async def _publish_tick_sample(
     republishes if it never landed, and is skipped cheaply if it did (the
     manifest-exists check below). One bucket failing never blocks the others.
 
-    Each bucket must cover ``expected_models`` on its own. A model can be
-    present for today and absent for yesterday, and judging each bucket against
-    only its own runs would call that yesterday complete.
+    Each bucket is judged against ``expected_models`` on its own: a model can be
+    present for today and absent for yesterday.
     """
     if storage_client is None:  # pragma: no cover -- real client only outside tests
         from google.cloud import storage as gcs
@@ -366,27 +371,23 @@ async def _publish_one_bucket(
     expected = expected_models or {r.key for r in runs}
     absent = expected - {r.key for r in runs}
     if absent:
-        logger.error("samples_bucket_provider_absent", tick=tick_key, absent=model_labels(absent))
-        return 0
+        logger.warning("samples_bucket_provider_absent", tick=tick_key, absent=model_labels(absent))
 
     # A "conversation" is one (test_case, persona) pair — the same scenario and
     # the same simulated caller, which is what makes the sample comparable across
-    # models. Group runs by persona; only a persona present for EVERY model can
-    # yield a conversation. sims[(persona, provider, model)] = {test_case_id: sim_id}.
+    # models. sims[(persona, provider, model)] = {test_case_id: sim_id}.
     runs_by_persona: dict[str, dict[tuple[str, str], SampleRun]] = {}
     for run in runs:
-        runs_by_persona.setdefault(run.persona_id, {})[run.key] = run
+        if run.key in expected:
+            runs_by_persona.setdefault(run.persona_id, {})[run.key] = run
 
     sims: dict[tuple[str, str, str], dict[str, str]] = {}
-    pool: list[tuple[str, str]] = []
+    pool: list[tuple[str, str, list[tuple[str, str]]]] = []
     for persona_id, model_runs in runs_by_persona.items():
-        if set(model_runs) != expected:
+        if missing := expected - set(model_runs):
             logger.warning(
-                "samples_persona_incomplete",
-                persona=persona_id,
-                missing=model_labels(expected - set(model_runs)),
+                "samples_persona_incomplete", persona=persona_id, missing=model_labels(missing)
             )
-            continue
         for (provider, model), run in model_runs.items():
 
             async def list_sims(run: SampleRun = run) -> dict[str, str]:
@@ -403,8 +404,11 @@ async def _publish_one_bucket(
                     exc_info=True,
                 )
                 sims[(persona_id, provider, model)] = {}
-        shared = set.intersection(*(set(sims[(persona_id, p, m)]) for p, m in expected))
-        pool.extend((persona_id, tc) for tc in sorted(shared))
+        covered: dict[str, list[tuple[str, str]]] = {}
+        for provider, model in sorted(model_runs):
+            for test_case_id in sims[(persona_id, provider, model)]:
+                covered.setdefault(test_case_id, []).append((provider, model))
+        pool.extend((persona_id, tc, keys) for tc, keys in sorted(covered.items()))
 
     if not pool:
         logger.error(
@@ -416,103 +420,123 @@ async def _publish_one_bucket(
         )
         return 0
 
-    # Uniform draw over the shared conversations of both personas; repick on any
-    # incomplete model so only a fully-complete conversation (audio + turns for
-    # EVERY model) is ever surfaced.
+    # Random among the conversations most models ran. Stop at the first that
+    # stages _TARGET_RECORDINGS; otherwise keep the fullest one staged so far.
     rng.shuffle(pool)
-    for persona_id, test_case_id in pool:
-        model_runs = runs_by_persona[persona_id]
-        blocked_by: str | None = None
-        staged: list[tuple[SampleRun, str, bytes, list[dict[str, Any]]]] = []
-        for provider, model in sorted(expected):
-            run = model_runs[(provider, model)]
-            sim_id = sims[(persona_id, provider, model)][test_case_id]
-            audio: bytes | None = None
-            turns: list[dict[str, Any]] = []
-            try:
-
-                async def fetch_detail(sim_id: str = sim_id) -> httpx.Response:
-                    resp = await client.get(f"/simulations/{sim_id}")
-                    resp.raise_for_status()
-                    return resp
-
-                detail = await _fetch_retry(fetch_detail, provider=provider, what="sim_detail")
-                # /simulations/{id} wraps the object in a "simulation" envelope.
-                turns = _conversation_turns(cast("dict[str, Any]", detail.json()["simulation"]))
-
-                async def fetch_recording(sim_id: str = sim_id) -> bytes | None:
-                    return await _download_recording(client, download_client, sim_id)
-
-                audio = await _fetch_retry(fetch_recording, provider=provider, what="recording")
-            except Exception:
-                logger.error(
-                    "sample_copy_failed",
-                    provider=provider,
-                    model=model,
-                    sim_id=sim_id,
-                    exc_info=True,
-                )
-            if audio is None or not turns:
-                blocked_by = f"{provider}:{model}"
-                break
-            staged.append((run, sim_id, audio, turns))
-
-        if len(staged) != len(expected):
+    pool.sort(key=lambda candidate: len(candidate[2]), reverse=True)
+    chosen: tuple[str, str, list[_Staged]] | None = None
+    for persona_id, test_case_id, keys in pool:
+        if chosen is not None and len(keys) <= len(chosen[2]):
+            break
+        staged = await _stage_recordings(
+            client,
+            download_client,
+            runs=runs_by_persona[persona_id],
+            sims={key: sims[(persona_id, *key)][test_case_id] for key in keys},
+        )
+        if len(staged) < len(keys):
             logger.info(
                 "sample_incomplete_skipped",
                 tick=tick_key,
                 persona=persona_id,
                 test_case_id=test_case_id,
-                model=blocked_by,
+                staged=len(staged),
+                wanted=len(keys),
             )
-            continue
+        if staged and (chosen is None or len(staged) > len(chosen[2])):
+            chosen = (persona_id, test_case_id, staged)
+        if len(staged) >= _TARGET_RECORDINGS:
+            break
 
-        recordings: list[dict[str, Any]] = []
-        for s_run, s_sim_id, s_audio, s_turns in staged:
-            key = f"{tick_prefix}/{s_run.provider}/{s_run.model}.wav"
-            _upload(bucket, key, s_audio, "audio/wav")
-            recordings.append(
-                {
-                    "provider": s_run.provider,
-                    "model": s_run.model,
-                    "object": key,
-                    "coval_run_id": s_run.coval_run_id,
-                    "sim_id": s_sim_id,
-                    "agent_id": s_run.agent_id,
-                    "turns": s_turns,
-                }
-            )
-        manifest = {
-            "schema_version": 2,
-            "bucket_at": tick_key,
-            "dataset_id": dataset_id,
-            # The recordings' own set, falling back to the configured one only when
-            # a run predates the field.
-            "test_set_id": next((r.test_set_id for r in runs if r.test_set_id), test_set_id),
-            "test_case_id": test_case_id,
-            "persona_name": (persona_labels or {}).get(persona_id, persona_id),
-            "recordings": recordings,
-        }
-        _upload(bucket, manifest_key, json.dumps(manifest).encode(), "application/json")
-        _update_index(bucket, dataset_id, tick_key)
-        logger.info(
-            "samples_tick_stored",
-            dataset=dataset_id,
+    if chosen is None or len(chosen[2]) < _MIN_RECORDINGS:
+        logger.error(
+            "samples_no_complete_sample",
             tick=tick_key,
-            recordings=len(recordings),
-            persona=persona_id,
-            test_case_id=test_case_id,
+            models=model_labels(expected),
+            attempted=len(pool),
+            test_case_ids=sorted({tc for _, tc, _ in pool}),
         )
-        return len(recordings)
+        return 0
 
-    logger.error(
-        "samples_no_complete_sample",
+    persona_id, test_case_id, staged = chosen
+    recordings: list[dict[str, Any]] = []
+    for s_run, s_sim_id, s_audio, s_turns in staged:
+        key = f"{tick_prefix}/{s_run.provider}/{s_run.model}.wav"
+        _upload(bucket, key, s_audio, "audio/wav")
+        recordings.append(
+            {
+                "provider": s_run.provider,
+                "model": s_run.model,
+                "object": key,
+                "coval_run_id": s_run.coval_run_id,
+                "sim_id": s_sim_id,
+                "agent_id": s_run.agent_id,
+                "turns": s_turns,
+            }
+        )
+    manifest = {
+        "schema_version": 2,
+        "bucket_at": tick_key,
+        "dataset_id": dataset_id,
+        # The recordings' own set, falling back to the configured one only when
+        # a run predates the field.
+        "test_set_id": next((r.test_set_id for r in runs if r.test_set_id), test_set_id),
+        "test_case_id": test_case_id,
+        "persona_name": (persona_labels or {}).get(persona_id, persona_id),
+        "recordings": recordings,
+    }
+    _upload(bucket, manifest_key, json.dumps(manifest).encode(), "application/json")
+    _update_index(bucket, dataset_id, tick_key)
+    logger.info(
+        "samples_tick_stored",
+        dataset=dataset_id,
         tick=tick_key,
-        models=model_labels(expected),
-        attempted=len(pool),
-        test_case_ids=sorted({tc for _, tc in pool}),
+        recordings=len(recordings),
+        missing=model_labels(expected - {s_run.key for s_run, *_ in staged}),
+        persona=persona_id,
+        test_case_id=test_case_id,
     )
-    return 0
+    return len(recordings)
+
+
+async def _stage_recordings(
+    client: httpx.AsyncClient,
+    download_client: httpx.AsyncClient,
+    *,
+    runs: Mapping[tuple[str, str], SampleRun],
+    sims: Mapping[tuple[str, str], str],
+) -> list[_Staged]:
+    """Each model's recording and turns for one conversation; a model that fails is left out."""
+    staged: list[_Staged] = []
+    for (provider, model), sim_id in sorted(sims.items()):
+        audio: bytes | None = None
+        turns: list[dict[str, Any]] = []
+        try:
+
+            async def fetch_detail(sim_id: str = sim_id) -> httpx.Response:
+                resp = await client.get(f"/simulations/{sim_id}")
+                resp.raise_for_status()
+                return resp
+
+            detail = await _fetch_retry(fetch_detail, provider=provider, what="sim_detail")
+            # /simulations/{id} wraps the object in a "simulation" envelope.
+            turns = _conversation_turns(cast("dict[str, Any]", detail.json()["simulation"]))
+
+            async def fetch_recording(sim_id: str = sim_id) -> bytes | None:
+                return await _download_recording(client, download_client, sim_id)
+
+            audio = await _fetch_retry(fetch_recording, provider=provider, what="recording")
+        except Exception:
+            logger.error(
+                "sample_copy_failed",
+                provider=provider,
+                model=model,
+                sim_id=sim_id,
+                exc_info=True,
+            )
+        if audio is not None and turns:
+            staged.append((runs[(provider, model)], sim_id, audio, turns))
+    return staged
 
 
 AUDIO_URL_TTL = timedelta(minutes=10)

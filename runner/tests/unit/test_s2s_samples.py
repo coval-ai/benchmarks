@@ -277,20 +277,63 @@ async def test_failed_sim_drops_its_test_case_from_the_pool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_complete_conversation_publishes_nothing() -> None:
-    # Every candidate has a provider missing audio → no partial sample, nothing stored.
+async def test_model_without_audio_is_left_out() -> None:
+    # openai's audio is missing in every conversation, so google publishes alone.
     storage_client, bucket = _fake_storage()
     cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["c"], "RG_M": ["c"]}
     async with _fake_client(cases, audio_404=frozenset({"RO_F-b", "RO_M-c"})) as client:
         stored = await _publish(client, storage_client, _runs())
 
-    assert stored == 0
-    assert f"{PARTITION}/{TICK}/manifest.json" not in bucket.objects
+    assert stored == 1
+    manifest = json.loads(bucket.objects[f"{PARTITION}/{TICK}/manifest.json"])
+    assert [r["provider"] for r in manifest["recordings"]] == ["google"]
+    assert f"{PARTITION}/{TICK}/openai/gpt-realtime.wav" not in bucket.objects
 
 
 @pytest.mark.asyncio
-async def test_empty_transcript_counts_as_incomplete() -> None:
-    # Only the female persona is eligible, but one provider's transcript is empty → skip.
+async def test_no_audio_anywhere_publishes_nothing() -> None:
+    storage_client, bucket = _fake_storage()
+    cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["c"], "RG_M": ["c"]}
+    gone = frozenset({"RO_F-b", "RG_F-b", "RO_M-c", "RG_M-c"})
+    async with _fake_client(cases, audio_404=gone) as client:
+        stored = await _publish(client, storage_client, _runs())
+
+    assert stored == 0
+    assert bucket.objects == {}
+
+
+@pytest.mark.asyncio
+async def test_conversation_most_models_ran_wins() -> None:
+    # "a" was run by openai alone; "b" by all three, so "b" publishes with three.
+    storage_client, bucket = _fake_storage()
+    runs = [
+        _run("openai", "gpt-realtime", "RO_F", FEMALE, "AO"),
+        _run("google", "gemini-live", "RG_F", FEMALE, "AG"),
+        _run("xai", "grok-voice-3.0", "RX_F", FEMALE, "AX"),
+    ]
+    cases = {"RO_F": ["a", "b"], "RG_F": ["b"], "RX_F": ["b"]}
+    async with _fake_client(cases) as client:
+        stored = await _publish(client, storage_client, runs)
+
+    assert stored == 3
+    manifest = json.loads(bucket.objects[f"{PARTITION}/{TICK}/manifest.json"])
+    assert manifest["test_case_id"] == "b"
+
+
+@pytest.mark.asyncio
+async def test_falls_back_to_fewer_models_when_none_reach_the_target() -> None:
+    # Only one model can stage in each conversation; the day still gets one.
+    storage_client, bucket = _fake_storage()
+    cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["c"], "RG_M": ["c"]}
+    async with _fake_client(cases, audio_404=frozenset({"RO_F-b", "RG_M-c"})) as client:
+        stored = await _publish(client, storage_client, _runs())
+
+    assert stored == 1
+    assert f"{PARTITION}/{TICK}/manifest.json" in bucket.objects
+
+
+@pytest.mark.asyncio
+async def test_empty_transcript_leaves_that_model_out() -> None:
     storage_client, bucket = _fake_storage()
     runs = [
         _run("openai", "gpt-realtime", "RO_F", FEMALE, "AO"),
@@ -301,8 +344,9 @@ async def test_empty_transcript_counts_as_incomplete() -> None:
     ) as client:
         stored = await _publish(client, storage_client, runs)
 
-    assert stored == 0
-    assert bucket.objects == {}
+    assert stored == 1
+    manifest = json.loads(bucket.objects[f"{PARTITION}/{TICK}/manifest.json"])
+    assert [r["provider"] for r in manifest["recordings"]] == ["google"]
 
 
 @pytest.mark.asyncio
@@ -319,14 +363,14 @@ async def test_persona_missing_a_provider_is_skipped() -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_shared_conversation_stores_nothing() -> None:
+async def test_no_shared_conversation_publishes_one_model() -> None:
     storage_client, bucket = _fake_storage()
     cases = {"RO_F": ["a"], "RG_F": ["b"], "RO_M": ["c"], "RG_M": ["d"]}
     async with _fake_client(cases) as client:
         stored = await _publish(client, storage_client, _runs())
 
-    assert stored == 0
-    assert bucket.objects == {}
+    assert stored == 1
+    assert f"{PARTITION}/{TICK}/manifest.json" in bucket.objects
 
 
 @pytest.mark.asyncio
@@ -409,13 +453,8 @@ async def test_missed_day_publishes_alongside_the_current_tick() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bucket_missing_an_expected_provider_publishes_nothing() -> None:
-    """A provider can be present today and absent yesterday.
-
-    Completeness has to be judged against the configured provider set, not
-    against whichever providers happen to appear in that one bucket — otherwise
-    yesterday calls itself complete and ships a one-provider comparison.
-    """
+async def test_bucket_missing_an_expected_provider_publishes_the_rest() -> None:
+    """A provider can be present today and absent yesterday; yesterday still publishes."""
     storage_client, bucket = _fake_storage()
     openai_only = [
         _run("openai", "gpt-realtime", "RO_F_Y", FEMALE, "AO", PREV_BUCKET_AT),
@@ -431,12 +470,11 @@ async def test_bucket_missing_an_expected_provider_publishes_nothing() -> None:
             expected_models={("openai", "gpt-realtime"), ("google", "gemini-live")},
         )
 
-    # Today is complete and publishes; yesterday is refused outright.
-    assert stored == 2
+    assert stored == 3
+    yesterday = json.loads(bucket.objects[f"{PARTITION}/{PREV_TICK}/manifest.json"])
+    assert [r["provider"] for r in yesterday["recordings"]] == ["openai"]
     assert f"{PARTITION}/{TICK}/manifest.json" in bucket.objects
-    assert f"{PARTITION}/{PREV_TICK}/manifest.json" not in bucket.objects
-    assert f"{PARTITION}/{PREV_TICK}/openai/gpt-realtime.wav" not in bucket.objects
-    assert json.loads(bucket.objects[samples.index_key(DATASET)]) == [TICK]
+    assert json.loads(bucket.objects[samples.index_key(DATASET)]) == [TICK, PREV_TICK]
 
 
 @pytest.mark.asyncio
