@@ -326,9 +326,19 @@ jobs:
           set -euo pipefail
           git push origin "HEAD:refs/heads/production-runner"
 
+  push_api_types:
+    name: Push Benchmarks API Types
+    needs: [context, dispatch_infra]
+    if: always() && needs.context.outputs.skip != 'true' && needs.dispatch_infra.result == 'success'
+    uses: ./.github/workflows/push-benchmarks-types.yml
+    with:
+      environment: production
+      ref: ${{ needs.context.outputs.deploy_sha }}
+    secrets: inherit
+
   summarize:
     name: Summarize release
-    needs: [context, build_and_push, dispatch_infra, promote_marker]
+    needs: [context, build_and_push, dispatch_infra, promote_marker, push_api_types]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -341,5 +351,6 @@ jobs:
             echo "- Build: \`${{ needs.build_and_push.result }}\`"
             echo "- Infra rollout: \`${{ needs.dispatch_infra.result }}\`"
             echo "- Marker promote: \`${{ needs.promote_marker.result }}\`"
+            echo "- API types publish: \`${{ needs.push_api_types.result }}\`"
             echo "- Infra run: ${{ needs.dispatch_infra.outputs.infra_url || 'n/a' }}"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,14 @@
+version: 1
+artifacts:
+  - id: benchmarks_api_types
+    installCommand: python -m pip install uv && uv sync --frozen --no-dev --project runner
+    generateCommand: bash scripts/generate_types.sh "${SWITCHBOARD_ARTIFACT_OUTPUT}"
+    outputPath: $SWITCHBOARD_ARTIFACT_OUTPUT/types/api
+    toolchain:
+      node: "22"
+      python: "3.12"
+    materiality:
+      ignoredPaths:
+        - .commit-sha
+        - .openapi-sha
+      ignoredJsonFields: []
