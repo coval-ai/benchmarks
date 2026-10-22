@@ -89,14 +89,18 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   build_and_push:
-    name: Build and push ${{ matrix.image }}
+    name: Build, push, and scan ${{ matrix.image }}
     needs: context
     if: needs.context.outputs.skip != 'true'
     runs-on: ubuntu-latest
+    outputs:
+      runner_digest: ${{ steps.digest.outputs.runner_digest }}
+      api_digest: ${{ steps.digest.outputs.api_digest }}
 
     permissions:
       contents: read
       id-token: write
+      security-events: write
 
     strategy:
       matrix:
@@ -105,6 +109,9 @@ jobs:
             dockerfile: Dockerfile
           - image: api
             dockerfile: Dockerfile.api
+
+    env:
+      IMAGE: us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-${{ matrix.image }}
 
     steps:
       - name: Checkout repository
@@ -129,16 +136,53 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build and push ${{ matrix.image }} image
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: runner
           file: runner/${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
-          tags: us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-${{ matrix.image }}:${{ needs.context.outputs.deploy_sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ env.IMAGE }}:${{ needs.context.outputs.deploy_sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=min,scope=${{ matrix.image }}
           provenance: true
+          sbom: true
+
+      - name: Scan pushed digest with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        if: always() && hashFiles(format('trivy-{0}.sarif', matrix.image)) != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}
+
+      - name: Record scanned digest
+        id: digest
+        if: always() && steps.build.outcome == 'success'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          NAME: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          [ -n "$DIGEST" ] || { echo "::error::build produced no digest"; exit 1; }
+          findings="$(jq '[.runs[].results[]] | length' "trivy-${NAME}.sarif" 2>/dev/null || echo "scan did not run")"
+          echo "${NAME}_digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## ${NAME} image"
+            echo ""
+            echo "- Scanned: \`${IMAGE}@${DIGEST}\`"
+            echo "- Fixable HIGH/CRITICAL findings: ${findings}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   dispatch_infra:
     name: Dispatch and watch benchmark-infra rollout
@@ -149,11 +193,47 @@ jobs:
     outputs:
       infra_url: ${{ steps.dispatch.outputs.infra_url }}
 
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Verify tags resolve to the scanned digests
+        env:
+          API_IMAGE: ${{ needs.context.outputs.api_image }}
+          API_DIGEST: ${{ needs.build_and_push.outputs.api_digest }}
+          RUNNER_IMAGE: ${{ needs.context.outputs.runner_image }}
+          RUNNER_DIGEST: ${{ needs.build_and_push.outputs.runner_digest }}
+        run: |
+          set -euo pipefail
+          check() {
+            local image="$1" expected="$2" actual
+            [ -n "$expected" ] || { echo "::error::no scanned digest recorded for ${image}"; exit 1; }
+            actual="$(gcloud artifacts docker images describe "$image" --format='value(image_summary.digest)')"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::${image} resolves to ${actual}, but Trivy scanned ${expected}"
+              exit 1
+            fi
+            echo "${image} -> ${actual} (scanned)"
+          }
+          check "$RUNNER_IMAGE" "$RUNNER_DIGEST"
+          check "$API_IMAGE" "$API_DIGEST"
+
       - name: Dispatch image-bump
         id: dispatch
         env:
           API_IMAGE: ${{ needs.context.outputs.api_image }}
+          API_DIGEST: ${{ needs.build_and_push.outputs.api_digest }}
+          RUNNER_DIGEST: ${{ needs.build_and_push.outputs.runner_digest }}
           DEPLOY_REF: ${{ needs.context.outputs.deploy_ref }}
           DEPLOY_SHA: ${{ needs.context.outputs.deploy_sha }}
           GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
@@ -168,6 +248,8 @@ jobs:
             --arg ref "$DEPLOY_REF" \
             --arg runner_image "$RUNNER_IMAGE" \
             --arg api_image "$API_IMAGE" \
+            --arg runner_digest "$RUNNER_DIGEST" \
+            --arg api_digest "$API_DIGEST" \
             --arg source_repo "$GITHUB_REPOSITORY" \
             --arg switchboard_correlation_id "$correlation_id" \
             --arg compare_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/production-runner...${DEPLOY_SHA}" \
@@ -178,6 +260,8 @@ jobs:
                 ref: $ref,
                 runner_image: $runner_image,
                 api_image: $api_image,
+                runner_digest: $runner_digest,
+                api_digest: $api_digest,
                 source_repo: $source_repo,
                 switchboard_correlation_id: $switchboard_correlation_id,
                 compare_url: $compare_url
