@@ -38,7 +38,7 @@ def _settings(**kwargs: Any) -> Settings:
     return Settings(**values)
 
 
-def _client(runs_by_agent: dict[str, list[dict[str, Any]]]) -> httpx.AsyncClient:
+def coval_client(runs_by_agent: dict[str, list[dict[str, Any]]]) -> httpx.AsyncClient:
     now = datetime.now(tz=UTC)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -62,7 +62,7 @@ async def test_every_model_and_condition_found_has_no_flags() -> None:
         ]
         for agent in ("A1", "A2")
     }
-    async with _client(runs) as client:
+    async with coval_client(runs) as client:
         found, flags = await check_scenarios(_settings(), client, window_seconds=86_400)
 
     assert flags == []
@@ -75,7 +75,7 @@ async def test_every_model_and_condition_found_has_no_flags() -> None:
 @pytest.mark.asyncio
 async def test_model_without_runs_is_flagged_per_condition() -> None:
     runs = {"A1": [{"run_id": "r1", "persona_id": "P0"}, {"run_id": "r2", "persona_id": "P1"}]}
-    async with _client(runs) as client:
+    async with coval_client(runs) as client:
         _found, flags = await check_scenarios(_settings(), client, window_seconds=86_400)
 
     assert flags == ["bank/gemini-live: no clean runs", "bank/gemini-live: no low runs"]
@@ -92,7 +92,7 @@ async def test_unmapped_persona_is_flagged() -> None:
     }
     runs["A1"].append({"run_id": "stray-1", "persona_id": "PX"})
     runs["A1"].append({"run_id": "stray-2", "persona_id": "PX"})
-    async with _client(runs) as client:
+    async with coval_client(runs) as client:
         _found, flags = await check_scenarios(_settings(), client, window_seconds=86_400)
 
     assert flags == ["unmapped persona 'PX' in bank/gpt-realtime"]
@@ -100,7 +100,7 @@ async def test_unmapped_persona_is_flagged() -> None:
 
 @pytest.mark.asyncio
 async def test_unset_judge_is_flagged_as_skipped_by_the_fetch() -> None:
-    async with _client({}) as client:
+    async with coval_client({}) as client:
         found, flags = await check_scenarios(
             _settings(coval_s2s_bank_instruction_metric_id=None), client
         )
@@ -114,7 +114,7 @@ async def test_unset_judge_is_flagged_as_skipped_by_the_fetch() -> None:
 
 @pytest.mark.asyncio
 async def test_settings_the_fetch_rejects_raise_before_reading_coval() -> None:
-    async with _client({}) as client:
+    async with coval_client({}) as client:
         with pytest.raises(RuntimeError, match="coval_s2s_latency_metric_id is not set"):
             await check_scenarios(_settings(coval_s2s_latency_metric_id=None), client)
 
