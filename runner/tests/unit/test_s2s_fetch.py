@@ -52,6 +52,7 @@ from coval_bench.s2s.conditions import (
 )
 from coval_bench.s2s.coval_runs import CovalRun
 from coval_bench.s2s.rows import (
+    VALUE_MAPPERS,
     InvalidInstructionVerdict,
     call_length_value,
     has_duplicate_ids,
@@ -62,7 +63,7 @@ from coval_bench.s2s.rows import (
     population_mismatch,
     s2s_rows,
 )
-from coval_bench.s2s.specs import AgentSpec
+from coval_bench.s2s.specs import AgentSpec, s2s_specs
 
 
 def _settings(**kwargs: Any) -> Settings:
@@ -146,7 +147,7 @@ def _every_s2s_row() -> list[RegisteredModel]:
             collected=True,
             published=False,
         )
-        for spec in fetch_v2v.s2s_specs(Settings.model_construct(**agent_fields))
+        for spec in s2s_specs(Settings.model_construct(**agent_fields))
     ]
 
 
@@ -1829,7 +1830,7 @@ async def test_fetch_and_write_rejects_a_metric_with_no_row_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Simulate a configured metric whose mapper is missing.
-    mappers = dict(fetch_v2v.VALUE_MAPPERS)
+    mappers = dict(VALUE_MAPPERS)
     del mappers[Metric.INTERRUPTION_RATE]
     monkeypatch.setattr(fetch_v2v, "VALUE_MAPPERS", mappers)
     settings = _settings(
@@ -2846,12 +2847,12 @@ def test_an_unknown_agent_model_key_faults() -> None:
         }
     )
     with pytest.raises(RuntimeError, match="unknown model"):
-        fetch_v2v.s2s_specs(settings)
+        s2s_specs(settings)
 
 
 def test_unconfigured_scenarios_yield_no_specs() -> None:
     settings = _settings(coval_s2s_scenarios={"happy-smile": ScenarioCovalIds(test_set_id="TSS")})
-    families = {spec.family for spec in fetch_v2v.s2s_specs(settings)}
+    families = {spec.family for spec in s2s_specs(settings)}
     assert "s2s-happy-smile" in families
     assert "s2s-bank" not in families and "s2s-happy-customer" not in families
 
@@ -2998,7 +2999,7 @@ def _adherence_settings() -> Settings:
 def test_adherence_scenarios_carry_their_own_judge_and_publish_no_samples() -> None:
     specs = {
         spec.family: spec
-        for spec in fetch_v2v.s2s_specs(_adherence_settings())
+        for spec in s2s_specs(_adherence_settings())
         if spec.model == "gpt-realtime"
     }
     instruction = specs["s2s-instruction-bank"]
@@ -3020,7 +3021,7 @@ def test_an_adherence_scenario_without_its_judge_is_skipped() -> None:
         }
     )
     with capture_logs() as logs:
-        families = {spec.family for spec in fetch_v2v.s2s_specs(settings)}
+        families = {spec.family for spec in s2s_specs(settings)}
     assert "s2s-workflow-bank" not in families
     assert any(log["event"] == "scenario_metric_id_unset" for log in logs)
 
@@ -3031,7 +3032,7 @@ def test_a_blank_scenario_judge_id_is_rejected() -> None:
 
 
 def test_workflow_adherence_is_stored_as_a_percentage() -> None:
-    mapper = fetch_v2v.VALUE_MAPPERS[Metric.WORKFLOW_ADHERENCE]
+    mapper = VALUE_MAPPERS[Metric.WORKFLOW_ADHERENCE]
     assert mapper(0.75) == (75.0, ResultStatus.SUCCESS)
     assert mapper(1) == (100.0, ResultStatus.SUCCESS)
 
