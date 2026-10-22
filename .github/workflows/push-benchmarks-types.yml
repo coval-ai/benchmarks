@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: Benchmarks API environment whose deployed SHA publishes types.
+        description: Switchboard publication environment for the deployed SHA.
         required: true
         type: string
       ref:
@@ -17,19 +17,164 @@ on:
       RELEASE_APP_PRIVATE_KEY:
         required: true
 
+env:
+  ARTIFACT_ID: benchmarks_api_types
+  PRODUCER_MANIFEST: .switchboard/generated-artifacts.yaml
+  SWITCHBOARD_REF: main
+
 permissions:
   contents: read
 
 jobs:
+  resolve:
+    name: Resolve publication destinations
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+      producer_repo_name: ${{ steps.inputs.outputs.producer_repo_name }}
+    steps:
+      - name: Validate immutable publication inputs
+        id: inputs
+        env:
+          SOURCE_SHA: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::ref must be a full lowercase commit SHA."
+            exit 1
+          fi
+          echo "producer_repo_name=${GITHUB_REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate token for Switchboard
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: coval-ai
+          repositories: ci-cd-switchboard
+
+      - name: Checkout Switchboard
+        uses: actions/checkout@v7
+        with:
+          repository: coval-ai/ci-cd-switchboard
+          ref: ${{ env.SWITCHBOARD_REF }}
+          token: ${{ steps.app_token.outputs.token }}
+          path: switchboard-src
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install contract resolver
+        run: npm --prefix switchboard-src ci --ignore-scripts --no-audit --no-fund
+
+      - name: Resolve central publication destinations
+        id: targets
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          result_path="${RUNNER_TEMP}/generated-artifact-publication-targets.json"
+          npm --prefix switchboard-src --silent run switchboard -- \
+            generated-artifact-publication-targets \
+            --config config/switchboard \
+            --artifact "${ARTIFACT_ID}" \
+            --environment "${ENVIRONMENT}" \
+            --producer-repository "${GITHUB_REPOSITORY}" \
+            --output "${result_path}"
+          RESULT_PATH="${result_path}" node <<'NODE' >> "$GITHUB_OUTPUT"
+          const fs = require("node:fs")
+          const result = JSON.parse(fs.readFileSync(process.env.RESULT_PATH, "utf8"))
+          const include = result.targets.map((target, index) => ({
+            ...target,
+            repo_name: target.repository.split("/").at(-1),
+            target_key: `${target.repo}-${index}`,
+          }))
+          console.log(`matrix=${JSON.stringify({ include })}`)
+          NODE
+
   publish:
-    name: Publish benchmarks API generated artifact
-    uses: coval-ai/ci-cd-switchboard/.github/workflows/publish-generated-artifact.yml@main
-    with:
-      artifact_id: benchmarks_api_types
-      environment: ${{ inputs.environment }}
-      source_sha: ${{ inputs.ref }}
-      predecessor_verified: true
-      switchboard_ref: main
-    secrets:
-      RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
-      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+    name: Publish benchmarks_api_types to ${{ matrix.repository }}
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: generated-artifact-${{ matrix.repository }}-${{ matrix.branch }}
+      cancel-in-progress: false
+    steps:
+      - name: Generate repository token
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: coval-ai
+          repositories: |
+            ci-cd-switchboard
+            ${{ matrix.repo_name }}
+            ${{ needs.resolve.outputs.producer_repo_name }}
+
+      - name: Checkout immutable producer
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          path: provider-src
+          token: ${{ steps.app_token.outputs.token }}
+          persist-credentials: false
+
+      - name: Checkout Switchboard
+        uses: actions/checkout@v7
+        with:
+          repository: coval-ai/ci-cd-switchboard
+          ref: ${{ env.SWITCHBOARD_REF }}
+          token: ${{ steps.app_token.outputs.token }}
+          path: switchboard-src
+          persist-credentials: false
+
+      - name: Generate producer artifact
+        id: generation
+        uses: ./switchboard-src/.github/actions/switchboard-generate-artifact
+        with:
+          artifact-id: ${{ env.ARTIFACT_ID }}
+          environment: ${{ inputs.environment }}
+          producer-manifest: ${{ env.PRODUCER_MANIFEST }}
+          provider-root: provider-src
+
+      - name: Publish generated artifact
+        id: publication
+        uses: ./switchboard-src/.github/actions/switchboard-publish-generated-types
+        with:
+          artifact-id: ${{ env.ARTIFACT_ID }}
+          environment: ${{ inputs.environment }}
+          source-sha: ${{ inputs.ref }}
+          source-path: ${{ steps.generation.outputs.source_path }}
+          target-repo: ${{ matrix.repository }}
+          target-branch: ${{ matrix.branch }}
+          target-path: ${{ matrix.path }}
+          token: ${{ steps.app_token.outputs.token }}
+          commit-message: >-
+            chole: publish ${{ env.ARTIFACT_ID }} from
+            ${{ github.repository }} ${{ inputs.environment }}@${{ inputs.ref }}
+          marker-paths: ${{ steps.generation.outputs.marker_paths }}
+          ignored-json-fields: ${{ steps.generation.outputs.ignored_json_fields }}
+          replace-target: ${{ matrix.replaceTarget && 'true' || 'false' }}
+          result-path: >-
+            switchboard-generated-artifact-publication-${{ matrix.target_key }}.json
+
+      - name: Upload publication result
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: >-
+            generated-artifact-publication-${{ env.ARTIFACT_ID }}-${{
+            inputs.environment }}-${{ matrix.target_key }}-${{ github.run_attempt }}
+          path: ${{ steps.publication.outputs.result_path }}
+          if-no-files-found: error
+          retention-days: 30
