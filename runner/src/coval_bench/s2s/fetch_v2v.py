@@ -11,13 +11,9 @@ metric id, and the API key are read from the environment, never committed.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import importlib.resources
 import random
-from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
 
 import click
 import httpx
@@ -28,1134 +24,45 @@ from coval_bench import scenarios
 from coval_bench.config import Settings, get_settings, require_capture_bucket
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.models import (
-    CAPTURE_PENDING_ERROR,
-    MetricExecutor,
-    Result,
-    ResultStatus,
     RunStatus,
 )
 from coval_bench.db.registry_store import fetch_models
 from coval_bench.db.writer import RunWriter
-from coval_bench.registries import METRIC_SPECS, Metric
+from coval_bench.registries import Metric
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import RegisteredModel
-from coval_bench.runner.capture import (
-    ImportRunClaim,
-    ImportRunIdentity,
-    RunSeal,
-    read_import_run_claim,
-    read_run_state,
-    upload_import_run_claim,
-)
 from coval_bench.s2s.conditions import (
-    ADHERENCE_SLUGS,
     DATASET_ID,
-    DEFAULT_CONDITION,
-    FAMILY_DENTAL,
-    FAMILY_MULTITURN,
     Condition,
-    DatasetMetrics,
     condition_for,
     dataset_id_for,
 )
+from coval_bench.s2s.coval_runs import (
+    WINDOW_PAGE_SIZE,
+    CovalRun,
+    bucket_start,
+    coval_client,
+    recent_completed_runs,
+)
+from coval_bench.s2s.identity import (
+    UnmappedPersona,
+    all_persona_conditions,
+    all_persona_labels,
+    dataset_identity,
+    fetches_v2v,
+    packaged_dataset_sha256,
+    parse_persona_conditions,
+)
+from coval_bench.s2s.ingest import (
+    import_identity,
+    ingest_run,
+    pending_metrics,
+    resolve_import_generation,
+)
+from coval_bench.s2s.rows import VALUE_MAPPERS, ingestable_metrics
 from coval_bench.s2s.samples import SampleRun, model_labels, publish_tick_sample
+from coval_bench.s2s.specs import AgentSpec, llm_specs, s2s_specs
 
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
-
-# Ingest window: how far back one tick looks for not-yet-ingested runs, and
-# how many list results that scan reads. Two periods (with a one-day floor)
-# so the previous run stays visible while the current one is due, and a run
-# resolving late is still picked up.
-WINDOW_FLOOR_SECONDS = 86_400
-WINDOW_PAGE_SIZE = 10
-
-
-@dataclass(frozen=True)
-class AgentSpec:
-    """One provider: its Coval agent id + display strings."""
-
-    provider: str
-    model: str
-    # None means the agent is not configured and is skipped.
-    agent_id: str | None = None
-    # Settings attr holding this agent's own Coval test set id; None uses the
-    # shared ``coval_s2s_test_set_id``.
-    test_set_id_attr: str | None = None
-    # The test set id itself, for agents wired through ``coval_s2s_scenarios``;
-    # takes precedence over ``test_set_id_attr``.
-    test_set_id: str | None = None
-    # Dataset family for this agent's rows (see ``s2s.conditions``).
-    family: str = FAMILY_MULTITURN
-    # Whether this agent's recordings may reach the public samples card.
-    publish_samples: bool = True
-    benchmark: Benchmark = Benchmark.S2S
-    # Settings attr holding the Coval workspace id this agent lives in. None
-    # means the workspace coval_api_key defaults to (the existing behavior).
-    workspace_id_attr: str | None = None
-    # Settings attr holding this agent's own instruction-adherence metric id,
-    # overriding the global coval_s2s_instruction_metric_id. None uses the
-    # global one.
-    instruction_metric_id_attr: str | None = None
-    metric_ids: Mapping[Metric, str] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class CovalRun:
-    """One completed Coval run from the list endpoint's summary view."""
-
-    run_id: str
-    create_time: datetime | None
-    persona_id: str = ""
-
-
-# Model strings are display labels. Every agent runs the dental test set: the
-# shared multi-turn set stays queryable but is no longer written to, so a spec
-# left on it would go stale rather than idle.
-def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
-    return (
-        AgentSpec(
-            agent_id=settings.coval_s2s_openai_agent_id,
-            provider="openai",
-            model="gpt-realtime",
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_DENTAL,
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_gemini_agent_id,
-            provider="google",
-            model="gemini-live",
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_DENTAL,
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_xai_agent_id,
-            provider="xai",
-            model="grok-voice-think-fast-1.0",
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_DENTAL,
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_xai_think_fast_2_agent_id,
-            provider="xai",
-            model="grok-voice-think-fast-2.0",
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_DENTAL,
-        ),
-        # Pre-launch models under codenames: the provider and model strings are what
-        # land in stored results, so they carry no vendor identity of their own.
-        AgentSpec(
-            agent_id=settings.coval_s2s_gray_agent_id,
-            provider="colors",
-            model="gray",
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_DENTAL,
-            publish_samples=False,
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_red_agent_id,
-            provider="colors",
-            model="red",
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_DENTAL,
-            publish_samples=False,
-        ),
-        *_scenario_specs(settings),
-    )
-
-
-# The models every instruction-following scenario runs, keyed by the model string
-# the registry knows them as; the same key names the agent in
-# ``Settings.coval_s2s_scenarios``.
-SCENARIO_MODELS: tuple[tuple[str, str], ...] = (
-    ("openai", "gpt-realtime"),
-    ("openai", "gpt-live-1"),
-    ("google", "gemini-live"),
-    ("google", "gemini-3.8-live"),
-    ("xai", "grok-voice-think-fast-2.0"),
-    ("xai", "grok-voice-3.0"),
-    ("stepfun", "stepaudio-3-realtime-preview"),
-    ("alibaba", "qwen3.8-omni-flash-realtime"),
-    ("polyai", "dialog-rsn-1"),
-)
-
-
-def _scenario_specs(settings: Settings) -> tuple[AgentSpec, ...]:
-    """One spec per (scenario, model); unconfigured ones carry no agent id and are skipped.
-
-    Domain scenarios share the bank Validate Expected Behaviors judge; an
-    adherence scenario carries its own judge id and is skipped (with a warning)
-    until it names one. Both judges return a fraction rather than a verdict,
-    which the instruction mapper scales to a percentage.
-    """
-    known = {model for _provider, model in SCENARIO_MODELS}
-    specs: list[AgentSpec] = []
-    for scenario in scenarios.SCENARIOS:
-        ids = settings.coval_s2s_scenarios.get(scenario.slug)
-        if ids is None:
-            continue
-        unknown = sorted(set(ids.agents) - known)
-        if unknown:
-            raise RuntimeError(
-                f"coval_s2s_scenarios[{scenario.slug!r}].agents names unknown model(s) "
-                f"{unknown}; expected one of {sorted(known)}"
-            )
-        metric_ids = {
-            metric: ident
-            for metric, ident in (
-                (Metric.INSTRUCTION_FOLLOWING, ids.instruction_metric_id),
-                (Metric.WORKFLOW_ADHERENCE, ids.workflow_metric_id),
-            )
-            if ident
-        }
-        adherence_metric = ADHERENCE_SLUGS.get(scenario.slug)
-        if adherence_metric is not None and adherence_metric not in metric_ids:
-            logger.warning(
-                "scenario_metric_id_unset", scenario=scenario.slug, metric=adherence_metric.value
-            )
-            continue
-        for provider, model in SCENARIO_MODELS:
-            specs.append(
-                AgentSpec(
-                    agent_id=ids.agents.get(model),
-                    provider=provider,
-                    model=model,
-                    test_set_id=ids.test_set_id,
-                    family=scenario.family(Benchmark.S2S),
-                    publish_samples=adherence_metric is None,
-                    instruction_metric_id_attr=(
-                        None
-                        if adherence_metric is not None
-                        else scenarios.ACTIVE.instruction_metric_id_attr
-                    ),
-                    metric_ids=metric_ids,
-                )
-            )
-    return tuple(specs)
-
-
-def llm_specs(
-    models: Iterable[RegisteredModel], agent_ids: Mapping[str, str] | None = None
-) -> tuple[AgentSpec, ...]:
-    """Every collected LLM model, driven over the active suite through the proxy.
-
-    TTFT comes from the proxy's own turn log rather than from Coval.
-    """
-    agent_ids = agent_ids or {}
-    return tuple(
-        AgentSpec(
-            agent_id=agent_ids.get(model.provider),
-            provider=model.provider,
-            model=model.model,
-            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
-            family=scenarios.ACTIVE.family(Benchmark.LLM),
-            publish_samples=False,
-            benchmark=Benchmark.LLM,
-            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
-        )
-        for model in models
-        if model.benchmark is Benchmark.LLM and model.collected
-    )
-
-
-def _client(settings: Settings) -> httpx.AsyncClient:
-    """Build the Coval API client. The key is used only as a header, never logged."""
-    key = settings.coval_api_key
-    if key is None:
-        raise RuntimeError("coval_api_key is not set (Secret Manager in prod, .env locally)")
-    return httpx.AsyncClient(
-        base_url=settings.coval_api_base,
-        headers={"X-API-Key": key.get_secret_value()},
-        timeout=30.0,
-    )
-
-
-def _dataset_sha256() -> str:
-    """SHA-256 of the packaged S2S manifest."""
-    try:
-        ref = importlib.resources.files("coval_bench.datasets.manifests").joinpath(
-            f"{DATASET_ID}.json"
-        )
-        return hashlib.sha256(ref.read_bytes()).hexdigest()
-    except Exception:
-        logger.warning("dataset_sha256_failed", dataset_id=DATASET_ID, exc_info=True)
-        return "unknown"
-
-
-def _dataset_fingerprint(provenance: str) -> str:
-    """Return a stable 64-hex dataset fingerprint.
-
-    Packaged datasets already carry a content SHA. Coval-hosted S2S datasets
-    carry immutable test-set/persona provenance in the legacy run column, so
-    fingerprint that identifier without changing the legacy representation.
-    """
-    if len(provenance) == 64 and all(character in "0123456789abcdef" for character in provenance):
-        return provenance
-    return hashlib.sha256(provenance.encode()).hexdigest()
-
-
-class UnmappedPersona(ValueError):
-    """A run's persona is absent from the condition map, so its rows have no home."""
-
-
-def _condition_for_persona(
-    persona_id: str,
-    persona_conditions: Mapping[str, Condition] | None,
-    noisy_persona_id: str | None,
-) -> Condition:
-    """This run's caller condition.
-
-    An unmapped persona raises rather than counting as clean: that pooling would be
-    invisible in both the data and the logs. ``noisy_persona_id`` is the pre-map
-    setting, honoured only while the map is unset so the two can deploy in either
-    order.
-    """
-    if persona_conditions:
-        try:
-            return persona_conditions[persona_id]
-        except KeyError:
-            raise UnmappedPersona(f"persona {persona_id!r} has no condition mapped") from None
-    if noisy_persona_id and persona_id == noisy_persona_id:
-        return Condition.NOISY
-    return Condition.CLEAN
-
-
-def _dataset_identity(
-    test_set_id: str | None,
-    persona_id: str = "",
-    noisy_persona_id: str | None = None,
-    *,
-    family: str = FAMILY_MULTITURN,
-    persona_conditions: Mapping[str, Condition] | None = None,
-) -> tuple[str, str] | None:
-    """Dataset id + provenance for one run's rows, or None when not ingested.
-
-    Multi-turn runs are keyed to their Coval test set, not the single-turn SLURP
-    manifest, so they get their own dataset id (never pooling with s2s-v1) and
-    record the test-set id as provenance. Without a test set (legacy latency-only
-    mode) the rows stay under the packaged s2s-v1 manifest.
-
-    Non-clean conditions name the persona in their provenance so the rows stay
-    self-describing.
-    """
-    if not test_set_id:
-        return DATASET_ID, _dataset_sha256()
-    condition = _condition_for_persona(persona_id, persona_conditions, noisy_persona_id)
-    dataset_id = dataset_id_for(family, condition)
-    if dataset_id is None:
-        return None
-    if condition is Condition.CLEAN:
-        return dataset_id, test_set_id
-    return dataset_id, f"{test_set_id}:{persona_id}"
-
-
-def _fetches_v2v(family: str) -> bool:
-    """Whether *family*'s clean condition asks Coval for V2V latency."""
-    dataset_id = dataset_id_for(family, Condition.CLEAN)
-    return dataset_id is not None and Metric.V2V in condition_for(dataset_id).fetched
-
-
-def _persona_conditions(raw: Mapping[str, str]) -> dict[str, Condition] | None:
-    """Parse the persona -> condition setting, rejecting unknown condition names."""
-    if not raw:
-        return None
-    parsed: dict[str, Condition] = {}
-    for persona_id, name in raw.items():
-        try:
-            parsed[persona_id] = Condition(name)
-        except ValueError:
-            valid = ", ".join(c.value for c in Condition)
-            raise RuntimeError(
-                f"persona {persona_id!r} maps to condition {name!r}; expected one of {valid}"
-            ) from None
-    return parsed
-
-
-def _all_persona_conditions(settings: Settings) -> dict[str, str]:
-    """The legacy persona map plus every scenario's callers, as condition names.
-
-    Coval personas are workspace-level, so the same id may serve several
-    scenarios; identical declarations merge. Two different conditions for one
-    persona is a configuration error, not a tie.
-    """
-    merged = dict(settings.coval_s2s_condition_personas)
-    owner = dict.fromkeys(merged, "coval_s2s_condition_personas")
-    for slug, ids in settings.coval_s2s_scenarios.items():
-        for condition, persona_id in ids.personas.items():
-            previous = merged.get(persona_id)
-            if previous is not None and previous != condition:
-                raise RuntimeError(
-                    f"persona {persona_id!r} is {previous!r} in {owner[persona_id]} but "
-                    f"{condition!r} in coval_s2s_scenarios[{slug!r}]"
-                )
-            owner.setdefault(persona_id, f"coval_s2s_scenarios[{slug!r}]")
-            merged[persona_id] = condition
-    return merged
-
-
-def _all_persona_labels(settings: Settings) -> dict[str, str]:
-    """Labels for the samples card: the legacy map plus the registry label of each
-    scenario persona's condition."""
-    registry = scenarios.load_personas().personas
-    labels = dict(settings.s2s_persona_labels)
-    for ids in settings.coval_s2s_scenarios.values():
-        for condition, persona_id in ids.personas.items():
-            persona = registry.get(condition)
-            if persona is not None:
-                labels.setdefault(persona_id, persona.label)
-    return labels
-
-
-def _parse_time(raw: object) -> datetime | None:
-    if not isinstance(raw, str):
-        return None
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(UTC)
-    except ValueError:
-        return None
-
-
-def _bucket_start(at: datetime, period_seconds: int) -> datetime:
-    """Floor a timestamp to the epoch-anchored fetch grid."""
-    epoch = int(at.timestamp())
-    return datetime.fromtimestamp(epoch - epoch % period_seconds, tz=UTC)
-
-
-async def recent_completed_runs(
-    client: httpx.AsyncClient,
-    agent_id: str,
-    *,
-    period_seconds: int,
-    test_set_id: str | None = None,
-    window_seconds: int | None = None,
-    page_size: int = WINDOW_PAGE_SIZE,
-    requested_run_ids: frozenset[str] | None = None,
-    workspace_id: str | None = None,
-) -> list[CovalRun]:
-    """Completed Coval runs for one agent within the ingest window, newest first.
-
-    List returns the summary view newest-first; the API WAF rejects AND
-    filters, so filter by agent_id and check status and test set here.
-    ``test_set_id`` narrows to one test set so other sims on the same agents
-    (e.g. the single-turn set) are not ingested. Runs
-    without a parseable create_time are kept: better to ingest with a fetch-time
-    slot than to drop data. Pages are followed until one reaches past the window,
-    so an agent with several runs a day (one per persona) is never cut off at the
-    first page. ``workspace_id`` is required for an agent that does not live in
-    the workspace the client's API key defaults to.
-    """
-    window = window_seconds or max(WINDOW_FLOOR_SECONDS, 2 * period_seconds)
-    filt = f'agent_id="{agent_id}"'
-    now = datetime.now(tz=UTC)
-    runs: list[CovalRun] = []
-    page_token: str | None = None
-    found_ids: set[str] = set()
-    headers = {"X-Coval-Workspace-Id": workspace_id} if workspace_id else None
-    while True:
-        params: dict[str, str | int] = {
-            "filter": filt,
-            "order_by": "-create_time",
-            "page_size": page_size,
-        }
-        if page_token:
-            params["page_token"] = page_token
-        resp = await client.get("/runs", params=params, headers=headers)
-        resp.raise_for_status()
-        payload = cast("dict[str, Any]", resp.json())
-        raw = cast("list[dict[str, Any]]", payload.get("runs", []))
-        left_window = False
-        for r in raw:
-            run = CovalRun(
-                run_id=cast("str", r["run_id"]),
-                create_time=_parse_time(r.get("create_time")),
-                persona_id=cast("str", r.get("persona_id") or ""),
-            )
-            if run.create_time is not None and (now - run.create_time).total_seconds() > window:
-                left_window = True
-                continue
-            if r.get("status") != "COMPLETED":
-                continue
-            if test_set_id and r.get("test_set_id") != test_set_id:
-                continue
-            runs.append(run)
-            found_ids.add(run.run_id)
-        if requested_run_ids:
-            if requested_run_ids <= found_ids:
-                break
-        elif left_window or not raw:
-            break
-        page_token = cast("str | None", payload.get("next_page_token"))
-        if not page_token:
-            break
-    return runs
-
-
-def _v2v_value(raw: object) -> tuple[float | None, ResultStatus] | None:
-    """Seconds to ms; a clip with no numeric value becomes a FAILED row."""
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        return round(float(raw) * 1000, 1), ResultStatus.SUCCESS
-    return None, ResultStatus.FAILED
-
-
-class InvalidInstructionVerdict(Exception):
-    """A run's instruction metric returned a value outside YES/NO/UNKNOWN."""
-
-
-def _instruction_verdict(raw: object) -> bool | None:
-    """Classify a binary judge verdict: YES -> True, NO -> False, UNKNOWN -> None.
-
-    UNKNOWN (None) is excluded from the pass rate. A binary judge only ever emits
-    canonical YES/NO/UNKNOWN, so anything else violates the contract and raises,
-    rather than being silently scored as a miss.
-    """
-    normalized = raw.strip().upper() if isinstance(raw, str) else raw
-    if normalized == "YES":
-        return True
-    if normalized == "NO":
-        return False
-    if normalized == "UNKNOWN":
-        return None
-    raise InvalidInstructionVerdict(f"unexpected instruction verdict: {raw!r}")
-
-
-def _has_duplicate_ids(values: list[dict[str, Any]]) -> bool:
-    """True if two of a metric's conversations share a simulation id."""
-    ids = [v.get("simulation_output_id") for v in values]
-    return len(ids) != len(set(ids))
-
-
-def _population_mismatch(
-    anchor_values: list[dict[str, Any]], other_values: list[dict[str, Any]]
-) -> dict[str, object] | None:
-    """None if *other_values* covers the same conversations as the anchor.
-
-    Ids, not counts: equal counts can be different conversations. Values with no id
-    are excluded from both sides — two of them are not the same conversation, so
-    matching them would invent an overlap. The caller trims to the overlap; only
-    duplicates skip the metric for the run.
-    """
-    other_set = {sid for v in other_values if (sid := v.get("simulation_output_id"))}
-    anchor_set = {sid for v in anchor_values if (sid := v.get("simulation_output_id"))}
-    missing = sorted(str(x) for x in anchor_set - other_set)
-    extra = sorted(str(x) for x in other_set - anchor_set)
-    duplicate = _has_duplicate_ids(other_values)
-    if not duplicate and not missing and not extra:
-        return None
-    return {"missing_ids": missing, "extra_ids": extra, "duplicate_ids": duplicate}
-
-
-def _instruction_value(raw: object) -> tuple[float | None, ResultStatus] | None:
-    """YES -> 100.0, NO -> 0.0, UNKNOWN -> no row, so the mean is YES / (YES + NO).
-
-    A composite judge reports the fraction of expected behaviors met instead of a
-    verdict; that fraction becomes a percentage on the same scale, unrounded.
-    Raises InvalidInstructionVerdict on any value outside either contract.
-    """
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        if not 0.0 <= raw <= 1.0:
-            raise InvalidInstructionVerdict(f"instruction fraction out of range: {raw!r}")
-        return float(raw) * 100.0, ResultStatus.SUCCESS
-    verdict = _instruction_verdict(raw)
-    if verdict is None:
-        return None
-    return (100.0 if verdict else 0.0), ResultStatus.SUCCESS
-
-
-def _interruption_value(raw: object) -> tuple[float | None, ResultStatus] | None:
-    """Interruptions per minute, unrounded; a clip with no numeric value becomes a FAILED row."""
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        return float(raw), ResultStatus.SUCCESS
-    return None, ResultStatus.FAILED
-
-
-def _call_length_value(raw: object) -> tuple[float | None, ResultStatus] | None:
-    """Conversation audio duration in seconds; a clip with no numeric value becomes a FAILED row."""
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        return float(raw), ResultStatus.SUCCESS
-    return None, ResultStatus.FAILED
-
-
-# The only per-metric part: one raw Coval value -> (row value, status), or None to
-# write no row. A metric is ingestable once it appears here.
-_VALUE_MAPPERS: dict[Metric, Callable[[object], tuple[float | None, ResultStatus] | None]] = {
-    Metric.V2V: _v2v_value,
-    Metric.INSTRUCTION_FOLLOWING: _instruction_value,
-    Metric.INTERRUPTION_RATE: _interruption_value,
-    Metric.CALL_LENGTH: _call_length_value,
-    Metric.WORKFLOW_ADHERENCE: _instruction_value,
-}
-
-
-def _s2s_rows(
-    values: list[dict[str, Any]],
-    *,
-    metric: Metric,
-    run_pk: int,
-    coval_run_id: str,
-    spec: AgentSpec,
-) -> list[Result]:
-    """Map one metric's per-conversation values to Result rows."""
-    to_row = _VALUE_MAPPERS[metric]
-    rows: list[Result] = []
-    for i, v in enumerate(values):
-        mapped = to_row(v.get("value"))
-        if mapped is None:
-            continue
-        metric_value, status = mapped
-        sim_id = v.get("simulation_output_id")
-        rows.append(
-            Result(
-                run_id=run_pk,
-                provider=spec.provider,
-                model=spec.model,
-                benchmark=spec.benchmark,
-                metric_type=metric,
-                metric_units=METRIC_SPECS[metric].units,
-                metric_value=metric_value,
-                audio_filename=f"{coval_run_id}/{sim_id}" if sim_id else f"{coval_run_id}/{i}",
-                status=status,
-            )
-        )
-    return rows
-
-
-def _failed_conversation_rows(
-    output_ids: list[str],
-    anchor_values: list[dict[str, Any]],
-    *,
-    run_pk: int,
-    coval_run_id: str,
-    spec: AgentSpec,
-) -> list[Result]:
-    """A FAILED latency row for each conversation with no anchor value.
-
-    Coval omits a failed conversation from every metric's values but still lists
-    it in ``results.output_ids``. Without these rows a model is judged only on
-    the calls it survived, and a run's failures would not show in its success
-    rate.
-
-    An anchor value without a simulation_output_id (kept by ``_s2s_rows`` under
-    its index fallback) can't be reconciled against ``output_ids``, so coverage
-    is undecidable for the whole run: synthesize nothing rather than stamp a
-    measured conversation FAILED.
-    """
-    covered = {v.get("simulation_output_id") for v in anchor_values}
-    if not all(covered):
-        logger.warning(
-            "anchor_ids_missing",
-            provider=spec.provider,
-            coval_run_id=coval_run_id,
-            anchors_without_id=sum(1 for v in anchor_values if not v.get("simulation_output_id")),
-        )
-        return []
-    return [
-        Result(
-            run_id=run_pk,
-            provider=spec.provider,
-            model=spec.model,
-            benchmark=spec.benchmark,
-            metric_type=Metric.V2V,
-            metric_units=METRIC_SPECS[Metric.V2V].units,
-            metric_value=None,
-            audio_filename=f"{coval_run_id}/{sim_id}",
-            status=ResultStatus.FAILED,
-        )
-        for sim_id in output_ids
-        if sim_id not in covered
-    ]
-
-
-# Metrics a condition declares ``local`` are measured on our side and looked up
-# by the anchor's conversation ids instead of fetched from Coval. A local metric
-# is ingestable once it appears here, mirroring _VALUE_MAPPERS.
-_LOCAL_SOURCES: dict[
-    Metric, Callable[[RunWriter, Sequence[str]], Awaitable[Mapping[str, float]]]
-] = {
-    Metric.TTFT: lambda writer, sim_ids: writer.conversation_ttft(sim_ids),
-}
-
-
-def _local_rows(
-    values: Mapping[str, float],
-    *,
-    metric: Metric,
-    run_pk: int,
-    coval_run_id: str,
-    spec: AgentSpec,
-) -> list[Result]:
-    """One SUCCESS row per conversation measured locally, keyed like the anchor rows."""
-    return [
-        Result(
-            run_id=run_pk,
-            provider=spec.provider,
-            model=spec.model,
-            benchmark=spec.benchmark,
-            metric_type=metric,
-            metric_units=METRIC_SPECS[metric].units,
-            metric_value=round(value, 3),
-            audio_filename=f"{coval_run_id}/{sim_id}",
-            status=ResultStatus.SUCCESS,
-        )
-        for sim_id, value in values.items()
-    ]
-
-
-def _metric_values(metrics: dict[str, Any], metric_id: str | None) -> list[dict[str, Any]] | None:
-    """The metric's per-conversation values, or None when it is not on the run."""
-    payload = metrics.get(metric_id) if metric_id else None
-    if payload is None:
-        return None
-    return cast("list[dict[str, Any]]", payload.get("values", []))
-
-
-def _ingestable(condition: DatasetMetrics, metric_ids: Mapping[Metric, str]) -> frozenset[Metric]:
-    """The condition's metrics that are configured and have a row builder."""
-    fetched = frozenset(
-        metric for metric in condition.fetched if metric in metric_ids and metric in _VALUE_MAPPERS
-    )
-    return fetched | (condition.local & frozenset(_LOCAL_SOURCES))
-
-
-async def _pending_metrics(
-    writer: RunWriter,
-    *,
-    benchmark: Benchmark,
-    provider: str,
-    coval_run_id: str,
-    condition: DatasetMetrics,
-    metric_ids: Mapping[Metric, str],
-) -> frozenset[Metric]:
-    """The condition's ingestable metrics that are not yet stored."""
-    pending: set[Metric] = set()
-    for metric in _ingestable(condition, metric_ids):
-        if not await writer.coval_metric_ingested(
-            benchmark=benchmark,
-            provider=provider,
-            coval_run_id=coval_run_id,
-            metric_type=metric,
-        ):
-            pending.add(metric)
-    return frozenset(pending)
-
-
-def _import_identity(
-    *,
-    spec: AgentSpec,
-    coval_run: CovalRun,
-    dataset_id: str,
-    dataset_sha256: str,
-    workspace_id: str | None,
-) -> ImportRunIdentity:
-    return ImportRunIdentity(
-        external_run_id=coval_run.run_id,
-        workspace_id=workspace_id or "",
-        benchmark=str(spec.benchmark),
-        provider=spec.provider,
-        model=spec.model,
-        dataset_id=dataset_id,
-        dataset_sha256=_dataset_fingerprint(dataset_sha256),
-        persona_id=coval_run.persona_id,
-    )
-
-
-async def _import_generation(
-    client: storage.Client,
-    bucket: str,
-    identity: ImportRunIdentity,
-) -> tuple[ImportRunClaim | None, int | None]:
-    """Return an unsealed generation to resume, or the next generation number.
-
-    A sealed generation without a finalization receipt is owned by the recovery
-    command.  Starting another generation while it is unresolved could publish
-    an incomplete predecessor.
-    """
-    generation = 0
-    while True:
-        claim = await asyncio.to_thread(read_import_run_claim, client, bucket, identity, generation)
-        if claim is None:
-            return None, generation
-        finalized = await asyncio.to_thread(
-            read_run_state, client, bucket, claim.run_id, "finalized"
-        )
-        if finalized is not None:
-            generation += 1
-            continue
-        seal = await asyncio.to_thread(read_run_state, client, bucket, claim.run_id, "seal")
-        if seal is not None:
-            return None, None
-        return claim, generation
-
-
-async def _ingest_run(
-    client: httpx.AsyncClient,
-    writer: RunWriter,
-    *,
-    spec: AgentSpec,
-    coval_run: CovalRun,
-    metric_ids: Mapping[Metric, str],
-    condition: DatasetMetrics = DEFAULT_CONDITION,
-    pending: frozenset[Metric] | None = None,
-    dataset_id: str = DATASET_ID,
-    dataset_sha256: str = "",
-    period_seconds: int,
-    artifact_client: storage.Client,
-    artifact_bucket: str,
-    workspace_id: str | None = None,
-    import_identity: ImportRunIdentity,
-    import_generation: int,
-    import_claim: ImportRunClaim | None = None,
-) -> RunStatus | None:
-    """Ingest one Coval run into its own run row; None = skipped, nothing written.
-
-    Writes the metrics *condition* declares and *pending* still owes (default all
-    of them). Skips (before any DB write) runs missing the condition's required
-    metric and runs left with nothing to write. Coval's error_status is ignored
-    on purpose: one failed conversation stamps the whole run EXECUTION_FAILURE,
-    and gating on it threw away the healthy clips (and starved the sampler) over
-    a single short call. A conversation with no anchor value becomes a FAILED
-    row instead. SUCCEEDED = all clips numeric, PARTIAL = some failed, FAILED = all.
-    """
-    if pending is None:
-        pending = condition.fetched | (condition.local & frozenset(_LOCAL_SOURCES))
-    if import_claim is not None:
-        pending = frozenset(Metric(metric) for metric in import_claim.metric_types)
-    run_pk: int | None = None
-    headers = {"X-Coval-Workspace-Id": workspace_id} if workspace_id else None
-    try:
-        resp = await client.get(f"/runs/{coval_run.run_id}", headers=headers)
-        resp.raise_for_status()
-        run = cast("dict[str, Any]", resp.json()["run"])
-        metrics = cast("dict[str, Any]", (run.get("results") or {}).get("metrics") or {})
-        anchor = condition.required
-        anchor_values = _metric_values(metrics, metric_ids.get(anchor))
-        if anchor_values is None:
-            # The condition says this one must be here, so its absence is a fault
-            # rather than a quiet skip. Metrics the condition omits are never
-            # looked up, so they never reach this branch.
-            logger.warning(
-                "required_metric_absent",
-                provider=spec.provider,
-                coval_run_id=coval_run.run_id,
-                dataset_id=dataset_id,
-                metric=anchor.value,
-            )
-            return None
-        if _has_duplicate_ids(anchor_values):
-            # Nothing else checks the anchor's own population, and duplicate rows
-            # would double-count conversations in the aggregate.
-            logger.warning(
-                "anchor_duplicate_ids",
-                provider=spec.provider,
-                coval_run_id=coval_run.run_id,
-                metric=anchor.value,
-            )
-            return None
-
-        # Decide writability up front (pure) so a backfill with nothing to add
-        # creates no run row and stays retryable.
-        writable: dict[Metric, list[dict[str, Any]]] = {}
-        if anchor in pending:
-            writable[anchor] = anchor_values
-        for metric in sorted(condition.optional):
-            if metric not in pending:
-                continue
-            values = _metric_values(metrics, metric_ids.get(metric))
-            if values is None:
-                logger.info(
-                    "optional_metric_absent",
-                    provider=spec.provider,
-                    coval_run_id=coval_run.run_id,
-                    metric=metric.value,
-                )
-                continue
-            # An id-less value cannot be reconciled against the anchor or deduped,
-            # and its positional key is not stable across metrics, so it is
-            # rejected before the populations are compared.
-            values = [v for v in values if v.get("simulation_output_id")]
-            mismatch = _population_mismatch(anchor_values, values)
-            if mismatch is not None:
-                logger.warning(
-                    "metric_population_mismatch",
-                    provider=spec.provider,
-                    coval_run_id=coval_run.run_id,
-                    metric=metric.value,
-                    **mismatch,
-                )
-                # Trim to the conversations both cover rather than discarding the
-                # metric for the whole run: one unmeasured call should cost that
-                # call, not the other forty-nine. Row-level parity with the anchor
-                # was never exact anyway — an UNKNOWN verdict writes no row — so a
-                # coverage gap is thinner data, not corrupt data. Duplicates are
-                # corrupt: one conversation would carry twice its weight.
-                if mismatch["duplicate_ids"]:
-                    continue
-                anchor_ids = {sid for v in anchor_values if (sid := v.get("simulation_output_id"))}
-                values = [v for v in values if v.get("simulation_output_id") in anchor_ids]
-                if not values:
-                    continue
-            writable[metric] = values
-        # Same mapper the rows are built from, so "would this write anything?"
-        # cannot drift from what actually gets written.
-        for metric in list(writable):
-            try:
-                mapped = [_VALUE_MAPPERS[metric](v.get("value")) for v in writable[metric]]
-            except InvalidInstructionVerdict as exc:
-                # Judge-contract violation: discard that metric for the whole run;
-                # retryable on a later scan.
-                logger.warning(
-                    "instruction_verdict_invalid",
-                    provider=spec.provider,
-                    coval_run_id=coval_run.run_id,
-                    metric=metric.value,
-                    error=str(exc),
-                )
-                del writable[metric]
-            else:
-                if not any(m is not None for m in mapped):
-                    # Every value maps to no row (all UNKNOWN), so claim nothing.
-                    logger.info(
-                        "metric_yields_no_rows",
-                        provider=spec.provider,
-                        coval_run_id=coval_run.run_id,
-                        metric=metric.value,
-                    )
-                    del writable[metric]
-
-        # Local metrics are looked up for the anchor's conversations. A metric with
-        # no values at all stays pending for a later scan; once any conversation
-        # has a value the run counts as ingested, and the ones still missing are a
-        # permanent coverage gap, as an UNKNOWN verdict is for instruction.
-        local: dict[Metric, Mapping[str, float]] = {}
-        sim_ids = [sid for v in anchor_values if (sid := v.get("simulation_output_id"))]
-        for metric in sorted(condition.local & pending):
-            measured = await _LOCAL_SOURCES[metric](writer, sim_ids)
-            if not measured:
-                continue
-            if len(measured) < len(sim_ids):
-                logger.warning(
-                    "local_metric_coverage_gap",
-                    provider=spec.provider,
-                    coval_run_id=coval_run.run_id,
-                    metric=metric.value,
-                    conversations=len(sim_ids) - len(measured),
-                )
-            local[metric] = measured
-
-        if not writable and not local:
-            # Backfill with nothing to add; leave it retryable, write no run row.
-            return None
-
-        run_dataset_sha256 = dataset_sha256 or _dataset_sha256()
-        scheduled_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
-        claim = import_claim
-        if claim is None:
-            started_at = datetime.now(UTC)
-            reserved_run_id = await writer.reserve_run_id()
-            claim = await asyncio.to_thread(
-                upload_import_run_claim,
-                artifact_client,
-                artifact_bucket,
-                ImportRunClaim(
-                    identity=import_identity,
-                    generation=import_generation,
-                    run_id=reserved_run_id,
-                    started_at=started_at,
-                    scheduled_at=scheduled_at,
-                    captured_at=started_at,
-                    metric_types=sorted(str(metric) for metric in set(writable) | set(local)),
-                ),
-            )
-        elif claim.identity != import_identity or claim.generation != import_generation:
-            raise ValueError("external import claim does not match the requested generation")
-        run_pk = claim.run_id
-        scheduled_at = claim.scheduled_at
-        captured_at = claim.captured_at
-        claimed_run = await writer.ensure_capture_run(
-            run_pk,
-            started_at=claim.started_at,
-            dataset_id=dataset_id,
-            dataset_sha256=run_dataset_sha256,
-            scheduled_at=scheduled_at,
-            persona_id=coval_run.persona_id or None,
-        )
-
-        # Grouped as built: metric_type is a plain str on Result, so filtering the
-        # flat list by enum identity would silently match nothing.
-        by_metric = {
-            metric: _s2s_rows(
-                values, metric=metric, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec
-            )
-            for metric, values in writable.items()
-        }
-        for metric, local_values in local.items():
-            by_metric[metric] = _local_rows(
-                local_values, metric=metric, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec
-            )
-        # Optional V2V (the workflow sets) gets the same FAILED rows as anchored V2V,
-        # or its latency would cover only the calls a model survived.
-        if Metric.V2V in writable:
-            output_ids = [
-                s
-                for s in cast("list[Any]", (run.get("results") or {}).get("output_ids") or [])
-                if isinstance(s, str)
-            ]
-            by_metric[Metric.V2V].extend(
-                _failed_conversation_rows(
-                    output_ids,
-                    writable[Metric.V2V],
-                    run_pk=run_pk,
-                    coval_run_id=coval_run.run_id,
-                    spec=spec,
-                )
-            )
-        all_rows = [row for rows in by_metric.values() for row in rows]
-        rows = by_metric.get(Metric.V2V, [])
-        capture_outcomes: list[Any] = []
-        expected_capture_ids: list[str] = []
-        if all_rows:
-            grouped: dict[str, list[Result]] = {}
-            for row in all_rows:
-                grouped.setdefault(cast("str", row.audio_filename), []).append(row)
-            dataset_fingerprint = _dataset_fingerprint(run_dataset_sha256)
-            from coval_bench.runner.capture import (
-                RunManifest,
-                build_capture_identity,
-                identity_digest,
-                upload_run_state,
-            )
-            from coval_bench.runner.persistence import persist_capture, prepare_capture_envelope
-
-            expected_capture_ids = [
-                identity_digest(
-                    build_capture_identity(
-                        run_id=run_pk,
-                        benchmark=spec.benchmark.value,
-                        dataset_id=dataset_id,
-                        sample_id=sample_id,
-                        provider=spec.provider,
-                        model=spec.model,
-                        capture_id=f"{coval_run.run_id}:{sample_id}",
-                    )
-                )
-                for sample_id in sorted(grouped)
-            ]
-            await asyncio.to_thread(
-                upload_run_state,
-                artifact_client,
-                artifact_bucket,
-                run_pk,
-                "manifest",
-                RunManifest(
-                    run_id=run_pk,
-                    scheduled_at=scheduled_at,
-                    benchmark_kind=spec.benchmark.value.lower(),
-                    source="coval-api",
-                    datasets={dataset_id: dataset_fingerprint},
-                    expected_capture_ids=expected_capture_ids,
-                ),
-            )
-            for index, (sample_id, sample_rows) in enumerate(sorted(grouped.items())):
-                sample_captured_at = captured_at + timedelta(microseconds=index)
-                provider_error = None
-                if not any(row.status is ResultStatus.SUCCESS for row in sample_rows):
-                    provider_error = next(
-                        (row.error for row in sample_rows if row.error),
-                        "Coval conversation produced no successful metric value",
-                    )
-                envelope = prepare_capture_envelope(
-                    run_id=run_pk,
-                    dataset_id=dataset_id,
-                    dataset_sha256=dataset_fingerprint,
-                    sample_id=sample_id,
-                    entry=spec,
-                    benchmark=spec.benchmark,
-                    results=sample_rows,
-                    provider_error=provider_error,
-                    captured_at=sample_captured_at,
-                    executor=MetricExecutor.COVAL_API,
-                    capture_id=f"{coval_run.run_id}:{sample_id}",
-                    provider_extras={"coval_run_id": coval_run.run_id},
-                )
-                capture_outcomes.append(
-                    await persist_capture(
-                        writer=writer,
-                        storage_client=artifact_client,
-                        bucket=artifact_bucket,
-                        envelope=envelope,
-                    )
-                )
-        logger.info(
-            "fetched_clips",
-            provider=spec.provider,
-            coval_run_id=coval_run.run_id,
-            slot=str(scheduled_at),
-            clips=len(rows),
-            instruction=len(by_metric.get(Metric.INSTRUCTION_FOLLOWING, [])),
-            workflow=len(by_metric.get(Metric.WORKFLOW_ADHERENCE, [])),
-            ttft=len(by_metric.get(Metric.TTFT, [])),
-            success=sum(1 for r in rows if r.status is ResultStatus.SUCCESS),
-        )
-        if Metric.V2V in writable:
-            # Reliability is the latency signal (other metrics never fail the run).
-            failed = sum(1 for r in rows if r.status is ResultStatus.FAILED)
-            if not rows or failed == len(rows):
-                status = RunStatus.FAILED
-            elif failed:
-                status = RunStatus.PARTIAL
-            else:
-                status = RunStatus.SUCCEEDED
-        else:
-            # This condition has no latency, or it landed on an earlier scan.
-            status = RunStatus.SUCCEEDED
-        from coval_bench.runner.persistence import capture_pending, seal_and_finish_run
-
-        incomplete = capture_pending(capture_outcomes, expected_capture_ids)
-        held = incomplete and status is not RunStatus.FAILED
-        if claimed_run.finished_at is not None:
-            stored_status, finish_error = claimed_run.status, claimed_run.error
-            finished_at = claimed_run.finished_at
-        else:
-            stored_status = RunStatus.PARTIAL if held else status
-            finish_error = CAPTURE_PENDING_ERROR if held else None
-            finished_at = datetime.now(UTC)
-        status = await seal_and_finish_run(
-            writer=writer,
-            storage_client=artifact_client,
-            bucket=artifact_bucket,
-            seal=RunSeal(
-                run_id=run_pk,
-                intended_status=str(status),
-                stored_status=str(stored_status),
-                finished_at=finished_at,
-                error=finish_error,
-                expected_capture_ids=expected_capture_ids,
-            ),
-            capture_pending=incomplete,
-        )
-        if status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
-            try:
-                await writer.rebuild_run_rollup(run_pk)
-            except Exception:
-                logger.warning(
-                    "normalized_bucket_refresh_failed", provider=spec.provider, exc_info=True
-                )
-        return status
-    except Exception as exc:
-        if run_pk is not None:
-            logger.warning(
-                "normalized_import_capture_pending",
-                provider=spec.provider,
-                coval_run_id=coval_run.run_id,
-                run_id=run_pk,
-                error=str(exc),
-            )
-            return RunStatus.PARTIAL
-        logger.warning(
-            "run_ingest_failed",
-            provider=spec.provider,
-            coval_run_id=coval_run.run_id,
-            error=str(exc),
-        )
-        return RunStatus.FAILED
 
 
 def _backfill_status(statuses: list[RunStatus]) -> RunStatus:
@@ -1238,7 +145,7 @@ async def _fetch_one_provider(
             return
         if not spec.publish_samples or dataset_id not in publishable:
             return
-        bucket_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
+        bucket_at = bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
         key = (bucket_at, coval_run.persona_id)
         if key in candidates:
             return
@@ -1272,7 +179,7 @@ async def _fetch_one_provider(
             # An unmapped persona skips only its own run: the provider's other runs
             # still ingest, and the job reports the persona once at the end.
             try:
-                identity = _dataset_identity(
+                identity = dataset_identity(
                     test_set_id,
                     coval_run.persona_id,
                     noisy_persona_id,
@@ -1307,20 +214,20 @@ async def _fetch_one_provider(
                     metric=condition.required.value,
                 )
                 continue
-            ingestable = _ingestable(condition, metric_ids)
+            ingestable = ingestable_metrics(condition, metric_ids)
             if artifact_client is None:
                 raise RuntimeError("required capture storage is unavailable")
-            import_identity_value = _import_identity(
+            import_identity_value = import_identity(
                 spec=spec,
                 coval_run=coval_run,
                 dataset_id=dataset_id,
-                dataset_sha256=dataset_sha256 or _dataset_sha256(),
+                dataset_sha256=dataset_sha256 or packaged_dataset_sha256(),
                 workspace_id=workspace_id,
             )
-            import_claim, import_generation = await _import_generation(
+            import_claim, import_generation = await resolve_import_generation(
                 artifact_client, artifact_bucket, import_identity_value
             )
-            database_pending = await _pending_metrics(
+            database_pending = await pending_metrics(
                 writer,
                 benchmark=spec.benchmark,
                 provider=spec.provider,
@@ -1352,7 +259,7 @@ async def _fetch_one_provider(
                     "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
                 )
                 continue
-            status = await _ingest_run(
+            status = await ingest_run(
                 client,
                 writer,
                 spec=spec,
@@ -1440,7 +347,7 @@ def validate_fetch_settings(
     if benchmark is Benchmark.S2S and not settings.coval_s2s_latency_metric_id:
         # Only a configured spec whose clean condition fetches V2V (see
         # conditions.py) makes the latency metric required.
-        v2v_spec_configured = any(spec.agent_id and _fetches_v2v(spec.family) for spec in specs)
+        v2v_spec_configured = any(spec.agent_id and fetches_v2v(spec.family) for spec in specs)
         if v2v_spec_configured:
             raise RuntimeError("coval_s2s_latency_metric_id is not set")
     # Instruction ingestion and the test-set filter go together: instruction
@@ -1482,7 +389,7 @@ def validate_fetch_settings(
     noisy_persona_id = raw_noisy or None
     if benchmark is Benchmark.S2S and noisy_persona_id and not test_set_id:
         raise RuntimeError("coval_s2s_noisy_persona_id requires coval_s2s_test_set_id")
-    _persona_conditions(_all_persona_conditions(settings))
+    parse_persona_conditions(all_persona_conditions(settings))
     # Scenario personas travel with their scenario's own test set, so only the
     # legacy map needs the shared one.
     if benchmark is Benchmark.S2S and settings.coval_s2s_condition_personas and not test_set_id:
@@ -1531,8 +438,8 @@ async def fetch_and_write_v2v(
     noisy_persona_id = settings.coval_s2s_noisy_persona_id or None
     # Supersedes coval_s2s_noisy_persona_id once set, so the two can deploy in
     # either order.
-    persona_conditions = _persona_conditions(_all_persona_conditions(settings))
-    persona_labels = _all_persona_labels(settings)
+    persona_conditions = parse_persona_conditions(all_persona_conditions(settings))
+    persona_labels = all_persona_labels(settings)
     raw_interruption = settings.coval_s2s_interruption_metric_id
     raw_call_length = settings.coval_s2s_call_length_metric_id
     # Only configured metrics are ever asked for, so an unset id simply means that
@@ -1546,11 +453,11 @@ async def fetch_and_write_v2v(
         metric_ids[Metric.INTERRUPTION_RATE] = raw_interruption
     if raw_call_length:
         metric_ids[Metric.CALL_LENGTH] = raw_call_length
-    unmapped = sorted(m.value for m in metric_ids.keys() - _VALUE_MAPPERS.keys())
+    unmapped = sorted(m.value for m in metric_ids.keys() - VALUE_MAPPERS.keys())
     if unmapped:
-        raise RuntimeError(f"no _VALUE_MAPPERS entry for configured metrics: {', '.join(unmapped)}")
+        raise RuntimeError(f"no VALUE_MAPPERS entry for configured metrics: {', '.join(unmapped)}")
 
-    async with _client(settings) as client, lifespan_pool(settings) as pool:
+    async with coval_client(settings) as client, lifespan_pool(settings) as pool:
         models = await fetch_models(pool)
         if benchmark is Benchmark.LLM:
             specs = llm_specs(models, llm_agent_ids)

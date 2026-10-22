@@ -15,17 +15,15 @@ import httpx
 
 from coval_bench.config import Settings
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.s2s.fetch_v2v import (
+from coval_bench.s2s.coval_runs import coval_client, recent_completed_runs
+from coval_bench.s2s.fetch_v2v import validate_fetch_settings
+from coval_bench.s2s.identity import (
     UnmappedPersona,
-    _all_persona_conditions,
-    _client,
-    _condition_for_persona,
-    _persona_conditions,
-    _scenario_specs,
-    recent_completed_runs,
-    s2s_specs,
-    validate_fetch_settings,
+    all_persona_conditions,
+    condition_for_persona,
+    parse_persona_conditions,
 )
+from coval_bench.s2s.specs import s2s_specs, scenario_specs
 
 
 @dataclass(frozen=True)
@@ -40,13 +38,13 @@ async def check_scenarios(
 ) -> tuple[list[ModelRuns], list[str]]:
     """Count each scenario model's recent runs per condition and flag what the fetch would miss."""
     validate_fetch_settings(settings, s2s_specs(settings), Benchmark.S2S)
-    persona_conditions = _persona_conditions(_all_persona_conditions(settings))
+    persona_conditions = parse_persona_conditions(all_persona_conditions(settings))
     found: list[ModelRuns] = []
     flags: list[str] = []
     unmapped: dict[str, set[str]] = {}
     for slug, ids in settings.coval_s2s_scenarios.items():
         only_this = settings.model_copy(update={"coval_s2s_scenarios": {slug: ids}})
-        specs = [s for s in _scenario_specs(only_this) if s.agent_id]
+        specs = [s for s in scenario_specs(only_this) if s.agent_id]
         if not specs:
             flags.append(f"{slug}: the fetch skips this scenario (no agents or no judge)")
             continue
@@ -67,7 +65,7 @@ async def check_scenarios(
             counts = dict.fromkeys(ids.personas, 0)
             for run in runs:
                 try:
-                    condition = _condition_for_persona(
+                    condition = condition_for_persona(
                         run.persona_id, persona_conditions, settings.coval_s2s_noisy_persona_id
                     )
                 except UnmappedPersona:
@@ -90,7 +88,7 @@ async def check_scenarios(
 async def _check(
     settings: Settings, window_seconds: int | None
 ) -> tuple[list[ModelRuns], list[str]]:
-    async with _client(settings) as client:
+    async with coval_client(settings) as client:
         return await check_scenarios(settings, client, window_seconds=window_seconds)
 
 
