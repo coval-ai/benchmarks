@@ -69,6 +69,7 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '1'
           ignore-unfixed: true
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF to GitHub Security tab
         if: always() && hashFiles(format('trivy-{0}.sarif', matrix.image)) != ''
