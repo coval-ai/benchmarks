@@ -4,8 +4,9 @@
 """AssemblyAI TTS provider — OpenAI-compatible HTTP streaming synthesis.
 
 Endpoint: POST https://tts.us.assemblyai.com/v1/openai/audio/speech
-Voices are selected with the ``voice_id`` extension field; OpenAI's ``voice``
-parameter must be left out or the request is refused with a 400.
+Voices and the output rate are set with the ``voice_id`` and ``sample_rate``
+extension fields; OpenAI's ``voice`` parameter must be left out or the request
+is refused with a 400.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ VALID_VOICES = (
     "aai-carrie",
 )
 _VOICE_UUID = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
-SAMPLE_RATE = 24000
+SAMPLE_RATE = 44100
 
 _BASE_URL = "https://tts.us.assemblyai.com"
 _OPENAI_PREFIX = "/v1/openai"
@@ -106,7 +107,7 @@ class AssemblyAITTSProvider(TTSProvider):
                 voice=NOT_GIVEN,  # type: ignore[arg-type]
                 input=text,
                 response_format="pcm",
-                extra_body={"voice_id": self._voice},
+                extra_body={"voice_id": self._voice, "sample_rate": SAMPLE_RATE},
             ) as response:
                 synthesis.http_version = response.http_version
                 synthesis.submit_to_headers_ms = submit_to_headers_ms(

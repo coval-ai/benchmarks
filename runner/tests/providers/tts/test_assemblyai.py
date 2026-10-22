@@ -85,7 +85,7 @@ async def test_assemblyai_tts_sends_voice_id_without_voice(fake_settings: Settin
     assert kwargs["model"] == _MODEL
     assert kwargs["voice"] is NOT_GIVEN
     assert kwargs["response_format"] == "pcm"
-    assert kwargs["extra_body"] == {"voice_id": _CLONED_VOICE}
+    assert kwargs["extra_body"] == {"voice_id": _CLONED_VOICE, "sample_rate": 44100}
     if result.audio_path:
         result.audio_path.unlink()
 
