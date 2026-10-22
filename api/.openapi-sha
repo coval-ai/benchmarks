@@ -1,0 +1,2 @@
+source: coval-ai/benchmarks scripts/generate_types.sh
+sha256: d750668076a55feac31b900627bfd7ebb34d971ddf9224e8c82263f2a2e5cad8
