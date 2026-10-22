@@ -43,7 +43,8 @@ import random
 import signal
 import wave
 from collections import Counter, defaultdict
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime  # noqa: UP017 — UTC alias requires 3.11+, target is 3.12
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -1204,6 +1205,645 @@ async def run_suite(
     return summaries
 
 
+@dataclass
+class _RunContext:
+    """Everything the phases of one run share after the run row exists."""
+
+    settings: Settings
+    writer: Any
+    run_id: int
+    started_at: datetime
+    artifact_client: Any
+    posthog_client: Posthog | None
+    benchmark_kind: Literal["stt", "tts", "both"]
+    smoke: bool
+    result_cls: Any
+    result_status: Any
+    run_status: Any
+    capture_pending_error: str
+
+
+@dataclass
+class _RunTally:
+    """Counts over the rows persisted so far; built the same way on every exit path."""
+
+    typed_results: list[Any]
+    success_count: int
+    fail_count: int
+    reliability: list[ProviderReliability]
+
+    @property
+    def total_results(self) -> int:
+        return len(self.typed_results)
+
+
+@dataclass(frozen=True)
+class _DatasetPlan:
+    stt_dataset_id: str
+    stt_size: int | None
+    tts_dataset_id: str
+    tts_size: int | None
+
+
+class _SigtermGuard:
+    """Turn Cloud Run's SIGTERM into a cancellation of the main task.
+
+    Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout. The
+    cancelled run finalizes its row as PARTIAL so timed-out executions surface in
+    /v1/results instead of staying stuck at status='running'.
+    """
+
+    def __init__(self) -> None:
+        self.received = False
+        self._loop = asyncio.get_running_loop()
+        self._task = asyncio.current_task()
+
+    def install(self) -> None:
+        with contextlib.suppress(NotImplementedError):
+            self._loop.add_signal_handler(signal.SIGTERM, self._on_sigterm)
+
+    def uninstall(self) -> None:
+        with contextlib.suppress(NotImplementedError, ValueError):
+            self._loop.remove_signal_handler(signal.SIGTERM)
+
+    def uncancel(self) -> None:
+        if self._task is not None:
+            self._task.uncancel()
+
+    def _on_sigterm(self) -> None:
+        if self.received:
+            return
+        self.received = True
+        logger.warning("sigterm_received")
+        if self._task is not None:
+            self._task.cancel()
+
+
+def _init_posthog(settings: Settings) -> Posthog | None:
+    if settings.posthog_disabled or not settings.posthog_project_token:
+        return None
+    try:
+        client = Posthog(
+            settings.posthog_project_token,
+            host=settings.posthog_host,
+            enable_exception_autocapture=True,
+        )
+    except Exception:
+        logger.warning("posthog_init_failed", exc_info=True)
+        return None
+    atexit.register(client.shutdown)
+    return client
+
+
+def _shutdown_posthog(client: Posthog | None) -> None:
+    if client is None:
+        return
+    with contextlib.suppress(Exception):
+        client.shutdown()  # type: ignore[no-untyped-call]
+    atexit.unregister(client.shutdown)
+
+
+def _plan_datasets(
+    settings: Settings,
+    *,
+    source: Literal["shared", "dedicated"],
+    dataset_id: str | None,
+    only: frozenset[str] | None,
+) -> _DatasetPlan:
+    stt_dataset_id = dataset_id or settings.dataset_id or DEFAULT_STT_DATASET
+    tts_dataset_id = settings.tts_dataset_id
+    if only and "tts_dataset_id" not in settings.model_fields_set:
+        tts_dataset_id = next(
+            iter(DEDICATED_TTS_SUITE if source == "dedicated" else SHARED_TTS_SUITE)
+        )
+    tts_override = (
+        settings.tts_dataset_sample_size
+        if settings.tts_dataset_sample_size is not None
+        else settings.dataset_sample_size
+    )
+    return _DatasetPlan(
+        stt_dataset_id=stt_dataset_id,
+        stt_size=stt_sample_size(source, stt_dataset_id, settings.dataset_sample_size),
+        tts_dataset_id=tts_dataset_id,
+        tts_size=tts_sample_size(source, tts_dataset_id, tts_override),
+    )
+
+
+def _apply_matrix_overrides(
+    models: list[RegisteredModel], overrides: list[RegisteredModel] | None
+) -> tuple[list[RegisteredModel], list[RegisteredModel]]:
+    """The registry split by benchmark, with overrides replacing or adding entries."""
+    stt_matrix = [m for m in models if m.benchmark is Benchmark.STT]
+    tts_matrix = [m for m in models if m.benchmark is Benchmark.TTS]
+    if not overrides:
+        return stt_matrix, tts_matrix
+    override_map = {(e.benchmark, e.provider, e.model): e for e in overrides}
+    stt_matrix = [override_map.get((e.benchmark, e.provider, e.model), e) for e in stt_matrix]
+    tts_matrix = [override_map.get((e.benchmark, e.provider, e.model), e) for e in tts_matrix]
+    existing_keys = {(e.benchmark, e.provider, e.model) for e in stt_matrix + tts_matrix}
+    for ov in overrides:
+        if (ov.benchmark, ov.provider, ov.model) not in existing_keys:
+            (stt_matrix if ov.benchmark is Benchmark.STT else tts_matrix).append(ov)
+    return stt_matrix, tts_matrix
+
+
+def _select_models(
+    stt_matrix: list[RegisteredModel],
+    tts_matrix: list[RegisteredModel],
+    *,
+    source: Literal["shared", "dedicated"],
+    benchmark_kind: Literal["stt", "tts", "both"],
+    only: frozenset[str] | None,
+) -> tuple[list[RegisteredModel], list[RegisteredModel]]:
+    """The collected models this run owns.
+
+    A collected model runs on the normal schedule whether or not it is published;
+    only the API hides the unpublished ones.
+    """
+    dedicated = source == "dedicated"
+    enabled_stt = [e for e in stt_matrix if e.collected and _runs_daily(e) == dedicated]
+    enabled_tts = [e for e in tts_matrix if e.collected and _runs_daily(e) == dedicated]
+    if not only:
+        return enabled_stt, enabled_tts
+    enabled_stt = [e for e in enabled_stt if f"{e.provider}/{e.model}" in only]
+    enabled_tts = [e for e in enabled_tts if f"{e.provider}/{e.model}" in only]
+    in_run = (enabled_stt if benchmark_kind in ("stt", "both") else []) + (
+        enabled_tts if benchmark_kind in ("tts", "both") else []
+    )
+    missing = only - {f"{e.provider}/{e.model}" for e in in_run}
+    if missing:
+        raise ValueError(
+            f"--only matched no model collected for a {source} {benchmark_kind} run: "
+            f"{sorted(missing)}"
+        )
+    return enabled_stt, enabled_tts
+
+
+def _manifest_sha256(dataset_id: str, fallback: str) -> str:
+    try:
+        return str(_get_manifest_sha256()(dataset_id))
+    except Exception:
+        return fallback
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def _capture_client() -> Any:
+    try:
+        from google.cloud import storage
+
+        return storage.Client()
+    except Exception as exc:
+        raise RuntimeError("capture client initialization failed") from exc
+
+
+def _require_dataset_hashes(
+    benchmark_kind: Literal["stt", "tts", "both"], dataset_sha256: str, tts_manifest_sha256: str
+) -> None:
+    if benchmark_kind in ("stt", "both") and not _is_sha256(dataset_sha256):
+        raise RuntimeError("required STT capture needs a valid dataset hash")
+    if benchmark_kind in ("tts", "both") and len(tts_manifest_sha256) != 64:
+        raise RuntimeError("required TTS capture needs a valid dataset hash")
+
+
+def _stt_capture_ids(
+    run_id: int, dataset_id: str, items: list[Any], entries: list[RegisteredModel]
+) -> list[str]:
+    from coval_bench.runner.capture import build_capture_identity, identity_digest
+
+    return [
+        identity_digest(
+            build_capture_identity(
+                run_id=run_id,
+                benchmark="STT",
+                dataset_id=dataset_id,
+                sample_id=item.sample_id or item.path.name,
+                provider=entry.provider,
+                model=entry.model,
+            )
+        )
+        for item in items
+        for entry in entries
+    ]
+
+
+def _tts_capture_ids(
+    run_id: int,
+    dataset_id: str,
+    items: list[Any],
+    entries: list[RegisteredModel],
+    voices: dict[tuple[str, str], list[str | None]],
+) -> list[str]:
+    from coval_bench.runner.capture import build_capture_identity, identity_digest
+
+    return [
+        identity_digest(
+            build_capture_identity(
+                run_id=run_id,
+                benchmark="TTS",
+                dataset_id=dataset_id,
+                sample_id=item.testcase_id,
+                provider=entry.provider,
+                model=entry.model,
+                voice=voices[(entry.provider, entry.model)][index],
+            )
+        )
+        for index, item in enumerate(items)
+        for entry in entries
+    ]
+
+
+async def _upload_manifest(
+    ctx: _RunContext,
+    *,
+    scheduled_at: datetime,
+    source: Literal["shared", "dedicated"],
+    datasets: dict[str, str],
+    expected_capture_ids: list[str],
+) -> None:
+    from coval_bench.runner.capture import RunManifest, upload_run_state
+
+    manifest = RunManifest(
+        run_id=ctx.run_id,
+        scheduled_at=scheduled_at,
+        benchmark_kind=ctx.benchmark_kind,
+        source=source,
+        datasets=datasets,
+        expected_capture_ids=sorted(expected_capture_ids),
+    )
+    await asyncio.to_thread(
+        upload_run_state,
+        ctx.artifact_client,
+        ctx.settings.benchmark_artifact_bucket,
+        ctx.run_id,
+        "manifest",
+        manifest,
+    )
+
+
+async def _warm_providers(
+    settings: Settings,
+    benchmark_kind: Literal["stt", "tts", "both"],
+    enabled_stt: list[RegisteredModel],
+    enabled_tts: list[RegisteredModel],
+) -> None:
+    """Absorb pre-t0 cold-start cost (TCP+TLS, gRPC channel, NVCF dispatch).
+
+    ``Provider.warmup`` is a no-op by default; only providers that need it pay the
+    call. Errors are non-fatal.
+    """
+    provider_classes: set[type[Provider]] = set()
+    if benchmark_kind in ("stt", "both"):
+        stt_providers = _get_stt_providers()
+        provider_classes.update(
+            cls for e in enabled_stt if (cls := stt_providers.get(e.provider)) is not None
+        )
+    if benchmark_kind in ("tts", "both"):
+        tts_providers = _get_tts_providers()
+        provider_classes.update(
+            cls for e in enabled_tts if (cls := tts_providers.get(e.provider)) is not None
+        )
+    if not provider_classes:
+        return
+    ordered_classes = list(provider_classes)
+    warmup_results = await asyncio.gather(
+        *(cls.warmup(settings=settings) for cls in ordered_classes),
+        return_exceptions=True,
+    )
+    for cls, res in zip(ordered_classes, warmup_results, strict=False):
+        if isinstance(res, BaseException):
+            logger.warning("provider_warmup_failed", provider=cls.__name__, exc_info=res)
+
+
+async def _run_phase(
+    kind: Literal["stt", "tts"],
+    tasks: Sequence[tuple[RegisteredModel, Awaitable[list[Any]]]],
+    completed_item_results: list[Any],
+) -> list[Any]:
+    """Gather one modality's item tasks; a task that raised is logged, not fatal.
+
+    Completed items are retained in ``completed_item_results`` even when SIGTERM
+    cancels the gather; the returned list is phase-scoped for dead-provider
+    alerts, so an interrupted sample is never read as a provider's whole workload.
+    """
+
+    async def collect(task: Awaitable[list[Any]]) -> list[Any]:
+        results = await task
+        completed_item_results.extend(results)
+        return results
+
+    batch = await asyncio.gather(*(collect(task) for _entry, task in tasks), return_exceptions=True)
+    results: list[Any] = []
+    for (entry, _task), batch_result in zip(tasks, batch, strict=True):
+        if isinstance(batch_result, BaseException):
+            logger.warning(
+                f"{kind}_task_raised",
+                provider=entry.provider,
+                model=entry.model,
+                exc_info=batch_result,
+            )
+        else:
+            results.extend(batch_result)
+    return results
+
+
+def _tally(
+    ctx: _RunContext, all_results: list[Any], completed_item_results: list[Any]
+) -> _RunTally:
+    typed = [r for r in all_results if isinstance(r, ctx.result_cls)]
+    return _RunTally(
+        typed_results=typed,
+        success_count=sum(1 for r in typed if r.status == ctx.result_status.SUCCESS),
+        fail_count=sum(1 for r in typed if r.status == ctx.result_status.FAILED),
+        reliability=_provider_reliability(completed_item_results, ctx.result_status),
+    )
+
+
+def _intended_status(ctx: _RunContext, tally: _RunTally) -> Any:
+    if tally.total_results == 0 or tally.fail_count == tally.total_results:
+        return ctx.run_status.FAILED
+    if tally.success_count == tally.total_results:
+        return ctx.run_status.SUCCEEDED
+    return ctx.run_status.PARTIAL
+
+
+def _emit_run_finished(
+    ctx: _RunContext,
+    *,
+    status: Any,
+    tally: _RunTally,
+    finished_at: datetime,
+    sigterm: bool = False,
+) -> RunSummary:
+    duration_s = (finished_at - ctx.started_at).total_seconds()
+    log = logger.warning if sigterm else logger.info
+    log(
+        "benchmark_run_finished_early_sigterm" if sigterm else "benchmark_run_finished",
+        status=str(status),
+        total_results=tally.total_results,
+        success_count=tally.success_count,
+        fail_count=tally.fail_count,
+        duration_s=duration_s,
+        reliability=[entry.model_dump() for entry in tally.reliability],
+    )
+    telemetry.record_run(kind=ctx.benchmark_kind, status=str(status))
+    properties: dict[str, Any] = {
+        "status": str(status),
+        "total_results": tally.total_results,
+        "success_count": tally.success_count,
+        "fail_count": tally.fail_count,
+        "duration_s": duration_s,
+        "benchmark_kind": ctx.benchmark_kind,
+        "smoke": ctx.smoke,
+        "$process_person_profile": False,
+    }
+    if sigterm:
+        properties["sigterm"] = True
+    _emit_posthog(ctx.posthog_client, "benchmark_run_completed", properties)
+    return RunSummary(
+        run_id=ctx.run_id,
+        started_at=ctx.started_at,
+        finished_at=finished_at,
+        status=str(status),
+        total_results=tally.total_results,
+        success_count=tally.success_count,
+        fail_count=tally.fail_count,
+        reliability=tally.reliability,
+        sigterm=sigterm,
+    )
+
+
+async def _seal_run(
+    ctx: _RunContext,
+    tally: _RunTally,
+    *,
+    capture_outcomes: list[Any],
+    expected_capture_ids: list[str],
+) -> RunSummary:
+    """Store the final row, then report and refresh. Nothing after the store raises.
+
+    Results were persisted incrementally inside _run_stt_item / _run_tts_item, so
+    a job-timeout mid-run still durably stores everything that completed. The
+    outcome is logged only after the row is stored: if finish_run raises, the
+    outer handler is the only thing that should report, otherwise a partial run
+    pages RUN_PARTIAL and then RUN_FAILED for one incident.
+    """
+    from coval_bench.runner.capture import RunSeal
+    from coval_bench.runner.persistence import capture_pending, seal_and_finish_run
+
+    intended_status = _intended_status(ctx, tally)
+    incomplete = capture_pending(capture_outcomes, expected_capture_ids)
+    held = incomplete and intended_status is not ctx.run_status.FAILED
+    finished_at = datetime.now(tz=UTC)
+    final_status = await seal_and_finish_run(
+        writer=ctx.writer,
+        storage_client=ctx.artifact_client,
+        bucket=ctx.settings.benchmark_artifact_bucket,
+        seal=RunSeal(
+            run_id=ctx.run_id,
+            intended_status=str(intended_status),
+            stored_status=str(ctx.run_status.PARTIAL if held else intended_status),
+            finished_at=finished_at,
+            error=ctx.capture_pending_error if held else None,
+            expected_capture_ids=sorted(expected_capture_ids),
+        ),
+        capture_pending=incomplete,
+    )
+    _log_run_outcome(
+        final_status,
+        tally.typed_results,
+        tally.fail_count,
+        result_status=ctx.result_status,
+        run_status=ctx.run_status,
+    )
+    if final_status in (ctx.run_status.SUCCEEDED, ctx.run_status.PARTIAL):
+        await _refresh_series_bucket(ctx.writer, ctx.run_id)
+        # Failed runs retain their queued repairs for hourly maintenance.
+        try:
+            snapshot_status = await ctx.writer.refresh_window_views(ctx.run_id)
+            logger.info("dashboard_windows_refresh", status=snapshot_status)
+        except Exception:
+            logger.warning("dashboard_windows_refresh_failed", exc_info=True)
+    return _emit_run_finished(ctx, status=final_status, tally=tally, finished_at=finished_at)
+
+
+async def _finish_after_sigterm(ctx: _RunContext, tally: _RunTally) -> RunSummary:
+    """Write PARTIAL so the run is visible to /v1/results, then report what landed.
+
+    Report before the bucket refresh, not after: SIGTERM gives ~10s before
+    SIGKILL, and losing the page to a slow maintenance call is worse than losing
+    the rollup. Reach is limited: results are only collected after a phase's
+    gather returns, so the cancelled phase contributes nothing and a single-kind
+    run names no dead provider. Rows are durable either way; each task persists
+    its own.
+    """
+    partial = ctx.run_status.PARTIAL
+    try:
+        await asyncio.shield(
+            ctx.writer.finish_run(
+                ctx.run_id,
+                status=partial,
+                error="sigterm-received (cloud-run-task-timeout)",
+            )
+        )
+    except Exception as write_exc:
+        logger.error("run_row_update_failed_after_sigterm", exc_info=write_exc)
+    else:
+        _log_run_outcome(
+            partial,
+            tally.typed_results,
+            tally.fail_count,
+            result_status=ctx.result_status,
+            run_status=ctx.run_status,
+        )
+        await asyncio.shield(_refresh_series_bucket(ctx.writer, ctx.run_id))
+    return _emit_run_finished(
+        ctx, status=partial, tally=tally, finished_at=datetime.now(tz=UTC), sigterm=True
+    )
+
+
+async def _finish_after_failure(ctx: _RunContext, exc: Exception) -> None:
+    """Emit RUN_FAILED (the Cloud Logging metric trigger) and mark the row FAILED."""
+    err_msg = _truncate(str(exc))
+    log_run_failed(err_msg, exc)
+    telemetry.record_run(kind=ctx.benchmark_kind, status=str(ctx.run_status.FAILED))
+    try:
+        await ctx.writer.finish_run(ctx.run_id, status=ctx.run_status.FAILED, error=err_msg)
+    except Exception as write_exc:
+        logger.error("run_row_update_failed_after_failure", exc_info=write_exc)
+    _emit_posthog(
+        ctx.posthog_client,
+        "benchmark_run_failed",
+        {
+            "benchmark_kind": ctx.benchmark_kind,
+            "smoke": ctx.smoke,
+            "$process_person_profile": False,
+        },
+    )
+
+
+async def _run_phases(
+    ctx: _RunContext,
+    *,
+    source: Literal["shared", "dedicated"],
+    scheduled_at: datetime,
+    load_dataset: Any,
+    plan: _DatasetPlan,
+    dataset_sha256: str,
+    tts_manifest_sha256: str,
+    enabled_stt: list[RegisteredModel],
+    enabled_tts: list[RegisteredModel],
+    all_results: list[Any],
+    completed_item_results: list[Any],
+) -> RunSummary:
+    """Load, warm up, dispatch STT then TTS, then seal the run."""
+    settings = ctx.settings
+    run_stt = ctx.benchmark_kind in ("stt", "both") and bool(enabled_stt)
+    run_tts = ctx.benchmark_kind in ("tts", "both") and bool(enabled_tts)
+    stt_items: list[Any] = []
+    tts_items: list[Any] = []
+    tts_voices: dict[tuple[str, str], list[str | None]] = {}
+    expected_capture_ids: list[str] = []
+    capture_outcomes: list[Any] = []
+
+    if run_stt:
+        stt_dataset = load_dataset(
+            plan.stt_dataset_id,
+            settings=settings,
+            sample_size=None if ctx.smoke else plan.stt_size,
+            rng=_get_family_rng()(plan.stt_dataset_id, scheduled_at),
+        )
+        stt_items = stt_dataset.items[:1] if ctx.smoke else stt_dataset.items
+        expected_capture_ids.extend(
+            _stt_capture_ids(ctx.run_id, plan.stt_dataset_id, stt_items, enabled_stt)
+        )
+    if run_tts:
+        tts_dataset = load_dataset(
+            plan.tts_dataset_id,
+            settings=settings,
+            sample_size=None if ctx.smoke else plan.tts_size,
+        )
+        tts_items = tts_dataset.items[:1] if ctx.smoke else tts_dataset.items
+        tts_voices = {
+            (entry.provider, entry.model): _assign_tts_voices(entry, len(tts_items), ctx.run_id)
+            for entry in enabled_tts
+        }
+        expected_capture_ids.extend(
+            _tts_capture_ids(ctx.run_id, plan.tts_dataset_id, tts_items, enabled_tts, tts_voices)
+        )
+    datasets: dict[str, str] = {}
+    if ctx.benchmark_kind in ("stt", "both"):
+        datasets[plan.stt_dataset_id] = dataset_sha256
+    if ctx.benchmark_kind in ("tts", "both"):
+        datasets[plan.tts_dataset_id] = tts_manifest_sha256
+    await _upload_manifest(
+        ctx,
+        scheduled_at=scheduled_at,
+        source=source,
+        datasets=datasets,
+        expected_capture_ids=expected_capture_ids,
+    )
+    await _warm_providers(settings, ctx.benchmark_kind, enabled_stt, enabled_tts)
+
+    gate = ModelGate(_CONCURRENCY_CAP)
+    # Item-major order so the gate interleaves providers; a model-major order
+    # would queue one model's items back to back while the others sit idle.
+    if run_stt:
+        logger.info("stt_dataset_sampled", item_count=len(stt_items))
+        stt_tasks = [
+            (
+                entry,
+                _run_stt_item(
+                    entry=entry,
+                    item=item,
+                    run_id=ctx.run_id,
+                    gate=gate,
+                    settings=settings,
+                    writer=ctx.writer,
+                    dataset_id=plan.stt_dataset_id,
+                    dataset_sha256=dataset_sha256,
+                    artifact_client=ctx.artifact_client,
+                    capture_outcomes=capture_outcomes,
+                ),
+            )
+            for item in stt_items
+            for entry in enabled_stt
+        ]
+        all_results.extend(await _run_phase("stt", stt_tasks, completed_item_results))
+    if run_tts:
+        logger.info("tts_dataset_sampled", item_count=len(tts_items))
+        tts_tasks = [
+            (
+                entry,
+                _run_tts_item(
+                    entry=entry,
+                    item=item,
+                    run_id=ctx.run_id,
+                    gate=gate,
+                    settings=settings,
+                    voice=tts_voices[(entry.provider, entry.model)][i],
+                    writer=ctx.writer,
+                    dataset_id=plan.tts_dataset_id,
+                    dataset_sha256=tts_manifest_sha256,
+                    artifact_client=ctx.artifact_client,
+                    capture_outcomes=capture_outcomes,
+                ),
+            )
+            for i, item in enumerate(tts_items)
+            for entry in enabled_tts
+        ]
+        all_results.extend(await _run_phase("tts", tts_tasks, completed_item_results))
+
+    return await _seal_run(
+        ctx,
+        _tally(ctx, all_results, completed_item_results),
+        capture_outcomes=capture_outcomes,
+        expected_capture_ids=expected_capture_ids,
+    )
+
+
 async def run_benchmarks(
     *,
     settings: Settings,
@@ -1245,116 +1885,29 @@ async def run_benchmarks(
     require_capture_bucket(settings)
 
     lifespan_pool, RunWriter, RunStatus, models_mod = _get_db_symbols()
-    Result = models_mod.Result
-    ResultStatus = models_mod.ResultStatus
     load_dataset = _get_load_dataset()
-    stt_dataset_id = dataset_id or settings.dataset_id or DEFAULT_STT_DATASET
-    stt_size = stt_sample_size(source, stt_dataset_id, settings.dataset_sample_size)
-    tts_dataset_id = settings.tts_dataset_id
-    if only and "tts_dataset_id" not in settings.model_fields_set:
-        tts_dataset_id = next(
-            iter(DEDICATED_TTS_SUITE if source == "dedicated" else SHARED_TTS_SUITE)
-        )
-    tts_override = (
-        settings.tts_dataset_sample_size
-        if settings.tts_dataset_sample_size is not None
-        else settings.dataset_sample_size
-    )
-    tts_size = tts_sample_size(source, tts_dataset_id, tts_override)
+    plan = _plan_datasets(settings, source=source, dataset_id=dataset_id, only=only)
+    posthog_client = _init_posthog(settings)
 
-    posthog_client: Posthog | None = None
-    if not settings.posthog_disabled and settings.posthog_project_token:
-        try:
-            posthog_client = Posthog(
-                settings.posthog_project_token,
-                host=settings.posthog_host,
-                enable_exception_autocapture=True,
-            )
-            atexit.register(posthog_client.shutdown)
-        except Exception:
-            logger.warning("posthog_init_failed", exc_info=True)
-            posthog_client = None
-
-    # ------------------------------------------------------------------
-    # 2. Open DB pool + start run row
-    # ------------------------------------------------------------------
     async with lifespan_pool(settings) as pool:
         writer = RunWriter(pool)
-
-        # ------------------------------------------------------------------
-        # 1. Resolve + filter the model registry
-        # ------------------------------------------------------------------
-        models = await fetch_models(pool)
-        stt_matrix = [m for m in models if m.benchmark is Benchmark.STT]
-        tts_matrix = [m for m in models if m.benchmark is Benchmark.TTS]
-
-        if matrix_overrides:
-            override_map: dict[tuple[Benchmark, str, str], RegisteredModel] = {
-                (e.benchmark, e.provider, e.model): e for e in matrix_overrides
-            }
-            stt_matrix = [
-                override_map.get((e.benchmark, e.provider, e.model), e) for e in stt_matrix
-            ]
-            tts_matrix = [
-                override_map.get((e.benchmark, e.provider, e.model), e) for e in tts_matrix
-            ]
-
-            # Also apply any overrides that add *new* models
-            existing_keys = {(e.benchmark, e.provider, e.model) for e in stt_matrix + tts_matrix}
-            for ov in matrix_overrides:
-                if (ov.benchmark, ov.provider, ov.model) not in existing_keys:
-                    (stt_matrix if ov.benchmark is Benchmark.STT else tts_matrix).append(ov)
-
-        # A collected model runs on the normal schedule whether or not it is
-        # published; only the API hides the unpublished ones.
-        dedicated = source == "dedicated"
-        enabled_stt = [e for e in stt_matrix if e.collected and _runs_daily(e) == dedicated]
-        enabled_tts = [e for e in tts_matrix if e.collected and _runs_daily(e) == dedicated]
-        if only:
-            enabled_stt = [e for e in enabled_stt if f"{e.provider}/{e.model}" in only]
-            enabled_tts = [e for e in enabled_tts if f"{e.provider}/{e.model}" in only]
-            in_run = (enabled_stt if benchmark_kind in ("stt", "both") else []) + (
-                enabled_tts if benchmark_kind in ("tts", "both") else []
-            )
-            missing = only - {f"{e.provider}/{e.model}" for e in in_run}
-            if missing:
-                raise ValueError(
-                    f"--only matched no model collected for a {source} {benchmark_kind} run: "
-                    f"{sorted(missing)}"
-                )
+        stt_matrix, tts_matrix = _apply_matrix_overrides(await fetch_models(pool), matrix_overrides)
+        enabled_stt, enabled_tts = _select_models(
+            stt_matrix, tts_matrix, source=source, benchmark_kind=benchmark_kind, only=only
+        )
 
         # A TTS-only run never touches the configured STT dataset; a 'both'
         # run's row still records the STT id. Storage carries the
         # TTS dataset id per row.
-        run_dataset_id = tts_dataset_id if benchmark_kind == "tts" else stt_dataset_id
-
-        try:
-            dataset_sha256 = _get_manifest_sha256()(run_dataset_id)
-        except Exception:
-            dataset_sha256 = "unknown"
-
-        tts_manifest_sha256 = ""
-        if benchmark_kind in ("tts", "both"):
-            try:
-                tts_manifest_sha256 = _get_manifest_sha256()(tts_dataset_id)
-            except Exception:
-                tts_manifest_sha256 = ""
-
+        run_dataset_id = plan.tts_dataset_id if benchmark_kind == "tts" else plan.stt_dataset_id
+        dataset_sha256 = _manifest_sha256(run_dataset_id, "unknown")
+        tts_manifest_sha256 = (
+            _manifest_sha256(plan.tts_dataset_id, "") if benchmark_kind in ("tts", "both") else ""
+        )
         if scheduled_at is None:
             scheduled_at = _current_tick(settings)
-        try:
-            from google.cloud import storage
-
-            artifact_client: Any = storage.Client()
-        except Exception as exc:
-            raise RuntimeError("capture client initialization failed") from exc
-        if benchmark_kind in ("stt", "both") and (
-            len(dataset_sha256) != 64
-            or any(character not in "0123456789abcdef" for character in dataset_sha256)
-        ):
-            raise RuntimeError("required STT capture needs a valid dataset hash")
-        if benchmark_kind in ("tts", "both") and len(tts_manifest_sha256) != 64:
-            raise RuntimeError("required TTS capture needs a valid dataset hash")
+        artifact_client = _capture_client()
+        _require_dataset_hashes(benchmark_kind, dataset_sha256, tts_manifest_sha256)
         from coval_bench.runner.capture import preflight_capture_storage
 
         await asyncio.to_thread(
@@ -1370,469 +1923,58 @@ async def run_benchmarks(
         )
         run_id = run.id
         assert run_id is not None  # noqa: S101 — DB always returns an id after INSERT
-        started_at = run.started_at or datetime.now(tz=UTC)
-
-        structlog.contextvars.bind_contextvars(run_id=run_id)
-
-        logger.info(
-            "benchmark_run_started",
+        ctx = _RunContext(
+            settings=settings,
+            writer=writer,
+            run_id=run_id,
+            started_at=run.started_at or datetime.now(tz=UTC),
+            artifact_client=artifact_client,
+            posthog_client=posthog_client,
             benchmark_kind=benchmark_kind,
             smoke=smoke,
-            source=source,
+            result_cls=models_mod.Result,
+            result_status=models_mod.ResultStatus,
+            run_status=RunStatus,
+            capture_pending_error=models_mod.CAPTURE_PENDING_ERROR,
+        )
+
+        structlog.contextvars.bind_contextvars(run_id=run_id)
+        logger.info(
+            "benchmark_run_started", benchmark_kind=benchmark_kind, smoke=smoke, source=source
         )
 
         all_results: list[Any] = []
         completed_item_results: list[Any] = []
-        capture_outcomes: list[Any] = []
-
-        async def collect_item_results(task: Awaitable[list[Any]]) -> list[Any]:
-            """Retain completed items even when SIGTERM cancels the phase's gather.
-
-            Keep all_results phase-scoped for dead-provider alerts: an interrupted
-            sample must not be treated as a provider's entire scheduled workload.
-            """
-            results = await task
-            completed_item_results.extend(results)
-            return results
-
-        gate = ModelGate(_CONCURRENCY_CAP)
-        stt_items: list[Any] = []
-        tts_items: list[Any] = []
-        tts_voices: dict[tuple[str, str], list[str | None]] = {}
-        expected_capture_ids: list[str] = []
-
-        # Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout.
-        # We catch it, cancel the in-flight gather, and finalize the run row as
-        # PARTIAL so timed-out executions surface in /v1/results instead of
-        # remaining stuck at status='running' (invisible to the API filter).
-        loop = asyncio.get_running_loop()
-        main_task = asyncio.current_task()
-        sigterm_received = False
-
-        def _on_sigterm() -> None:
-            nonlocal sigterm_received
-            if sigterm_received:
-                return
-            sigterm_received = True
-            logger.warning("sigterm_received")
-            if main_task is not None:
-                main_task.cancel()
-
-        with contextlib.suppress(NotImplementedError):
-            loop.add_signal_handler(signal.SIGTERM, _on_sigterm)
-
+        sigterm = _SigtermGuard()
+        sigterm.install()
         try:
-            from coval_bench.runner.capture import (
-                build_capture_identity,
-                identity_digest,
-            )
-
-            if benchmark_kind in ("stt", "both") and enabled_stt:
-                stt_dataset = load_dataset(
-                    stt_dataset_id,
-                    settings=settings,
-                    sample_size=None if smoke else stt_size,
-                    rng=_get_family_rng()(stt_dataset_id, scheduled_at),
-                )
-                stt_items = stt_dataset.items[:1] if smoke else stt_dataset.items
-                expected_capture_ids.extend(
-                    identity_digest(
-                        build_capture_identity(
-                            run_id=run_id,
-                            benchmark="STT",
-                            dataset_id=stt_dataset_id,
-                            sample_id=item.sample_id or item.path.name,
-                            provider=entry.provider,
-                            model=entry.model,
-                        )
-                    )
-                    for item in stt_items
-                    for entry in enabled_stt
-                )
-            if benchmark_kind in ("tts", "both") and enabled_tts:
-                tts_dataset = load_dataset(
-                    tts_dataset_id,
-                    settings=settings,
-                    sample_size=None if smoke else tts_size,
-                )
-                tts_items = tts_dataset.items[:1] if smoke else tts_dataset.items
-                # Item-major order so the gate interleaves providers; a
-                # model-major order would queue one model's items back to back
-                # while the others sit idle.
-                tts_voices = {
-                    (entry.provider, entry.model): _assign_tts_voices(entry, len(tts_items), run_id)
-                    for entry in enabled_tts
-                }
-                expected_capture_ids.extend(
-                    identity_digest(
-                        build_capture_identity(
-                            run_id=run_id,
-                            benchmark="TTS",
-                            dataset_id=tts_dataset_id,
-                            sample_id=item.testcase_id,
-                            provider=entry.provider,
-                            model=entry.model,
-                            voice=tts_voices[(entry.provider, entry.model)][index],
-                        )
-                    )
-                    for index, item in enumerate(tts_items)
-                    for entry in enabled_tts
-                )
-            from coval_bench.runner.capture import RunManifest, upload_run_state
-
-            manifest = RunManifest(
-                run_id=run_id,
-                scheduled_at=scheduled_at,
-                benchmark_kind=benchmark_kind,
+            return await _run_phases(
+                ctx,
                 source=source,
-                datasets={
-                    **(
-                        {stt_dataset_id: dataset_sha256}
-                        if benchmark_kind in ("stt", "both")
-                        else {}
-                    ),
-                    **(
-                        {tts_dataset_id: tts_manifest_sha256}
-                        if benchmark_kind in ("tts", "both")
-                        else {}
-                    ),
-                },
-                expected_capture_ids=sorted(expected_capture_ids),
+                scheduled_at=scheduled_at,
+                load_dataset=load_dataset,
+                plan=plan,
+                dataset_sha256=dataset_sha256,
+                tts_manifest_sha256=tts_manifest_sha256,
+                enabled_stt=enabled_stt,
+                enabled_tts=enabled_tts,
+                all_results=all_results,
+                completed_item_results=completed_item_results,
             )
-            await asyncio.to_thread(
-                upload_run_state,
-                artifact_client,
-                settings.benchmark_artifact_bucket,
-                run_id,
-                "manifest",
-                manifest,
-            )
-            # ------------------------------------------------------------------
-            # 2b. Provider warmup
-            # Each provider class may override Provider.warmup() to absorb
-            # pre-t0 deployment cold-start cost (HTTP TCP+TLS, gRPC channel
-            # open, NVCF dispatch).  Default is a no-op; only providers that
-            # need it pay the call.  Errors are non-fatal.
-            # ------------------------------------------------------------------
-            stt_providers = _get_stt_providers()
-            tts_providers = _get_tts_providers()
-            provider_classes: set[type[Provider]] = set()
-            if benchmark_kind in ("stt", "both"):
-                for entry in enabled_stt:
-                    cls = stt_providers.get(entry.provider)
-                    if cls is not None:
-                        provider_classes.add(cls)
-            if benchmark_kind in ("tts", "both"):
-                for entry in enabled_tts:
-                    cls = tts_providers.get(entry.provider)
-                    if cls is not None:
-                        provider_classes.add(cls)
-            if provider_classes:
-                ordered_classes = list(provider_classes)
-                warmup_results = await asyncio.gather(
-                    *(cls.warmup(settings=settings) for cls in ordered_classes),
-                    return_exceptions=True,
-                )
-                for cls, res in zip(ordered_classes, warmup_results, strict=False):
-                    if isinstance(res, BaseException):
-                        logger.warning(
-                            "provider_warmup_failed",
-                            provider=cls.__name__,
-                            exc_info=res,
-                        )
-
-            # ------------------------------------------------------------------
-            # 3. STT path
-            # ------------------------------------------------------------------
-            if benchmark_kind in ("stt", "both") and enabled_stt:
-                logger.info("stt_dataset_sampled", item_count=len(stt_items))
-
-                stt_pairs = [(entry, item) for item in stt_items for entry in enabled_stt]
-                stt_tasks = [
-                    _run_stt_item(
-                        entry=entry,
-                        item=item,
-                        run_id=run_id,
-                        gate=gate,
-                        settings=settings,
-                        writer=writer,
-                        dataset_id=stt_dataset_id,
-                        dataset_sha256=dataset_sha256,
-                        artifact_client=artifact_client,
-                        capture_outcomes=capture_outcomes,
-                    )
-                    for entry, item in stt_pairs
-                ]
-
-                stt_batch = await asyncio.gather(
-                    *(collect_item_results(task) for task in stt_tasks), return_exceptions=True
-                )
-                for (entry, _item), batch_result in zip(stt_pairs, stt_batch, strict=True):
-                    if isinstance(batch_result, BaseException):
-                        logger.warning(
-                            "stt_task_raised",
-                            provider=entry.provider,
-                            model=entry.model,
-                            exc_info=batch_result,
-                        )
-                    else:
-                        all_results.extend(batch_result)
-
-            # ------------------------------------------------------------------
-            # 4. TTS path
-            # ------------------------------------------------------------------
-            if benchmark_kind in ("tts", "both") and enabled_tts:
-                logger.info("tts_dataset_sampled", item_count=len(tts_items))
-                tts_pairs = [
-                    (entry, item, tts_voices[(entry.provider, entry.model)][i])
-                    for i, item in enumerate(tts_items)
-                    for entry in enabled_tts
-                ]
-                tts_tasks = [
-                    _run_tts_item(
-                        entry=entry,
-                        item=item,
-                        run_id=run_id,
-                        gate=gate,
-                        settings=settings,
-                        voice=voice,
-                        writer=writer,
-                        dataset_id=tts_dataset_id,
-                        dataset_sha256=tts_manifest_sha256,
-                        artifact_client=artifact_client,
-                        capture_outcomes=capture_outcomes,
-                    )
-                    for entry, item, voice in tts_pairs
-                ]
-
-                tts_batch = await asyncio.gather(
-                    *(collect_item_results(task) for task in tts_tasks), return_exceptions=True
-                )
-                for (entry, _item, _voice), batch_result in zip(tts_pairs, tts_batch, strict=True):
-                    if isinstance(batch_result, BaseException):
-                        logger.warning(
-                            "tts_task_raised",
-                            provider=entry.provider,
-                            model=entry.model,
-                            exc_info=batch_result,
-                        )
-                    else:
-                        all_results.extend(batch_result)
-
-            # ------------------------------------------------------------------
-            # 5. Compute final run status
-            # ------------------------------------------------------------------
-            # Results were persisted incrementally inside _run_stt_item /
-            # _run_tts_item — see those functions' ``writer`` argument. This
-            # ensures a job-timeout mid-run still durably stores everything
-            # that completed, instead of losing the whole run's results in a
-            # rolled-back batch INSERT.
-            typed_results = [r for r in all_results if isinstance(r, Result)]
-            success_count = sum(1 for r in typed_results if r.status == ResultStatus.SUCCESS)
-            fail_count = sum(1 for r in typed_results if r.status == ResultStatus.FAILED)
-            total_results = len(typed_results)
-            reliability = _provider_reliability(completed_item_results, ResultStatus)
-
-            if total_results == 0 or fail_count == total_results:
-                intended_status = RunStatus.FAILED
-            elif success_count == total_results:
-                intended_status = RunStatus.SUCCEEDED
-            else:
-                intended_status = RunStatus.PARTIAL
-
-            from coval_bench.runner.capture import RunSeal
-            from coval_bench.runner.persistence import capture_pending, seal_and_finish_run
-
-            incomplete = capture_pending(capture_outcomes, expected_capture_ids)
-            held = incomplete and intended_status is not RunStatus.FAILED
-            finished_at = datetime.now(tz=UTC)
-            final_status = await seal_and_finish_run(
-                writer=writer,
-                storage_client=artifact_client,
-                bucket=settings.benchmark_artifact_bucket,
-                seal=RunSeal(
-                    run_id=run_id,
-                    intended_status=str(intended_status),
-                    stored_status=str(RunStatus.PARTIAL if held else intended_status),
-                    finished_at=finished_at,
-                    error=models_mod.CAPTURE_PENDING_ERROR if held else None,
-                    expected_capture_ids=sorted(expected_capture_ids),
-                ),
-                capture_pending=incomplete,
-            )
-
-            # After the row is stored, never before: if finish_run raises, the outer
-            # handler is the only thing that should report, otherwise a partial run
-            # pages RUN_PARTIAL and then RUN_FAILED for one incident. Everything
-            # below this point is best-effort and cannot raise.
-            _log_run_outcome(
-                final_status,
-                typed_results,
-                fail_count,
-                result_status=ResultStatus,
-                run_status=RunStatus,
-            )
-
-            if final_status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
-                await _refresh_series_bucket(writer, run_id)
-
-                # Failed runs retain their queued repairs for hourly maintenance.
-                try:
-                    snapshot_status = await writer.refresh_window_views(run_id)
-                    logger.info("dashboard_windows_refresh", status=snapshot_status)
-                except Exception:
-                    logger.warning("dashboard_windows_refresh_failed", exc_info=True)
-
-            summary = RunSummary(
-                run_id=run_id,
-                started_at=started_at,
-                finished_at=finished_at,
-                status=str(final_status),
-                total_results=total_results,
-                success_count=success_count,
-                fail_count=fail_count,
-                reliability=reliability,
-            )
-
-            duration_s = (finished_at - started_at).total_seconds()
-            logger.info(
-                "benchmark_run_finished",
-                status=str(final_status),
-                total_results=total_results,
-                success_count=success_count,
-                fail_count=fail_count,
-                duration_s=duration_s,
-                reliability=[entry.model_dump() for entry in reliability],
-            )
-            telemetry.record_run(kind=benchmark_kind, status=str(final_status))
-            _emit_posthog(
-                posthog_client,
-                "benchmark_run_completed",
-                {
-                    "status": str(final_status),
-                    "total_results": total_results,
-                    "success_count": success_count,
-                    "fail_count": fail_count,
-                    "duration_s": duration_s,
-                    "benchmark_kind": benchmark_kind,
-                    "smoke": smoke,
-                    "$process_person_profile": False,
-                },
-            )
-            return summary
-
         except asyncio.CancelledError:
-            # SIGTERM-driven cancellation: write PARTIAL so the run is visible
-            # to /v1/results. Any other CancelledError (e.g., parent shutdown)
-            # is re-raised so it propagates normally.
-            if not sigterm_received:
+            # Any CancelledError other than SIGTERM's (e.g. parent shutdown)
+            # propagates normally.
+            if not sigterm.received:
                 raise
-            if main_task is not None:
-                main_task.uncancel()
-            typed_results = [r for r in all_results if isinstance(r, Result)]
-            success_count = sum(1 for r in typed_results if r.status == ResultStatus.SUCCESS)
-            fail_count = sum(1 for r in typed_results if r.status == ResultStatus.FAILED)
-            total_results = len(typed_results)
-            reliability = _provider_reliability(completed_item_results, ResultStatus)
-            try:
-                await asyncio.shield(
-                    writer.finish_run(
-                        run_id,
-                        status=RunStatus.PARTIAL,
-                        error="sigterm-received (cloud-run-task-timeout)",
-                    )
-                )
-            except Exception as write_exc:
-                logger.error(
-                    "run_row_update_failed_after_sigterm",
-                    exc_info=write_exc,
-                )
-            else:
-                # Report before the bucket refresh, not after: SIGTERM gives ~10s
-                # before SIGKILL, and losing the page to a slow maintenance call is
-                # worse than losing the rollup. Reach is limited — ``all_results`` is
-                # only extended after a phase's gather returns, so the cancelled phase
-                # contributes nothing and a single-kind run names no dead provider.
-                # Only an earlier completed phase (kind="both") can be named here.
-                # Rows are durable either way; each task persists its own.
-                _log_run_outcome(
-                    RunStatus.PARTIAL,
-                    typed_results,
-                    fail_count,
-                    result_status=ResultStatus,
-                    run_status=RunStatus,
-                )
-                # Run row is PARTIAL, so its bucket qualifies.
-                await asyncio.shield(_refresh_series_bucket(writer, run_id))
-            finished_at = datetime.now(tz=UTC)
-            sigterm_duration_s = (finished_at - started_at).total_seconds()
-            logger.warning(
-                "benchmark_run_finished_early_sigterm",
-                status=str(RunStatus.PARTIAL),
-                total_results=total_results,
-                success_count=success_count,
-                fail_count=fail_count,
-                duration_s=sigterm_duration_s,
-                reliability=[entry.model_dump() for entry in reliability],
+            sigterm.uncancel()
+            return await _finish_after_sigterm(
+                ctx, _tally(ctx, all_results, completed_item_results)
             )
-            telemetry.record_run(kind=benchmark_kind, status=str(RunStatus.PARTIAL))
-            _emit_posthog(
-                posthog_client,
-                "benchmark_run_completed",
-                {
-                    "status": str(RunStatus.PARTIAL),
-                    "total_results": total_results,
-                    "success_count": success_count,
-                    "fail_count": fail_count,
-                    "duration_s": sigterm_duration_s,
-                    "benchmark_kind": benchmark_kind,
-                    "smoke": smoke,
-                    "sigterm": True,
-                    "$process_person_profile": False,
-                },
-            )
-            return RunSummary(
-                run_id=run_id,
-                started_at=started_at,
-                finished_at=finished_at,
-                status=str(RunStatus.PARTIAL),
-                total_results=total_results,
-                success_count=success_count,
-                fail_count=fail_count,
-                reliability=reliability,
-                sigterm=True,
-            )
-
         except Exception as exc:
-            # Unrecoverable error — emit RUN_FAILED (triggers the Cloud Logging
-            # metric), update run row, then re-raise so the job exits non-zero.
-            err_msg = _truncate(str(exc))
-            log_run_failed(err_msg, exc)
-            telemetry.record_run(kind=benchmark_kind, status=str(RunStatus.FAILED))
-            try:
-                await writer.finish_run(run_id, status=RunStatus.FAILED, error=err_msg)
-            except Exception as write_exc:
-                logger.error(
-                    "run_row_update_failed_after_failure",
-                    exc_info=write_exc,
-                )
-            _emit_posthog(
-                posthog_client,
-                "benchmark_run_failed",
-                {
-                    "benchmark_kind": benchmark_kind,
-                    "smoke": smoke,
-                    "$process_person_profile": False,
-                },
-            )
+            await _finish_after_failure(ctx, exc)
             raise
-
         finally:
-            with contextlib.suppress(NotImplementedError, ValueError):
-                loop.remove_signal_handler(signal.SIGTERM)
+            sigterm.uninstall()
             with contextlib.suppress(Exception):
                 await _close_http_clients()
-            if posthog_client is not None:
-                with contextlib.suppress(Exception):
-                    posthog_client.shutdown()  # type: ignore[no-untyped-call]
-                atexit.unregister(posthog_client.shutdown)
+            _shutdown_posthog(posthog_client)
