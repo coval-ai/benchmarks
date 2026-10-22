@@ -58,6 +58,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libsndfile1 \
         ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall -y pip \
     && groupadd --gid 65532 nonroot \
     && useradd --uid 65532 --gid 65532 --no-create-home --shell /sbin/nologin nonroot
 
