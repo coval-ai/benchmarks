@@ -97,6 +97,8 @@ class AgentSpec:
     # global one.
     instruction_metric_id_attr: str | None = None
     metric_ids: Mapping[Metric, str] = field(default_factory=dict)
+    # Scenario slug for agents wired through ``coval_s2s_scenarios``.
+    scenario: str | None = None
 
 
 @dataclass(frozen=True)
@@ -228,6 +230,7 @@ def _scenario_specs(settings: Settings) -> tuple[AgentSpec, ...]:
                         else scenarios.ACTIVE.instruction_metric_id_attr
                     ),
                     metric_ids=metric_ids,
+                    scenario=scenario.slug,
                 )
             )
     return tuple(specs)
@@ -317,6 +320,39 @@ def _condition_for_persona(
     if noisy_persona_id and persona_id == noisy_persona_id:
         return Condition.NOISY
     return Condition.CLEAN
+
+
+def _run_asset_versions(
+    spec: AgentSpec,
+    coval_run: CovalRun,
+    condition: Condition,
+    asset_versions: Mapping[str, Any],
+) -> dict[str, str] | None:
+    """The version labels published for this run's scenario, model and condition.
+
+    None when nothing is published at all. A published setting without an entry
+    for this run, or with non-string labels, logs a warning and writes no labels.
+    """
+    if not asset_versions or spec.scenario is None:
+        return None
+    entry: Any = asset_versions
+    for key in (spec.scenario, spec.model, condition.value):
+        entry = entry.get(key) if isinstance(entry, Mapping) else None
+    if (
+        isinstance(entry, Mapping)
+        and entry
+        and all(isinstance(key, str) and isinstance(value, str) for key, value in entry.items())
+    ):
+        return dict(entry)
+    logger.warning(
+        "asset_versions_missing",
+        scenario=spec.scenario,
+        provider=spec.provider,
+        model=spec.model,
+        condition=condition.value,
+        coval_run_id=coval_run.run_id,
+    )
+    return None
 
 
 def _dataset_identity(
@@ -803,6 +839,7 @@ async def _ingest_run(
     import_identity: ImportRunIdentity,
     import_generation: int,
     import_claim: ImportRunClaim | None = None,
+    asset_versions: dict[str, str] | None = None,
 ) -> RunStatus | None:
     """Ingest one Coval run into its own run row; None = skipped, nothing written.
 
@@ -962,6 +999,7 @@ async def _ingest_run(
                     scheduled_at=scheduled_at,
                     captured_at=started_at,
                     metric_types=sorted(str(metric) for metric in set(writable) | set(local)),
+                    asset_versions=asset_versions,
                 ),
             )
         elif claim.identity != import_identity or claim.generation != import_generation:
@@ -1073,7 +1111,14 @@ async def _ingest_run(
                     captured_at=sample_captured_at,
                     executor=MetricExecutor.COVAL_API,
                     capture_id=f"{coval_run.run_id}:{sample_id}",
-                    provider_extras={"coval_run_id": coval_run.run_id},
+                    provider_extras={
+                        "coval_run_id": coval_run.run_id,
+                        **(
+                            {"asset_versions": dict(claim.asset_versions)}
+                            if claim.asset_versions
+                            else {}
+                        ),
+                    },
                 )
                 capture_outcomes.append(
                     await persist_capture(
@@ -1209,6 +1254,7 @@ async def _fetch_one_provider(
     artifact_bucket: str = "",
     workspace_id: str | None = None,
     unmapped_personas: dict[str, int] | None = None,
+    asset_versions: Mapping[str, Any] | None = None,
 ) -> tuple[RunStatus, int]:
     """Scan the window and ingest every clean, not-yet-ingested run.
 
@@ -1369,6 +1415,14 @@ async def _fetch_one_provider(
                 import_identity=import_identity_value,
                 import_generation=import_generation,
                 import_claim=import_claim,
+                asset_versions=_run_asset_versions(
+                    spec,
+                    coval_run,
+                    _condition_for_persona(
+                        coval_run.persona_id, persona_conditions, noisy_persona_id
+                    ),
+                    asset_versions or {},
+                ),
             )
             if status is None:
                 continue
@@ -1640,6 +1694,7 @@ async def fetch_and_write_v2v(
                 artifact_bucket=artifact_bucket,
                 workspace_id=spec_workspace_id,
                 unmapped_personas=unmapped_personas,
+                asset_versions=settings.coval_s2s_asset_versions,
             )
             total_ingested += ingested
 
