@@ -123,7 +123,11 @@ def test_adherence_scenarios_fetch_their_judge() -> None:
     for slug, metric in conditions.ADHERENCE_SLUGS.items():
         assert not slug.startswith("bank")
         family = conditions.scenario_family(slug)
-        extra = {Metric.V2V, Metric.CALL_LENGTH} if metric is Metric.WORKFLOW_ADHERENCE else set()
+        extra = (
+            {Metric.V2V, Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH}
+            if metric is Metric.WORKFLOW_ADHERENCE
+            else set()
+        )
         for condition in (conditions.Condition.CLEAN, *conditions.TIERS):
             dataset_id = conditions.dataset_id_for(family, condition)
             assert dataset_id is not None
