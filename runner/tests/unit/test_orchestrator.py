@@ -75,10 +75,7 @@ from tests.unit.test_telemetry import counter_points
 # ---------------------------------------------------------------------------
 
 _TEST_SETTINGS = Settings(
-    database_url="postgresql://runner:password@localhost:5432/benchmarks",
-    dataset_bucket="test-bucket",
     dataset_id="stt-v1",
-    log_level="DEBUG",
     openai_api_key=SecretStr("sk-test"),
     deepgram_api_key=SecretStr("dg-test"),
     posthog_disabled=True,

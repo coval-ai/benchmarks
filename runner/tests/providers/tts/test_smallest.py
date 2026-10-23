@@ -143,9 +143,6 @@ def test_smallest_name_and_model(fake_settings: Settings) -> None:
 
 def test_smallest_missing_api_key() -> None:
     settings_no_key = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
         smallest_api_key=None,
     )
     with pytest.raises(ValueError, match="smallest_api_key"):

@@ -283,7 +283,6 @@ def test_guava_smoke_passes_configured_domain(tmp_path: Path) -> None:
         wav.setframerate(16000)
         wav.writeframes(_SMALL_PCM)
     settings = Settings(
-        _env_file=None,
         guava_api_key=SecretStr("test-key"),
         guava_base_url=_BASE_URL,
         guava_stt_domain=_DOMAIN,

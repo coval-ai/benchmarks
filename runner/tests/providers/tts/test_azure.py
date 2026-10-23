@@ -261,10 +261,6 @@ def test_azure_tts_empty_voice_raises(fake_settings: Settings) -> None:
 
 def test_azure_tts_missing_api_key_raises() -> None:
     settings = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-        log_level="DEBUG",
         azure_api_key=None,
         azure_region="eastus",
     )

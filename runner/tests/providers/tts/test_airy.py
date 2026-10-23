@@ -43,7 +43,7 @@ class AudioStream(httpx2.AsyncByteStream):
 @pytest.fixture()
 def airy_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
     monkeypatch.setenv("AIRY_API_KEY", "test-airy-key")
-    settings = Settings(_env_file=None)
+    settings = Settings()
     assert settings.airy_api_key is not None
     assert settings.airy_api_key.get_secret_value() == "test-airy-key"
     return settings
@@ -140,14 +140,14 @@ async def test_failed_or_incompatible_stream_never_saves_audio(
 
 @pytest.mark.parametrize("api_key", [None, SecretStr("")])
 def test_missing_api_key_is_rejected(api_key: SecretStr | None) -> None:
-    settings = Settings(_env_file=None, airy_api_key=api_key)
+    settings = Settings(airy_api_key=api_key)
     with pytest.raises(ValueError, match="airy_api_key"):
         airy.AiryTTSProvider(settings, model="airy-tts-v1", voice=_VOICE)
 
 
 @pytest.mark.parametrize("suffix", ["\n", "\x00", "é"])
 def test_malformed_key_is_rejected_without_exposing_it(suffix: str) -> None:
-    settings = Settings(_env_file=None, airy_api_key=SecretStr("test-private-key" + suffix))
+    settings = Settings(airy_api_key=SecretStr("test-private-key" + suffix))
     with pytest.raises(ValueError, match="airy_api_key") as exc:
         airy.AiryTTSProvider(settings, model="airy-tts-v1", voice=_VOICE)
     assert "test-private-key" not in str(exc.value)

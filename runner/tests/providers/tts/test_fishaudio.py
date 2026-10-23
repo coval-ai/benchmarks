@@ -21,10 +21,6 @@ _VOICE = "9a9cf47702da476aa4629e2506d4a857"
 
 def _settings(**overrides: object) -> Settings:
     base: dict[str, object] = {
-        "database_url": "postgresql://runner:password@localhost:5432/benchmarks",
-        "dataset_bucket": "test-bucket",
-        "dataset_id": "stt-v1",
-        "log_level": "DEBUG",
         "fishaudio_api_key": SecretStr("test-fishaudio-key"),
     }
     base.update(overrides)

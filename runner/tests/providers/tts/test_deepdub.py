@@ -24,10 +24,6 @@ _VOICE = "f60bad7d-1667-42ff-8410-e60b71d0cc34"
 
 def _settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
-        "database_url": "postgresql://runner:password@localhost:5432/benchmarks",
-        "dataset_bucket": "test-bucket",
-        "dataset_id": "stt-v1",
-        "log_level": "DEBUG",
         "deepdub_api_key": SecretStr("test-deepdub-key"),
     }
     values.update(overrides)

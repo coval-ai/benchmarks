@@ -57,14 +57,10 @@ def _install_stub(monkeypatch: pytest.MonkeyPatch, create: Any) -> None:
 
 
 async def test_verdict_unavailable_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With no API key the moderator is unavailable, and no client is built.
-
-    ``_env_file=None`` matters: ``Settings`` otherwise reads ``.env``, so a key sitting
-    there would build a real client and send this prompt to OpenAI.
-    """
+    """With no API key the moderator is unavailable, and no client is built."""
     monkeypatch.setattr(moderation, "_clients", {})
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    verdict = await moderation_verdict(Settings(_env_file=None), "hello")
+    verdict = await moderation_verdict(Settings(), "hello")
     assert verdict.available is False
     assert verdict.flagged is False
 

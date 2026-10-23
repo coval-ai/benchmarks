@@ -25,10 +25,6 @@ _MALE = "f1d62423-085e-4694-91cd-4d04085a2fc5"
 @pytest.fixture()
 def palabra_settings() -> Settings:
     return Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-        log_level="DEBUG",
         palabra_api_key=SecretStr("test-palabra-key"),
     )
 
