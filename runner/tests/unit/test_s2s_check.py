@@ -140,3 +140,21 @@ def test_settings_file_the_fetch_would_reject_exits_non_zero(tmp_path: Path) -> 
     assert result.exit_code == 1
     assert "the fetch would reject these settings" in result.output
     assert "not-a-model" in result.output
+
+
+def test_unreadable_scenario_map_exits_with_a_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from google.api_core.exceptions import Forbidden
+
+    def _forbidden(bucket: str, key: str) -> None:
+        raise Forbidden("no storage.objects.get")  # type: ignore[no-untyped-call]
+
+    monkeypatch.setattr("coval_bench.gcs.read_json", _forbidden)
+    path = tmp_path / "env.json"
+    path.write_text(json.dumps({"S2S_SCENARIO_MAP_URI": "gs://maps/scenario_map.json"}))
+    with mock.patch.dict(os.environ, {"COVAL_API_KEY": "test-key"}):
+        result = CliRunner().invoke(check_s2s, ["--settings-file", str(path)])
+
+    assert result.exit_code == 1
+    assert "reading the scenario map failed" in result.output
