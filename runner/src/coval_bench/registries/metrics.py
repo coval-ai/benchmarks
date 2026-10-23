@@ -367,8 +367,10 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
             # Reson8 emits interims on a fixed ~1.1s grid, so first-token timing
             # tracks the emission interval.
             ("reson8", "realtime"),
-            # Scribe's interim deltas arrive on a fixed ~1s cadence, so first-token
-            # timing tracks the emission interval.
+            # Scribe's opt-in interim deltas (config.interim_results, off here)
+            # were observed on a fixed ~1s cadence, so first-token timing would
+            # track the emission interval; without them the first token is the
+            # turn-final.
             ("zoom", "scribe"),
             ("zoom", "scribe-pro"),
         }
