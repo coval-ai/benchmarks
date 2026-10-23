@@ -296,9 +296,6 @@ def test_elevenlabs_name_and_model(fake_settings: Settings) -> None:
 
 def test_elevenlabs_missing_api_key() -> None:
     settings_no_key = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
         elevenlabs_api_key=None,
     )
     with pytest.raises(ValueError, match="elevenlabs_api_key"):

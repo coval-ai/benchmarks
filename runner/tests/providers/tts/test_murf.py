@@ -22,10 +22,6 @@ _VOICE = "Amara"
 
 def _settings() -> Settings:
     return Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-        log_level="DEBUG",
         murfai_api_key="test-murf-key",
     )
 
@@ -170,11 +166,6 @@ def test_murf_tts_missing_voice_raises(murf_settings: Settings) -> None:
 
 def test_murf_tts_missing_key_raises() -> None:
     settings = Settings(
-        _env_file=None,
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-        log_level="DEBUG",
         murfai_api_key=None,
     )
     with pytest.raises(ValueError, match="murfai_api_key"):

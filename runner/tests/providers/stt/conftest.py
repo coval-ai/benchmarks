@@ -201,7 +201,7 @@ def make_settings(**overrides: Any) -> Settings:
         baseten_qwen_asr_url="wss://qwen.test/v1/websocket",
     )
     values.update(overrides)
-    return Settings(_env_file=None, **values)
+    return Settings(**values)
 
 
 @pytest.fixture

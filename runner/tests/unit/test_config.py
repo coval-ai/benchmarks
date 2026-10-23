@@ -18,7 +18,7 @@ from coval_bench.config import (
 
 
 def _settings(**overrides: Any) -> Settings:
-    return Settings(_env_file=None, **overrides)
+    return Settings(**overrides)
 
 
 def test_placeholder_secrets_nulled_and_warned() -> None:

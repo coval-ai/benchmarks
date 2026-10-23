@@ -133,10 +133,6 @@ def test_assemblyai_tts_rejects_unknown_model(fake_settings: Settings) -> None:
 
 def test_assemblyai_tts_missing_key_raises() -> None:
     settings = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-        log_level="DEBUG",
         assemblyai_api_key=None,
     )
     with pytest.raises(ValueError, match="assemblyai_api_key is required"):

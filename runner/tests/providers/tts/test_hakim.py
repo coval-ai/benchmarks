@@ -21,10 +21,6 @@ _VOICE = "amelia-en-us"
 
 def _settings() -> Settings:
     return Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-        log_level="DEBUG",
         hakimai_api_key="test-hakim-key",
     )
 
@@ -187,11 +183,6 @@ def test_hakim_tts_missing_voice_raises(hakim_settings: Settings) -> None:
 
 def test_hakim_tts_missing_key_raises() -> None:
     settings = Settings(
-        _env_file=None,
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-        log_level="DEBUG",
         hakimai_api_key=None,
     )
     with pytest.raises(ValueError, match="hakimai_api_key"):
@@ -200,10 +191,6 @@ def test_hakim_tts_missing_key_raises() -> None:
 
 def test_hakim_tts_empty_key_raises() -> None:
     settings = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-        log_level="DEBUG",
         hakimai_api_key="",
     )
     with pytest.raises(ValueError, match="hakimai_api_key"):

@@ -246,9 +246,6 @@ def test_inworld_accepts_tts_2_flash(fake_settings: Settings) -> None:
 
 def test_inworld_missing_api_key() -> None:
     settings_no_key = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
         inworld_api_key=None,
     )
     with pytest.raises(ValueError, match="inworld_api_key"):

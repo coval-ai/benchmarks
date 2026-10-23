@@ -133,10 +133,6 @@ async def test_stepfun_tts_close_without_audio_is_silent_failure(
 
 def test_stepfun_tts_missing_api_key_raises() -> None:
     settings = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-        log_level="DEBUG",
         stepfun_api_key=None,
     )
     with pytest.raises(ValueError, match="stepfun_api_key is required"):

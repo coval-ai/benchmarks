@@ -32,10 +32,6 @@ from coval_bench.config import Settings
 def fake_settings(tmp_path: Path) -> Settings:
     """Settings instance with placeholder API keys suitable for offline tests."""
     return Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-        log_level="DEBUG",
         openai_api_key=SecretStr("sk-test-openai"),
         cartesia_api_key=SecretStr("test-cartesia-key"),
         elevenlabs_api_key=SecretStr("test-elevenlabs-key"),

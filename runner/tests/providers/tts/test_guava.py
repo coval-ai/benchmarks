@@ -38,10 +38,6 @@ def _wav(pcm: bytes, sample_rate: int = 16000) -> bytes:
 
 def _settings(**overrides: object) -> Settings:
     base: dict[str, object] = {
-        "database_url": "postgresql://runner:password@localhost:5432/benchmarks",
-        "dataset_bucket": "test-bucket",
-        "dataset_id": "stt-v1",
-        "log_level": "DEBUG",
         "guava_base_url": _BASE_URL,
         "guava_api_key": SecretStr("test-guava-key"),
     }

@@ -228,10 +228,6 @@ def test_groq_valid_voices_accepted(fake_settings: Settings) -> None:
 
 def test_groq_missing_api_key_raises() -> None:
     settings = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-        log_level="DEBUG",
         groq_api_key=None,
     )
     with pytest.raises(ValueError, match="groq_api_key is required"):

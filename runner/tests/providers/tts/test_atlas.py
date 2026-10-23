@@ -293,8 +293,6 @@ async def test_unknown_voice_falls_back_to_capella(fake_settings: Settings) -> N
 
 def test_missing_key_is_rejected() -> None:
     settings = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
         atlas_api_key=None,
     )
     with pytest.raises(ValueError, match="atlas_api_key"):

@@ -113,8 +113,6 @@ async def test_workers_ai_error_body_is_surfaced(
     ids=["missing-key", "missing-account"],
 )
 def test_construction_guards(api_key: SecretStr | None, account_id: str | None, match: str) -> None:
-    settings = Settings(
-        _env_file=None, cloudflare_api_key=api_key, cloudflare_account_id=account_id
-    )
+    settings = Settings(cloudflare_api_key=api_key, cloudflare_account_id=account_id)
     with pytest.raises(ValueError, match=match):
         cloudflare.CloudflareTTSProvider(settings, model=_MODEL, voice=_VOICE)

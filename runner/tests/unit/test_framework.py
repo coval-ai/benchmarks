@@ -34,7 +34,7 @@ def test_write_manifest_rejects_reserved_dataset_id() -> None:
 def test_settings_reject_reserved_dataset_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATASET_ID", "__all__")
     with pytest.raises(ValidationError, match="reserved"):
-        Settings(_env_file=None)
+        Settings()
 
 
 def _clip(

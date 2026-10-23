@@ -22,10 +22,6 @@ _MODEL = "qwen3-tts-flash-realtime"
 
 def _settings(**overrides: object) -> Settings:
     base: dict[str, object] = {
-        "database_url": "postgresql://runner:password@localhost:5432/benchmarks",
-        "dataset_bucket": "test-bucket",
-        "dataset_id": "stt-v1",
-        "log_level": "DEBUG",
         "alibaba_api_key": SecretStr("test-alibaba-key"),
     }
     base.update(overrides)

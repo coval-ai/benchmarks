@@ -134,7 +134,7 @@ async def test_failed_or_incompatible_stream_never_saves_audio(
     ids=["missing-key", "malformed-key"],
 )
 def test_construction_guards(api_key: SecretStr | None, model: str, match: str) -> None:
-    settings = Settings(_env_file=None, nari_api_key=api_key)
+    settings = Settings(nari_api_key=api_key)
     with pytest.raises(ValueError, match=match) as exc:
         nari.NariTTSProvider(settings, model=model, voice=_VOICE)
     assert "test-private-key" not in str(exc.value)

@@ -549,7 +549,7 @@ async def test_missing_or_invalid_cursor_key_fails_before_pool_dependency() -> N
         pytest.fail("A missing cursor key must fail before any database query")
 
     for key in (None, SecretStr("not-a-fernet-key")):
-        settings = Settings(_env_file=None, results_cursor_key=key, posthog_disabled=True)
+        settings = Settings(results_cursor_key=key, posthog_disabled=True)
         app = create_app(settings=settings)
         app.state.settings = settings
         app.state.posthog = None

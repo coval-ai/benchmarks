@@ -144,7 +144,7 @@ def test_without_a_uri_settings_are_unchanged(monkeypatch: pytest.MonkeyPatch) -
         raise AssertionError("read the scenario map without a URI")
 
     monkeypatch.setattr("coval_bench.gcs.read_json", _explode)
-    settings = Settings(_env_file=None)
+    settings = Settings()
 
     assert with_scenario_map(settings) is settings
 
@@ -158,7 +158,6 @@ def test_map_replaces_the_env_ids(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("coval_bench.gcs.read_json", _read_json)
     settings = Settings(
-        _env_file=None,
         s2s_scenario_map_uri=_URI,
         coval_s2s_latency_metric_id="STALE",
         log_level="DEBUG",
@@ -176,12 +175,12 @@ def test_missing_map_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("coval_bench.gcs.read_json", lambda bucket, key: None)
 
     with pytest.raises(RuntimeError, match="not found"):
-        with_scenario_map(Settings(_env_file=None, s2s_scenario_map_uri=_URI))
+        with_scenario_map(Settings(s2s_scenario_map_uri=_URI))
 
 
 def test_uri_must_name_a_gcs_object() -> None:
     with pytest.raises(ValueError, match="not a gs://bucket/key URI"):
-        with_scenario_map(Settings(_env_file=None, s2s_scenario_map_uri="gs://bucket-only"))
+        with_scenario_map(Settings(s2s_scenario_map_uri="gs://bucket-only"))
 
 
 def test_an_old_version_of_another_shape_is_ignored() -> None:

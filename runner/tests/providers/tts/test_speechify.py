@@ -24,10 +24,6 @@ _VOICE = "geffen_32"
 
 def _settings(**overrides: object) -> Settings:
     base: dict[str, object] = {
-        "database_url": "postgresql://runner:password@localhost:5432/benchmarks",
-        "dataset_bucket": "test-bucket",
-        "dataset_id": "stt-v1",
-        "log_level": "DEBUG",
         "speechify_api_key": SecretStr("test-speechify-key"),
     }
     base.update(overrides)

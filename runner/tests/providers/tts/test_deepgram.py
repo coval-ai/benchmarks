@@ -320,8 +320,6 @@ async def test_deepgram_unsupported_model(fake_settings: Settings) -> None:
 
 def test_deepgram_missing_api_key() -> None:
     settings_no_key = Settings(
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
         deepgram_api_key=None,
     )
     with pytest.raises(ValueError, match="deepgram_api_key"):

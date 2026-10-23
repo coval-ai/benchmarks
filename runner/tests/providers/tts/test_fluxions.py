@@ -25,10 +25,6 @@ _CATALOG = {"maeve": _VOICE_ID, "abraham": "abraham.h8ff7e07da"}
 
 def _settings() -> Settings:
     return Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-        log_level="DEBUG",
         fluxions_api_key=SecretStr("test-api-key"),
     )
 

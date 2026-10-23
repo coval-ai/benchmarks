@@ -77,11 +77,7 @@ BAD_HASH_MANIFEST_PATH = FIXTURES_DIR / "manifest-bad-hash.json"
 
 @pytest.fixture()
 def test_settings() -> Settings:
-    return Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
-    )
+    return Settings()
 
 
 # ---------------------------------------------------------------------------

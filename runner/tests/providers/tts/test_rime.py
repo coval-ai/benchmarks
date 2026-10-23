@@ -384,9 +384,6 @@ def test_rime_name_and_model(fake_settings: Settings, model: str) -> None:
 
 def test_rime_missing_api_key() -> None:
     settings_no_key = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
         rime_api_key=None,
     )
     with pytest.raises(ValueError, match="rime_api_key"):

@@ -222,9 +222,6 @@ async def test_cartesia_send_includes_output_format(fake_settings: Settings) -> 
 
 def test_cartesia_missing_api_key() -> None:
     settings_no_key = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",
-        dataset_bucket="test-bucket",
-        dataset_id="stt-v1",
         cartesia_api_key=None,
     )
     with pytest.raises(ValueError, match="cartesia_api_key"):
