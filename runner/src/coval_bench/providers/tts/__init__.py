@@ -37,7 +37,6 @@ from coval_bench.providers.tts.lmnt import LmntTTSProvider
 from coval_bench.providers.tts.minimax import MinimaxTTSProvider
 from coval_bench.providers.tts.murf import MurfTTSProvider
 from coval_bench.providers.tts.nari import NariTTSProvider
-from coval_bench.providers.tts.openai import OpenAITTSProvider
 from coval_bench.providers.tts.palabra import PalabraTTSProvider
 from coval_bench.providers.tts.rime import RimeTTSProvider
 from coval_bench.providers.tts.smallest import SmallestTTSProvider
@@ -63,7 +62,6 @@ except ImportError:
 TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "airy": AiryTTSProvider,
     "assemblyai": AssemblyAITTSProvider,
-    "openai": OpenAITTSProvider,
     "atlas": AtlasTTSProvider,
     "cartesia": CartesiaTTSProvider,
     "cloudflare": CloudflareTTSProvider,
