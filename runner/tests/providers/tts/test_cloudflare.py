@@ -7,7 +7,7 @@ import json
 import wave
 from collections.abc import AsyncIterator
 
-import httpx
+import httpx2
 import pytest
 from pydantic import SecretStr
 
@@ -22,7 +22,7 @@ _URL = "https://api.cloudflare.com/client/v4/accounts/acct-0123/ai/run/@cf/deepg
 _PCM = make_pcm_bytes()
 
 
-class AudioStream(httpx.AsyncByteStream):
+class AudioStream(httpx2.AsyncByteStream):
     def __init__(self, chunks: list[bytes]) -> None:
         self.chunks = chunks
         self.now = 10.0
@@ -39,7 +39,7 @@ async def test_request_shape_and_first_chunk_timing(
 ) -> None:
     stream = AudioStream([_PCM[:240], _PCM[240:]])
 
-    def handle(request: httpx.Request) -> httpx.Response:
+    def handle(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "POST"
         assert str(request.url) == _URL
         assert request.headers["Authorization"] == "Bearer test-cloudflare-key"
@@ -52,15 +52,15 @@ async def test_request_shape_and_first_chunk_timing(
         }
         request.extensions.update(__t_submit=10.0, __t_headers=10.005, __connection_reused=True)
         # Workers AI mislabels the PCM body; the provider must not reject it.
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={"Content-Type": "audio/mpeg"},
             stream=stream,
             extensions={"http_version": b"HTTP/2"},
         )
 
-    async with httpx.AsyncClient(
-        base_url="https://api.cloudflare.com", transport=httpx.MockTransport(handle)
+    async with httpx2.AsyncClient(
+        base_url="https://api.cloudflare.com", transport=httpx2.MockTransport(handle)
     ) as client:
         monkeypatch.setattr(cloudflare, "get_shared_client", lambda *args: client)
         monkeypatch.setattr("time.monotonic", lambda: stream.now)
@@ -87,11 +87,11 @@ async def test_workers_ai_error_body_is_surfaced(
 ) -> None:
     body = {"errors": [{"message": "AiError: Bad input: enum nobody not in luna,thalia"}]}
 
-    def handle(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(400, headers={"cf-ai-req-id": "req-400"}, json=body)
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(400, headers={"cf-ai-req-id": "req-400"}, json=body)
 
-    async with httpx.AsyncClient(
-        base_url="https://api.cloudflare.com", transport=httpx.MockTransport(handle)
+    async with httpx2.AsyncClient(
+        base_url="https://api.cloudflare.com", transport=httpx2.MockTransport(handle)
     ) as client:
         monkeypatch.setattr(cloudflare, "get_shared_client", lambda *args: client)
         provider = cloudflare.CloudflareTTSProvider(fake_settings, model=_MODEL, voice="nobody")

@@ -38,7 +38,7 @@ from types import SimpleNamespace
 from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
-import httpx
+import httpx2
 import openai
 import pytest
 import structlog
@@ -3791,9 +3791,9 @@ async def test_stt_missing_endpoint_url_yields_error_rows(
 
 
 def _whisper_404() -> openai.NotFoundError:
-    request = httpx.Request("POST", "https://api.openai.com/v1/audio/transcriptions")
+    request = httpx2.Request("POST", "https://api.openai.com/v1/audio/transcriptions")
     return openai.NotFoundError(
-        "Invalid URL", response=httpx.Response(404, request=request), body=None
+        "Invalid URL", response=httpx2.Response(404, request=request), body=None
     )
 
 

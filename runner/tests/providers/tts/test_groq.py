@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import httpx2
 import pytest
 
 from coval_bench.config import Settings
@@ -247,20 +247,20 @@ def test_groq_name_property(fake_settings: Settings) -> None:
 def test_groq_uses_shared_http_client(fake_settings: Settings) -> None:
     _make_provider(fake_settings)
     assert "groq" in _http_session._CLIENTS
-    assert isinstance(_http_session._CLIENTS["groq"], httpx.AsyncClient)
+    assert isinstance(_http_session._CLIENTS["groq"], httpx2.AsyncClient)
 
 
 @pytest.mark.asyncio
 async def test_groq_warmup_issues_head(fake_settings: Settings) -> None:
     seen: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(f"{request.method} {request.url.path}")
-        return httpx.Response(401, content=b"unauthorized")
+        return httpx2.Response(401, content=b"unauthorized")
 
-    _http_session._CLIENTS["groq"] = httpx.AsyncClient(
+    _http_session._CLIENTS["groq"] = httpx2.AsyncClient(
         base_url="https://api.groq.com",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     await GroqTTSProvider.warmup(fake_settings)
     assert seen == ["HEAD /openai/v1/models"]
@@ -268,12 +268,12 @@ async def test_groq_warmup_issues_head(fake_settings: Settings) -> None:
 
 @pytest.mark.asyncio
 async def test_groq_warmup_propagates_transport_error(fake_settings: Settings) -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("dns blew up")
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("dns blew up")
 
-    _http_session._CLIENTS["groq"] = httpx.AsyncClient(
+    _http_session._CLIENTS["groq"] = httpx2.AsyncClient(
         base_url="https://api.groq.com",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
-    with pytest.raises(httpx.ConnectError):
+    with pytest.raises(httpx2.ConnectError):
         await GroqTTSProvider.warmup(fake_settings)

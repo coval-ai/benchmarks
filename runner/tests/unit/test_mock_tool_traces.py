@@ -219,9 +219,9 @@ def test_the_coval_exporter_is_addressed_to_one_simulation_beside_the_api() -> N
     exporter = coval_exporter("k-test", "sim_abc123", "https://staging.coval.invalid/v1/")
 
     assert exporter._endpoint == "https://staging.coval.invalid/v1/traces"  # noqa: SLF001
-    assert exporter._headers["X-API-Key"] == "k-test"  # noqa: SLF001
-    assert exporter._headers[COVAL_SIMULATION_HEADER] == "sim_abc123"  # noqa: SLF001
-    assert exporter._timeout == 30  # noqa: SLF001
+    assert exporter._client._headers["x-api-key"] == "k-test"  # noqa: SLF001
+    assert exporter._client._headers[COVAL_SIMULATION_HEADER.lower()] == "sim_abc123"  # noqa: SLF001
+    assert exporter._client._timeout == 30  # noqa: SLF001
 
 
 # --- scheduling -------------------------------------------------------------------
@@ -247,9 +247,8 @@ async def test_with_a_key_the_batch_is_posted_off_the_request_path(
     posted: list[tuple[str, str, int]] = []
 
     def fake_export(exporter: Any, spans: Sequence[ReadableSpan]) -> SpanExportResult:  # noqa: ANN401
-        posted.append(
-            (exporter._headers[COVAL_SIMULATION_HEADER], exporter._endpoint, len(spans))  # noqa: SLF001
-        )
+        headers = exporter._client._headers  # noqa: SLF001
+        posted.append((headers[COVAL_SIMULATION_HEADER.lower()], exporter._endpoint, len(spans)))  # noqa: SLF001
         return SpanExportResult.SUCCESS
 
     monkeypatch.setattr(traces, "export_spans", fake_export)

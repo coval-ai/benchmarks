@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator, Generator
 from typing import Any
 from unittest.mock import patch
 
-import httpx
+import httpx2
 import pytest
 from pydantic import SecretStr
 
@@ -50,9 +50,9 @@ def _settings(**overrides: object) -> Settings:
 
 
 def _install_mock(handler: Any) -> None:
-    _http_session._CLIENTS["guava"] = httpx.AsyncClient(
+    _http_session._CLIENTS["guava"] = httpx2.AsyncClient(
         base_url=_BASE_URL,
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
 
 
@@ -68,11 +68,11 @@ async def test_guava_happy_path() -> None:
     pcm = make_pcm_bytes(480) * 4
     captured: dict[str, object] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         captured["url"] = str(request.url)
         captured["authorization"] = request.headers.get("authorization")
         captured["body"] = json.loads(request.read())
-        return httpx.Response(200, content=_wav(pcm))
+        return httpx2.Response(200, content=_wav(pcm))
 
     _install_mock(handler)
 
@@ -102,8 +102,8 @@ async def test_guava_happy_path() -> None:
 
 @pytest.mark.asyncio
 async def test_guava_http_error() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(429, content=b'{"detail": "rate limit"}')
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(429, content=b'{"detail": "rate limit"}')
 
     _install_mock(handler)
 
@@ -118,8 +118,8 @@ async def test_guava_http_error() -> None:
 
 @pytest.mark.asyncio
 async def test_guava_transport_exception() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("synthetic network failure")
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("synthetic network failure")
 
     _install_mock(handler)
 
@@ -134,8 +134,8 @@ async def test_guava_transport_exception() -> None:
 
 @pytest.mark.asyncio
 async def test_guava_empty_response() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, content=b"")
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, content=b"")
 
     _install_mock(handler)
 
@@ -151,9 +151,9 @@ async def test_guava_empty_response() -> None:
 async def test_guava_warmup_synthesizes_and_cleans_up() -> None:
     seen: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(f"{request.method} {request.url.path}")
-        return httpx.Response(200, content=_wav(make_pcm_bytes(240)))
+        return httpx2.Response(200, content=_wav(make_pcm_bytes(240)))
 
     _install_mock(handler)
     await GuavaTTSProvider.warmup(_settings())
@@ -165,9 +165,9 @@ async def test_guava_warmup_synthesizes_and_cleans_up() -> None:
 async def test_guava_warmup_noop_without_config() -> None:
     calls: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append(str(request.url))
-        return httpx.Response(200, content=_wav(make_pcm_bytes(240)))
+        return httpx2.Response(200, content=_wav(make_pcm_bytes(240)))
 
     _install_mock(handler)
     # No URL / key configured → warmup must return without touching the network.
@@ -194,7 +194,7 @@ def test_guava_missing_api_key() -> None:
 
 @pytest.mark.asyncio
 async def test_guava_silent_wav_is_not_a_success() -> None:
-    _install_mock(lambda _: httpx.Response(200, content=_wav(bytes(32000))))
+    _install_mock(lambda _: httpx2.Response(200, content=_wav(bytes(32000))))
     result = await GuavaTTSProvider(_settings(), "daytona-tts", _VOICE).synthesize("hi")
     assert result.error == "provider audio remained below the audibility threshold"
     assert result.ttfa_ms is None
@@ -206,13 +206,13 @@ async def test_guava_silent_wav_is_not_a_success() -> None:
 async def test_guava_header_arrival_does_not_start_audio_clock() -> None:
     data = _wav(make_pcm_bytes(480))
 
-    class Stream(httpx.AsyncByteStream):
+    class Stream(httpx2.AsyncByteStream):
         async def __aiter__(self) -> AsyncIterator[bytes]:
             yield data[:20]
             yield data[20:44]
             yield data[44:]
 
-    _install_mock(lambda _: httpx.Response(200, stream=Stream()))
+    _install_mock(lambda _: httpx2.Response(200, stream=Stream()))
     with patch("coval_bench.providers.tts.guava.time") as clock:
         clock.monotonic.side_effect = [100.0, 100.1, 100.2, 103.0]
         result = await GuavaTTSProvider(_settings(), "daytona-tts", _VOICE).synthesize("hi")
@@ -225,7 +225,7 @@ async def test_guava_header_arrival_does_not_start_audio_clock() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("data", [b"not a WAV", _wav(bytes(320), sample_rate=8000)])
 async def test_guava_rejects_invalid_wav(data: bytes) -> None:
-    _install_mock(lambda _: httpx.Response(200, content=data))
+    _install_mock(lambda _: httpx2.Response(200, content=data))
     result = await GuavaTTSProvider(_settings(), "daytona-tts", _VOICE).synthesize("hi")
     assert result.error is not None
     assert result.ttfa_ms is None
@@ -236,7 +236,7 @@ async def test_guava_rejects_invalid_wav(data: bytes) -> None:
 async def test_guava_live_raw_pcm_response_format() -> None:
     pcm = make_pcm_bytes(480)
     _install_mock(
-        lambda _: httpx.Response(
+        lambda _: httpx2.Response(
             200, content=pcm, headers={"Content-Type": "audio/L16;rate=16000;channels=1"}
         )
     )

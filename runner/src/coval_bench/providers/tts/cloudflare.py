@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import time
 
-import httpx
+import httpx2
 import structlog
 
 from coval_bench.config import Settings
@@ -99,7 +99,7 @@ class CloudflareTTSProvider(TTSProvider):
                 request_id = response.headers.get("cf-ai-req-id")
                 if response.status_code >= 400:
                     body = (await response.aread()).decode("utf-8", errors="replace")
-                    raise httpx.HTTPStatusError(
+                    raise httpx2.HTTPStatusError(
                         f"HTTP {response.status_code}: {_error_message(body)}",
                         request=response.request,
                         response=response,

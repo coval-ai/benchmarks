@@ -3,7 +3,7 @@
 
 """Shared httpx clients with timed-transport diagnostics.
 
-HTTP providers grab a module-level ``httpx.AsyncClient`` keyed by provider.
+HTTP providers grab a module-level ``httpx2.AsyncClient`` keyed by provider.
 The client uses a long ``keepalive_expiry`` so the pool survives between
 dataset items; once the first request opens a connection, every subsequent
 request on that pool reuses it (no DNS, no TCP, no TLS).
@@ -23,7 +23,7 @@ from __future__ import annotations
 import time
 from typing import Final
 
-import httpx
+import httpx2
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -33,10 +33,10 @@ _TIMEOUT_S: Final[float] = 30.0
 _MAX_KEEPALIVE_CONNECTIONS: Final[int] = 8
 _MAX_CONNECTIONS: Final[int] = 8
 
-_CLIENTS: dict[str, httpx.AsyncClient] = {}
+_CLIENTS: dict[str, httpx2.AsyncClient] = {}
 
 
-class TimedTransport(httpx.AsyncHTTPTransport):
+class TimedTransport(httpx2.AsyncHTTPTransport):
     """httpx transport that timestamps each request for warmth diagnostics.
 
     The interval ``__t_headers - __t_submit`` contains connect time (if the
@@ -46,7 +46,7 @@ class TimedTransport(httpx.AsyncHTTPTransport):
     mid-run.
     """
 
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
         opened_connection = False
 
         async def _trace(name: str, info: dict[str, object]) -> None:
@@ -71,7 +71,7 @@ class TimedTransport(httpx.AsyncHTTPTransport):
         return response
 
 
-def submit_to_headers_ms(request: httpx.Request) -> float | None:
+def submit_to_headers_ms(request: httpx2.Request) -> float | None:
     t_submit = request.extensions.get("__t_submit")
     t_headers = request.extensions.get("__t_headers")
     if t_submit is None or t_headers is None:
@@ -79,15 +79,15 @@ def submit_to_headers_ms(request: httpx.Request) -> float | None:
     return round((float(t_headers) - float(t_submit)) * 1000, 1)
 
 
-def connection_reused(request: httpx.Request) -> bool | None:
+def connection_reused(request: httpx2.Request) -> bool | None:
     reused = request.extensions.get("__connection_reused")
     if reused is None:
         return None
     return bool(reused)
 
 
-def get_shared_client(provider_key: str, base_url: str) -> httpx.AsyncClient:
-    """Return the module-level ``httpx.AsyncClient`` for *provider_key*.
+def get_shared_client(provider_key: str, base_url: str) -> httpx2.AsyncClient:
+    """Return the module-level ``httpx2.AsyncClient`` for *provider_key*.
 
     Lazy-initialised on first call. Subsequent calls return the same instance
     so connection-pool state is preserved across providers' lifetimes.
@@ -104,12 +104,12 @@ def get_shared_client(provider_key: str, base_url: str) -> httpx.AsyncClient:
             )
         return existing
 
-    _CLIENTS[provider_key] = httpx.AsyncClient(
+    _CLIENTS[provider_key] = httpx2.AsyncClient(
         base_url=base_url,
         transport=TimedTransport(
             retries=0,
             http2=True,
-            limits=httpx.Limits(
+            limits=httpx2.Limits(
                 max_connections=_MAX_CONNECTIONS,
                 max_keepalive_connections=_MAX_KEEPALIVE_CONNECTIONS,
                 keepalive_expiry=_KEEPALIVE_S,

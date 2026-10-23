@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import time
 
-import httpx
+import httpx2
 import structlog
 
 from coval_bench.config import Settings
@@ -107,7 +107,7 @@ class AiryTTSProvider(TTSProvider):
         return synthesis.result()
 
 
-def _validate_audio_headers(headers: httpx.Headers) -> None:
+def _validate_audio_headers(headers: httpx2.Headers) -> None:
     content_type = headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
     if content_type != "audio/pcm":
         raise ValueError(f"Expected Airy audio/pcm response, got {content_type!r}")

@@ -9,7 +9,7 @@ import json
 from collections.abc import Generator
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 from pydantic import SecretStr
 
@@ -35,9 +35,9 @@ def _settings(**overrides: object) -> Settings:
 
 
 def _install_mock(handler: Any) -> None:
-    _http_session._CLIENTS["speechify"] = httpx.AsyncClient(
+    _http_session._CLIENTS["speechify"] = httpx2.AsyncClient(
         base_url="https://api.speechify.ai",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
 
 
@@ -53,12 +53,12 @@ async def test_speechify_happy_path() -> None:
     pcm = make_pcm_bytes(480) * 4
     captured: dict[str, object] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         captured["url"] = str(request.url)
         captured["authorization"] = request.headers.get("authorization")
         captured["accept"] = request.headers.get("accept")
         captured["body"] = json.loads(request.read())
-        return httpx.Response(200, content=pcm)
+        return httpx2.Response(200, content=pcm)
 
     _install_mock(handler)
 
@@ -87,8 +87,8 @@ async def test_speechify_happy_path() -> None:
 
 @pytest.mark.asyncio
 async def test_speechify_http_error() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(429, content=b'{"detail": "rate limit"}')
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(429, content=b'{"detail": "rate limit"}')
 
     _install_mock(handler)
 
@@ -103,8 +103,8 @@ async def test_speechify_http_error() -> None:
 
 @pytest.mark.asyncio
 async def test_speechify_transport_exception() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("synthetic network failure")
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("synthetic network failure")
 
     _install_mock(handler)
 
@@ -119,8 +119,8 @@ async def test_speechify_transport_exception() -> None:
 
 @pytest.mark.asyncio
 async def test_speechify_empty_response() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, content=b"")
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, content=b"")
 
     _install_mock(handler)
 
@@ -136,9 +136,9 @@ async def test_speechify_empty_response() -> None:
 async def test_speechify_warmup_issues_head() -> None:
     seen: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(f"{request.method} {request.url.path}")
-        return httpx.Response(401, content=b"unauthorized")
+        return httpx2.Response(401, content=b"unauthorized")
 
     _install_mock(handler)
     await SpeechifyTTSProvider.warmup(_settings())
@@ -148,11 +148,11 @@ async def test_speechify_warmup_issues_head() -> None:
 
 @pytest.mark.asyncio
 async def test_speechify_warmup_propagates_transport_error() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("dns blew up")
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("dns blew up")
 
     _install_mock(handler)
-    with pytest.raises(httpx.ConnectError):
+    with pytest.raises(httpx2.ConnectError):
         await SpeechifyTTSProvider.warmup(_settings())
 
 
