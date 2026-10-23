@@ -370,8 +370,7 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
             # Scribe's interim deltas arrive on a fixed ~1s cadence, so first-token
             # timing tracks the emission interval.
             ("zoom", "scribe"),
-            ("zoom", "zoom-scribe-en"),
-            ("zoom", "zoom-scribe-en-pro"),
+            ("zoom", "scribe-pro"),
         }
     ),
     Metric.TTFS: frozenset(
@@ -391,8 +390,7 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
             # the client pads trailing silence, so the final's timing bundles
             # endpoint detection.
             ("zoom", "scribe"),
-            ("zoom", "zoom-scribe-en"),
-            ("zoom", "zoom-scribe-en-pro"),
+            ("zoom", "scribe-pro"),
         }
     ),
 }

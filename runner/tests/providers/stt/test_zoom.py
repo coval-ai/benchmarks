@@ -73,7 +73,7 @@ async def test_zoom_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> N
 
     assert json.loads(sent[0]) == {
         "type": "session.update",
-        "config": {"language": "en-US"},
+        "config": {"language": "en-US", "model": "zoom-scribe-en"},
         "audio": {"format": "pcm16"},
     }
     assert all(isinstance(frame, bytes) for frame in sent[1:-1])
@@ -202,11 +202,11 @@ def test_zoom_jwt_claims() -> None:
 
 
 @pytest.mark.asyncio
-async def test_zoom_named_model_is_selected_in_config(
+async def test_zoom_pro_row_selects_the_pro_model(
     stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     sent: list[Any] = []
-    provider = ZoomSTTProvider(stt_settings, model="zoom-scribe-en-pro")
+    provider = ZoomSTTProvider(stt_settings, model="scribe-pro")
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
