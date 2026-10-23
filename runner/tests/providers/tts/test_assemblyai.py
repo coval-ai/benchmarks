@@ -9,7 +9,7 @@ from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import httpx2
 import pytest
 from openai import NOT_GIVEN
 
@@ -111,7 +111,7 @@ def test_assemblyai_tts_client_targets_openai_prefix(fake_settings: Settings) ->
     provider = _make_provider(fake_settings)
     assert str(provider._client.base_url) == "https://tts.us.assemblyai.com/v1/openai/"
     assert "assemblyai" in _http_session._CLIENTS
-    assert isinstance(_http_session._CLIENTS["assemblyai"], httpx.AsyncClient)
+    assert isinstance(_http_session._CLIENTS["assemblyai"], httpx2.AsyncClient)
 
 
 @pytest.mark.parametrize("voice", [*VALID_VOICES, _CLONED_VOICE])
@@ -147,13 +147,13 @@ def test_assemblyai_tts_missing_key_raises() -> None:
 async def test_assemblyai_tts_warmup_heads_speech_endpoint(fake_settings: Settings) -> None:
     seen: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(f"{request.method} {request.url.path}")
-        return httpx.Response(401, content=b"unauthorized")
+        return httpx2.Response(401, content=b"unauthorized")
 
-    _http_session._CLIENTS["assemblyai"] = httpx.AsyncClient(
+    _http_session._CLIENTS["assemblyai"] = httpx2.AsyncClient(
         base_url="https://tts.us.assemblyai.com",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     await AssemblyAITTSProvider.warmup(fake_settings)
     assert seen == ["HEAD /v1/openai/audio/speech"]

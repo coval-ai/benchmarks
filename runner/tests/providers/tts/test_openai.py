@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import httpx2
 import pytest
 
 from coval_bench.config import Settings
@@ -195,7 +195,7 @@ def test_openai_uses_shared_http_client(fake_settings: Settings) -> None:
     """Construction registers a pooled httpx client in the shared registry."""
     OpenAITTSProvider(fake_settings, model="gpt-4o-mini-tts", voice="alloy")
     assert "openai" in _http_session._CLIENTS
-    assert isinstance(_http_session._CLIENTS["openai"], httpx.AsyncClient)
+    assert isinstance(_http_session._CLIENTS["openai"], httpx2.AsyncClient)
 
 
 @pytest.mark.asyncio
@@ -203,13 +203,13 @@ async def test_openai_warmup_issues_head(fake_settings: Settings) -> None:
     """warmup() HEADs /v1/models on the shared client; a 401 does not raise."""
     seen: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(f"{request.method} {request.url.path}")
-        return httpx.Response(401, content=b"unauthorized")
+        return httpx2.Response(401, content=b"unauthorized")
 
-    _http_session._CLIENTS["openai"] = httpx.AsyncClient(
+    _http_session._CLIENTS["openai"] = httpx2.AsyncClient(
         base_url="https://api.openai.com",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     await OpenAITTSProvider.warmup(fake_settings)
     assert seen == ["HEAD /v1/models"]
@@ -219,14 +219,14 @@ async def test_openai_warmup_issues_head(fake_settings: Settings) -> None:
 async def test_openai_warmup_propagates_transport_error(fake_settings: Settings) -> None:
     """Transport failures propagate so the orchestrator can log them."""
 
-    def handler(_: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("dns blew up")
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("dns blew up")
 
-    _http_session._CLIENTS["openai"] = httpx.AsyncClient(
+    _http_session._CLIENTS["openai"] = httpx2.AsyncClient(
         base_url="https://api.openai.com",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
-    with pytest.raises(httpx.ConnectError):
+    with pytest.raises(httpx2.ConnectError):
         await OpenAITTSProvider.warmup(fake_settings)
 
 

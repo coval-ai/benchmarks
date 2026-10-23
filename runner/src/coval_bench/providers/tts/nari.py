@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 
-import httpx
+import httpx2
 import structlog
 
 from coval_bench.config import Settings
@@ -96,7 +96,7 @@ class NariTTSProvider(TTSProvider):
                 request_id = response.headers.get("x-request-id")
                 if response.status_code >= 400:
                     body = (await response.aread()).decode("utf-8", errors="replace")
-                    raise httpx.HTTPStatusError(
+                    raise httpx2.HTTPStatusError(
                         f"HTTP {response.status_code}: {body[:400]}",
                         request=response.request,
                         response=response,
@@ -113,7 +113,7 @@ class NariTTSProvider(TTSProvider):
         return synthesis.result()
 
 
-def _validate_content_type(headers: httpx.Headers) -> None:
+def _validate_content_type(headers: httpx2.Headers) -> None:
     content_type = headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
     if content_type != "audio/pcm":
         raise ValueError(f"Expected Nari audio/pcm response, got {content_type!r}")

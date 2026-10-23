@@ -7,7 +7,7 @@ import json
 import wave
 from collections.abc import AsyncIterator
 
-import httpx
+import httpx2
 import pytest
 from pydantic import SecretStr
 
@@ -23,7 +23,7 @@ _PCM_HEADERS = {"Content-Type": "audio/pcm"}
 _PCM = make_pcm_bytes()
 
 
-class AudioStream(httpx.AsyncByteStream):
+class AudioStream(httpx2.AsyncByteStream):
     def __init__(self, chunks: list[bytes], *, broken: bool = False) -> None:
         self.chunks = chunks
         self.broken = broken
@@ -34,7 +34,7 @@ class AudioStream(httpx.AsyncByteStream):
             self.now = 10.025 if index == 0 else 12.0
             yield chunk
         if self.broken:
-            raise httpx.ReadError("stream interrupted")
+            raise httpx2.ReadError("stream interrupted")
 
 
 @pytest.mark.asyncio
@@ -43,7 +43,7 @@ async def test_stream_request_and_first_chunk_timing_produce_24khz_wav(
 ) -> None:
     stream = AudioStream([_PCM[:240], _PCM[240:]])
 
-    def handle(request: httpx.Request) -> httpx.Response:
+    def handle(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "POST"
         assert str(request.url) == "https://api.narilabs.com/v1/audio/speech"
         assert request.headers["Authorization"] == "Bearer test-nari-key"
@@ -56,12 +56,12 @@ async def test_stream_request_and_first_chunk_timing_produce_24khz_wav(
             "response_format": "pcm",
         }
         request.extensions.update(__t_submit=10.0, __t_headers=10.005, __connection_reused=True)
-        return httpx.Response(
+        return httpx2.Response(
             200, headers=_PCM_HEADERS, stream=stream, extensions={"http_version": b"HTTP/2"}
         )
 
-    async with httpx.AsyncClient(
-        base_url="https://api.narilabs.com", transport=httpx.MockTransport(handle)
+    async with httpx2.AsyncClient(
+        base_url="https://api.narilabs.com", transport=httpx2.MockTransport(handle)
     ) as client:
         monkeypatch.setattr(nari, "get_shared_client", lambda *args: client)
         monkeypatch.setattr("time.monotonic", lambda: stream.now)
@@ -109,11 +109,11 @@ async def test_failed_or_incompatible_stream_never_saves_audio(
     broken: bool,
     expected: str,
 ) -> None:
-    def handle(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(status, headers=headers, stream=AudioStream(chunks, broken=broken))
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(status, headers=headers, stream=AudioStream(chunks, broken=broken))
 
-    async with httpx.AsyncClient(
-        base_url="https://api.narilabs.com", transport=httpx.MockTransport(handle)
+    async with httpx2.AsyncClient(
+        base_url="https://api.narilabs.com", transport=httpx2.MockTransport(handle)
     ) as client:
         monkeypatch.setattr(nari, "get_shared_client", lambda *args: client)
         provider = nari.NariTTSProvider(fake_settings, model=_MODEL, voice=_VOICE)
@@ -144,14 +144,14 @@ def test_construction_guards(api_key: SecretStr | None, model: str, match: str) 
 async def test_warmup_uses_head_without_synthesizing(
     fake_settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handle(request: httpx.Request) -> httpx.Response:
+    def handle(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(405)
+        return httpx2.Response(405)
 
-    async with httpx.AsyncClient(
-        base_url="https://api.narilabs.com", transport=httpx.MockTransport(handle)
+    async with httpx2.AsyncClient(
+        base_url="https://api.narilabs.com", transport=httpx2.MockTransport(handle)
     ) as client:
         monkeypatch.setattr(nari, "get_shared_client", lambda *args: client)
         await nari.NariTTSProvider.warmup(fake_settings)
