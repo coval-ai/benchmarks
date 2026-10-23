@@ -2475,6 +2475,26 @@ def test_cli_no_providers_alerts_failed_exit_nonzero(monkeypatch: pytest.MonkeyP
     assert "RUN_PARTIAL" not in events
 
 
+def test_cli_missing_scenario_map_alerts_failed_exit_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch(_settings: Settings, **kwargs: object) -> dict[str, RunStatus]:
+        raise AssertionError("fetched without the scenario map")
+
+    settings = Settings.model_construct(
+        log_level="INFO", s2s_scenario_map_uri="gs://maps/coval-benchmarking/scenario_map.json"
+    )
+    monkeypatch.setattr(fetch_v2v, "fetch_and_write_v2v", fake_fetch)
+    monkeypatch.setattr(fetch_v2v, "get_settings", lambda: settings)
+    monkeypatch.setattr("coval_bench.gcs.read_json", lambda bucket, key: None)
+    monkeypatch.setattr("coval_bench.logging.configure_logging", lambda level: None)
+    with capture_logs() as logs:
+        result = CliRunner().invoke(fetch_v2v.fetch_s2s, [])
+
+    assert result.exit_code != 0
+    assert "RUN_FAILED" in [str(entry.get("event")) for entry in logs]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("spec", "condition", "metric_ids"),

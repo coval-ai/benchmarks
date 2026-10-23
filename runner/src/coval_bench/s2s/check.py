@@ -23,6 +23,7 @@ from coval_bench.s2s.identity import (
     condition_for_persona,
     parse_persona_conditions,
 )
+from coval_bench.s2s.scenario_map import with_scenario_map
 from coval_bench.s2s.specs import s2s_specs, scenario_specs
 
 
@@ -117,7 +118,7 @@ def check_s2s(settings_file: str | None, window_hours: int | None) -> None:
         )
     window_seconds = window_hours * 3600 if window_hours else None
     try:
-        found, flags = asyncio.run(_check(Settings(), window_seconds))
+        found, flags = asyncio.run(_check(with_scenario_map(Settings()), window_seconds))
     except httpx.HTTPError as exc:
         raise click.ClickException(f"the Coval request failed: {exc}") from exc
     except (RuntimeError, ValueError) as exc:

@@ -63,6 +63,7 @@ from coval_bench.s2s.ingest import (
 )
 from coval_bench.s2s.rows import VALUE_MAPPERS, ingestable_metrics
 from coval_bench.s2s.samples import SampleRun, model_labels, publish_tick_sample
+from coval_bench.s2s.scenario_map import with_scenario_map
 from coval_bench.s2s.specs import AgentSpec, llm_specs, s2s_specs
 
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
@@ -693,6 +694,7 @@ def _run_fetch(
     configure_logging(level=settings.log_level)
     # A setup crash fails the whole job.
     try:
+        settings = with_scenario_map(settings)
         only_run_ids = frozenset(coval_run_ids) or None
         statuses = asyncio.run(
             fetch_and_write_v2v(

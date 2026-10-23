@@ -336,6 +336,9 @@ class Settings(BaseSettings):
     # scenario shares the bank judge above; instruction-bank and workflow-bank each
     # name their own. Opaque ids, not secrets.
     coval_s2s_scenarios: dict[str, ScenarioCovalIds] = Field(default_factory=dict)
+    # gs://bucket/key of the scenario map the assets apply publishes. When set, the
+    # S2S fetch takes the Coval ids above from it at run time instead of the env.
+    s2s_scenario_map_uri: str = ""
     # Shared across all three industries (it reads test_case.expected_behaviors
     # generically, unlike the domain judges), so one field rather than three.
     # A separate metric from coval_s2s_*_instruction_metric_id above, not a
