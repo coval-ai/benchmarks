@@ -71,7 +71,11 @@ async def test_zoom_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> N
     assert result.word_count == 5
     assert result.audio_to_final_seconds is not None
 
-    assert json.loads(sent[0])["type"] == "session.update"
+    assert json.loads(sent[0]) == {
+        "type": "session.update",
+        "config": {"language": "en-US"},
+        "audio": {"format": "pcm16"},
+    }
     assert all(isinstance(frame, bytes) for frame in sent[1:-1])
     assert json.loads(sent[-1]) == {"type": "session.close"}
 
@@ -195,3 +199,26 @@ def test_zoom_jwt_claims() -> None:
         issuer=settings.zoom_api_key.get_secret_value(),
     )
     assert claims["exp"] - claims["iat"] == 7200
+
+
+@pytest.mark.asyncio
+async def test_zoom_named_model_is_selected_in_config(
+    stt_settings: Settings, audio_pcm_bytes: bytes
+) -> None:
+    sent: list[Any] = []
+    provider = ZoomSTTProvider(stt_settings, model="zoom-scribe-en-pro")
+
+    with patch(
+        "coval_bench.providers.stt._streaming.ws_client.connect",
+        return_value=fake_connect(_SUCCESS_EVENTS, sent),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert json.loads(sent[0])["config"] == {"language": "en-US", "model": "zoom-scribe-en-pro"}

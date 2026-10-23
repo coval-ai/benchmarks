@@ -22,6 +22,7 @@ _WS_URL = "wss://api.zoom.us/v2/aiservices/scribe/live"
 _SUBPROTOCOL = Subprotocol("live-asr")
 _TOKEN_TTL_S = 7200
 _EOT_SILENCE_S = 2.0
+_AUTO_MODEL = "scribe"
 
 
 class ZoomSTTProvider(WebSocketSTTProvider):
@@ -29,7 +30,7 @@ class ZoomSTTProvider(WebSocketSTTProvider):
 
     _SAMPLE_RATE = 16000
 
-    def __init__(self, settings: Settings, model: str = "scribe") -> None:
+    def __init__(self, settings: Settings, model: str = _AUTO_MODEL) -> None:
         super().__init__(settings, model)
         self._api_key = self._require_secret("zoom_api_key")
         self._api_secret = self._require_secret("zoom_api_secret")
@@ -55,10 +56,13 @@ class ZoomSTTProvider(WebSocketSTTProvider):
         )
 
     async def _open(self, ws: Any, tx: Transcription, sample_rate: int) -> None:
+        config: dict[str, Any] = {"language": "en-US"}
+        # The original "scribe" row predates explicit selection; it keeps Zoom's
+        # automatic model so its history stays comparable.
+        if self._model != _AUTO_MODEL:
+            config["model"] = self._model
         await ws.send(
-            json.dumps(
-                {"type": "session.update", "language": "en-US", "audio": {"format": "pcm16"}}
-            )
+            json.dumps({"type": "session.update", "config": config, "audio": {"format": "pcm16"}})
         )
 
     async def _end_audio(self, ws: Any, tx: Transcription) -> None:
