@@ -10,7 +10,13 @@ import pytest
 from coval_bench import scenarios
 from coval_bench.config import Settings
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.s2s.conditions import DATASET_ID_BANK, DATASET_ID_LLM_BANK, SCENARIO_SLUGS
+from coval_bench.registries.metrics import Metric
+from coval_bench.s2s.conditions import (
+    CONDITIONS,
+    DATASET_ID_BANK,
+    DATASET_ID_LLM_BANK,
+    SCENARIO_SLUGS,
+)
 
 
 def test_bank_scenario_names_one_dataset_per_benchmark() -> None:
@@ -22,6 +28,12 @@ def test_each_board_headline_reads_its_scenario_clean_dataset() -> None:
     assert scenarios.headline_dataset(Benchmark.S2S) == "s2s-workflow-bank-v1"
     assert scenarios.headline_dataset(Benchmark.LLM) == DATASET_ID_LLM_BANK
     assert scenarios.headline_dataset(Benchmark.TTS) is None
+
+
+def test_the_s2s_headline_dataset_collects_latency() -> None:
+    dataset = scenarios.headline_dataset(Benchmark.S2S)
+    assert dataset is not None
+    assert Metric.V2V in CONDITIONS[dataset].fetched
 
 
 def test_only_text_runs_need_the_persona_setting() -> None:

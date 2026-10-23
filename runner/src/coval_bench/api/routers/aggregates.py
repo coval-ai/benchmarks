@@ -68,10 +68,10 @@ from coval_bench.db.dashboard_rollups import GRAINS, RUN_SLOT
 from coval_bench.db.dashboard_windows import WINDOW_VIEWS
 from coval_bench.registries import (
     METRIC_SPECS,
+    Benchmark,
     Metric,
     is_metric_excluded,
 )
-from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.scenarios import headline_dataset
 
 logger = structlog.get_logger("coval_bench.api")

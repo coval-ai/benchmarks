@@ -109,7 +109,8 @@ ACTIVE = BANK
 _BY_SLUG = {scenario.slug: scenario for scenario in SCENARIOS}
 
 # The scenario each board's headline reads, at its clean caller. Move a board to
-# another scenario here; the API serves the result as ``primary_dataset``.
+# another scenario here; the API serves the result as ``primary_dataset``. The
+# boards can differ: S2S reads the workflow set, the text board stays on bank.
 HEADLINE: dict[Benchmark, Scenario] = {
     Benchmark.S2S: _BY_SLUG["workflow-bank"],
     Benchmark.LLM: ACTIVE,
