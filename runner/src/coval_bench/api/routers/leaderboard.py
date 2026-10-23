@@ -59,13 +59,12 @@ _VALID_COMBOS: set[tuple[str, str]] = {
     ("TTFT", "LLM"),
 }
 
-# The headline S2S board is the Ultra Bank instruction-following set, which every
-# S2S agent runs daily. Dental and the multi-turn set are frozen rather than
-# retired: nothing writes to them, but they stay reachable through the aggregates
-# ``dataset`` param, as does ``__all__`` for callers that want every S2S condition
-# pooled. LLM runs the same bank scenario over text.
+# Each board's headline dataset comes from ``scenarios.HEADLINE``. Every other
+# dataset (the still-fetched bank set, frozen dental and multi-turn) stays
+# reachable through the aggregates ``dataset`` param, as does ``__all__`` for
+# callers that want every S2S condition pooled.
 _PRIMARY_DATASET_BY_BENCHMARK = {
-    b.value: scenarios.ACTIVE.primary_dataset(b) for b in (Benchmark.S2S, Benchmark.LLM)
+    b.value: dataset for b in Benchmark if (dataset := scenarios.headline_dataset(b))
 }
 
 _LEADERBOARD_SQL = """

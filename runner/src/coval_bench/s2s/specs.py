@@ -171,7 +171,9 @@ def scenario_specs(settings: Settings) -> tuple[AgentSpec, ...]:
                     model=model,
                     test_set_id=ids.test_set_id,
                     family=scenario.family(Benchmark.S2S),
-                    publish_samples=adherence_metric is None,
+                    publish_samples=(
+                        adherence_metric is None or scenario is scenarios.HEADLINE[Benchmark.S2S]
+                    ),
                     instruction_metric_id_attr=(
                         None
                         if adherence_metric is not None

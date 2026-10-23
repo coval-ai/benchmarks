@@ -3012,7 +3012,7 @@ def _adherence_settings() -> Settings:
     )
 
 
-def test_adherence_scenarios_carry_their_own_judge_and_publish_no_samples() -> None:
+def test_adherence_judges_and_only_the_headline_publishes_samples() -> None:
     specs = {
         spec.family: spec
         for spec in s2s_specs(_adherence_settings())
@@ -3025,7 +3025,7 @@ def test_adherence_scenarios_carry_their_own_judge_and_publish_no_samples() -> N
     workflow = specs["s2s-workflow-bank"]
     assert workflow.metric_ids == {Metric.WORKFLOW_ADHERENCE: "WAM"}
     assert workflow.instruction_metric_id_attr is None
-    assert workflow.publish_samples is False
+    assert workflow.publish_samples is True
 
 
 def test_an_adherence_scenario_without_its_judge_is_skipped() -> None:

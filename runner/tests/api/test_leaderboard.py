@@ -115,12 +115,15 @@ async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any)
     assert [(e["provider"], e["model"]) for e in entries] == [("deepgram", "nova-3")]
 
 
-async def test_s2s_leaderboard_uses_the_bank_primary_dataset(
+async def test_s2s_leaderboard_uses_the_headline_dataset(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    """The headline S2S board is the Ultra Bank set; the frozen dental rows stay out."""
-    primary_run = await _insert_run(postgresql, dataset_id="s2s-bank-v1")
-    dental_run = await _insert_run(postgresql, dataset_id="s2s-dental-v1")
+    """The headline S2S board is the workflow set; the old bank and dental rows stay out."""
+    primary_run = await _insert_run(postgresql, dataset_id="s2s-workflow-bank-v1")
+    other_runs = {
+        dataset_id: await _insert_run(postgresql, dataset_id=dataset_id)
+        for dataset_id in ("s2s-bank-v1", "s2s-dental-v1")
+    }
     await _insert_value(
         postgresql,
         primary_run,
@@ -129,18 +132,19 @@ async def test_s2s_leaderboard_uses_the_bank_primary_dataset(
         model="gpt-realtime",
         metric_type="V2V",
         benchmark="S2S",
-        dataset_id="s2s-bank-v1",
+        dataset_id="s2s-workflow-bank-v1",
     )
-    await _insert_value(
-        postgresql,
-        dental_run,
-        900.0,
-        provider="google",
-        model="gemini-live",
-        metric_type="V2V",
-        benchmark="S2S",
-        dataset_id="s2s-dental-v1",
-    )
+    for dataset_id, run in other_runs.items():
+        await _insert_value(
+            postgresql,
+            run,
+            900.0,
+            provider="google",
+            model="gemini-live",
+            metric_type="V2V",
+            benchmark="S2S",
+            dataset_id=dataset_id,
+        )
     await _publish(postgresql)
 
     response = await client.get("/v1/leaderboard", params={"metric": "V2V", "benchmark": "S2S"})
