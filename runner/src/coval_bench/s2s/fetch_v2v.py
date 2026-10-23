@@ -694,7 +694,8 @@ def _run_fetch(
     configure_logging(level=settings.log_level)
     # A setup crash fails the whole job.
     try:
-        settings = with_scenario_map(settings)
+        if benchmark is Benchmark.S2S:
+            settings = with_scenario_map(settings)
         only_run_ids = frozenset(coval_run_ids) or None
         statuses = asyncio.run(
             fetch_and_write_v2v(

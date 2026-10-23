@@ -182,3 +182,22 @@ def test_missing_map_fails(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_uri_must_name_a_gcs_object() -> None:
     with pytest.raises(ValueError, match="not a gs://bucket/key URI"):
         with_scenario_map(Settings(_env_file=None, s2s_scenario_map_uri="gs://bucket-only"))
+
+
+def test_an_old_version_of_another_shape_is_ignored() -> None:
+    bank = {
+        "v1": {"schedules": {"clean": {"enabled": False}}, "agents": "pre-registry"},
+        "v2": _version(agents={"gpt-realtime": "A1"}),
+    }
+
+    fields = scenario_map_fields(_map(bank=bank))
+
+    assert fields["coval_s2s_scenarios"]["bank"].agents == {"gpt-realtime": "A1"}
+
+
+@pytest.mark.parametrize("bad", ['A1" OR agent_id="X', "A 1", ""])
+def test_ids_outside_coval_format_are_rejected(bad: str) -> None:
+    bank = {"v1": _version(agents={"gpt-realtime": bad})}
+
+    with pytest.raises(ValueError, match="pattern"):
+        scenario_map_fields(_map(bank=bank))

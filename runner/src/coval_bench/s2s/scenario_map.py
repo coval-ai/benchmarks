@@ -9,9 +9,9 @@ re-plan of the prod job that used to copy these ids into its environment.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
 
 from coval_bench import gcs
 from coval_bench.config import ScenarioCovalIds, Settings
@@ -25,13 +25,16 @@ _BANK_METRICS = {
 }
 _CLEAN_PERSONA_LABEL = "Clean Speech Baseline"
 
+# Coval ids go into run filters as agent_id="…", so quotes or spaces must never pass.
+_CovalId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]+$")]
+
 
 class _Ref(BaseModel, frozen=True):
-    id: str
+    id: _CovalId
 
 
 class _Agent(BaseModel, frozen=True):
-    id: str
+    id: _CovalId
     registry_model: str
 
 
@@ -39,27 +42,30 @@ class _Schedule(BaseModel, frozen=True):
     enabled: bool
 
 
-class _ScenarioVersion(BaseModel, frozen=True):
-    test_set_id: str
+class _Schedules(BaseModel, frozen=True):
+    schedules: dict[str, _Schedule]
+
+
+class _ScenarioVersion(_Schedules, frozen=True):
+    test_set_id: _CovalId
     agents: dict[str, _Agent]
     personas: dict[str, _Ref]
     judge: _Ref
-    metric_ids: dict[str, str]
-    schedules: dict[str, _Schedule]
+    metric_ids: dict[str, _CovalId]
 
 
 def _live_version(name: str, versions: object) -> _ScenarioVersion:
     """The scenario's newest version with an enabled schedule."""
     if not isinstance(versions, dict):
         raise ValueError(f"scenario map has no {name!r} scenario")
-    live: list[tuple[int, _ScenarioVersion]] = []
-    for version, assets in versions.items():
-        parsed = _ScenarioVersion.model_validate(assets)
-        if any(schedule.enabled for schedule in parsed.schedules.values()):
-            live.append((int(version.removeprefix("v")), parsed))
+    live = [
+        (int(version.removeprefix("v")), assets)
+        for version, assets in versions.items()
+        if any(s.enabled for s in _Schedules.model_validate(assets).schedules.values())
+    ]
     if not live:
         raise ValueError(f"scenario map has no {name!r} version with an enabled schedule")
-    return max(live, key=lambda pair: pair[0])[1]
+    return _ScenarioVersion.model_validate(max(live, key=lambda pair: pair[0])[1])
 
 
 def _scenario_ids(name: str, assets: _ScenarioVersion) -> ScenarioCovalIds:
@@ -91,8 +97,6 @@ def scenario_map_fields(raw: object) -> dict[str, Any]:
     missing = sorted(key for key in _BANK_METRICS.values() if not bank.metric_ids.get(key))
     if missing:
         raise ValueError(f"scenario map 'bank' has no metric id for {missing}")
-    if not bank.judge.id.strip():
-        raise ValueError("scenario map 'bank' has no judge id")
     clean_persona_id = bank.personas["clean"].id
     return {
         "coval_s2s_scenarios": scenarios,

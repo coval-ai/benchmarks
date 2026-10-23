@@ -117,25 +117,6 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def _seed_bank_scenario_from_legacy_fields(self) -> Settings:
-        legacy = {
-            "gpt-realtime": self.coval_s2s_bank_openai_agent_id,
-            "gpt-live-1": self.coval_s2s_bank_gpt_live_agent_id,
-            "gemini-live": self.coval_s2s_bank_gemini_agent_id,
-            "grok-voice-think-fast-2.0": self.coval_s2s_bank_xai_agent_id,
-            "stepaudio-3-realtime-preview": self.coval_s2s_bank_stepfun_agent_id,
-        }
-        agents = {model: (ident or "").strip() for model, ident in legacy.items()}
-        agents = {model: ident for model, ident in agents.items() if ident}
-        test_set_id = (self.coval_s2s_bank_test_set_id or "").strip()
-        if agents and test_set_id and "bank" not in self.coval_s2s_scenarios:
-            self.coval_s2s_scenarios = {
-                **self.coval_s2s_scenarios,
-                "bank": ScenarioCovalIds(test_set_id=test_set_id, agents=agents),
-            }
-        return self
-
-    @model_validator(mode="after")
     def _configured_scenarios_declare_their_personas(self) -> Settings:
         missing = sorted(
             slug
@@ -319,14 +300,6 @@ class Settings(BaseSettings):
     coval_s2s_bank_test_set_id: str | None = None
     coval_s2s_bank_instruction_metric_id: str | None = None
     coval_s2s_bank_persona_id: str | None = None
-    # Deprecated: the bank agents before ``coval_s2s_scenarios``. Still read so the
-    # runner and infra can deploy in either order; seeded into the bank scenario
-    # block when that block is absent. Drop once infra carries the block.
-    coval_s2s_bank_openai_agent_id: str | None = None
-    coval_s2s_bank_gpt_live_agent_id: str | None = None
-    coval_s2s_bank_gemini_agent_id: str | None = None
-    coval_s2s_bank_xai_agent_id: str | None = None
-    coval_s2s_bank_stepfun_agent_id: str | None = None
     # Scenario slug -> its Coval test set, the agent id per model and the persona
     # id per condition, e.g. {"bank": {"test_set_id": "…", "agents": {"gpt-realtime":
     # "…"}, "personas": {"clean": "…", "hard": "…"}}}. The slugs are

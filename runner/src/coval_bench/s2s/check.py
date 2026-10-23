@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 import click
 import httpx
+from google.api_core.exceptions import GoogleAPIError
+from google.auth.exceptions import GoogleAuthError
 
 from coval_bench.config import Settings
 from coval_bench.registries.benchmarks import Benchmark
@@ -121,6 +123,8 @@ def check_s2s(settings_file: str | None, window_hours: int | None) -> None:
         found, flags = asyncio.run(_check(with_scenario_map(Settings()), window_seconds))
     except httpx.HTTPError as exc:
         raise click.ClickException(f"the Coval request failed: {exc}") from exc
+    except (GoogleAPIError, GoogleAuthError) as exc:
+        raise click.ClickException(f"reading the scenario map failed: {exc}") from exc
     except (RuntimeError, ValueError) as exc:
         raise click.ClickException(f"the fetch would reject these settings: {exc}") from exc
     for row in found:
