@@ -54,10 +54,19 @@ class ZoomSTTProvider(WebSocketSTTProvider):
             additional_headers={"Authorization": f"Bearer {self._auth_token()}"},
         )
 
+    def _zoom_model(self) -> str:
+        # Registry ids are "scribe" and "scribe-pro"; Zoom's are zoom-scribe-en[-pro].
+        base, _, tier = self._model.partition("-")
+        return f"zoom-{base}-en" + (f"-{tier}" if tier else "")
+
     async def _open(self, ws: Any, tx: Transcription, sample_rate: int) -> None:
         await ws.send(
             json.dumps(
-                {"type": "session.update", "language": "en-US", "audio": {"format": "pcm16"}}
+                {
+                    "type": "session.update",
+                    "config": {"language": "en-US", "model": self._zoom_model()},
+                    "audio": {"format": "pcm16"},
+                }
             )
         )
 
