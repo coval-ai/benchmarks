@@ -71,6 +71,8 @@ from coval_bench.registries import (
     Metric,
     is_metric_excluded,
 )
+from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.scenarios import headline_dataset
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -322,6 +324,7 @@ async def get_results_aggregates(
         window=window,
         dataset=dataset_key,
         datasets=[r["dataset_id"] for r in dataset_rows],
+        primary_dataset=headline_dataset(Benchmark(benchmark)),
         model_stats=[
             _flag_thin(ModelStatEntry.model_validate(r), benchmark)
             for r in stat_rows
@@ -519,6 +522,7 @@ async def get_results_aggregates_by_dataset(
     response = AggregatesByDatasetResponse(
         benchmark=benchmark,
         window=window,
+        primary_dataset=headline_dataset(Benchmark(benchmark)),
         blocks=[
             DatasetAggregates(
                 dataset=dataset,

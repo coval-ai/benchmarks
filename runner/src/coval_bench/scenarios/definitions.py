@@ -97,11 +97,26 @@ _DETAILS: dict[str, dict[str, str]] = {
     "workflow-bank": {"label": "Ultra Bank · Workflow Adherence"},
 }
 
-# Every voice scenario, in board order; the first is the headline.
+# Every voice scenario, in board order.
 SCENARIOS: tuple[Scenario, ...] = tuple(
     Scenario(slug=slug, **_DETAILS[slug]) for slug in SCENARIO_SLUGS
 )
 BANK = SCENARIOS[0]
 
-# The headline board and the text board.
+# The text board, and the scenario whose Coval ids the fetch reads as the bank.
 ACTIVE = BANK
+
+_BY_SLUG = {scenario.slug: scenario for scenario in SCENARIOS}
+
+# The scenario each board's headline reads, at its clean caller. Move a board to
+# another scenario here; the API serves the result as ``primary_dataset``.
+HEADLINE: dict[Benchmark, Scenario] = {
+    Benchmark.S2S: _BY_SLUG["workflow-bank"],
+    Benchmark.LLM: ACTIVE,
+}
+
+
+def headline_dataset(benchmark: Benchmark) -> str | None:
+    """The dataset *benchmark*'s headline reads, or None for boards without one."""
+    scenario = HEADLINE.get(benchmark)
+    return scenario.primary_dataset(benchmark) if scenario else None

@@ -706,6 +706,17 @@ async def test_by_dataset_empty_db_returns_no_blocks(client: AsyncClient, postgr
     assert body["benchmark"] == "STT"
     assert body["window"] == "24h"
     assert body["blocks"] == []
+    assert body["primary_dataset"] is None
+
+
+@pytest.mark.parametrize("path", ["/v1/results/aggregates", "/v1/results/aggregates/by-dataset"])
+async def test_s2s_responses_name_the_headline_dataset(
+    client: AsyncClient, postgresql: Any, path: str
+) -> None:
+    await _publish(postgresql)
+    response = await client.get(path, params={"benchmark": "S2S"})
+    assert response.status_code == 200
+    assert response.json()["primary_dataset"] == "s2s-workflow-bank-v1"
 
 
 async def test_by_dataset_attaches_the_bound_persona(client: AsyncClient, postgresql: Any) -> None:

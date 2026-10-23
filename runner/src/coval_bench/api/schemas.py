@@ -238,13 +238,15 @@ class AggregatesResponse(BaseModel):
     Wraps and returns all our ModelStatEntry and SeriesPoint data for a time
     window. ``dataset`` echoes the dataset the blocks were computed over
     ('__all__' = pooled across datasets); ``datasets`` lists the dataset ids
-    with data in the window.
+    with data in the window. ``primary_dataset`` is the dataset the board's
+    headline reads; None for boards without one.
     """
 
     benchmark: BenchmarkLiteral
     window: WindowLiteral
     dataset: str
     datasets: list[str]
+    primary_dataset: str | None = None
     model_stats: list[ModelStatEntry]
     series: list[SeriesPoint]
     snapshot: DashboardSnapshot | None = None
@@ -330,11 +332,13 @@ class AggregatesByDatasetResponse(BaseModel):
     One block per dataset with data in the window, sorted by dataset id.
     Series are deliberately absent: per-dataset timelines would multiply the
     payload by the dataset count and nothing consumes them batched — the
-    single-dataset endpoint serves that long tail.
+    single-dataset endpoint serves that long tail. ``primary_dataset`` is the
+    dataset the board's headline reads; None for boards without one.
     """
 
     benchmark: BenchmarkLiteral
     window: WindowLiteral
+    primary_dataset: str | None = None
     blocks: list[DatasetAggregates]
     snapshot: DashboardSnapshot | None = None
 

@@ -18,6 +18,12 @@ def test_bank_scenario_names_one_dataset_per_benchmark() -> None:
     assert scenarios.ACTIVE.primary_dataset(Benchmark.LLM) == DATASET_ID_LLM_BANK
 
 
+def test_each_board_headline_reads_its_scenario_clean_dataset() -> None:
+    assert scenarios.headline_dataset(Benchmark.S2S) == "s2s-workflow-bank-v1"
+    assert scenarios.headline_dataset(Benchmark.LLM) == DATASET_ID_LLM_BANK
+    assert scenarios.headline_dataset(Benchmark.TTS) is None
+
+
 def test_only_text_runs_need_the_persona_setting() -> None:
     settings = Settings(coval_s2s_bank_test_set_id="T", coval_s2s_bank_instruction_metric_id="M")
     assert scenarios.ACTIVE.missing(settings, benchmark=Benchmark.S2S) == []
