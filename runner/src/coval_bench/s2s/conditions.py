@@ -282,12 +282,13 @@ CONDITIONS: dict[str, DatasetMetrics] = {
         for tier in TIERS
     },
     # Workflow runs replace the instruction tiers on the board, so they also carry
-    # latency and call length for every caller, the noisy tiers included.
+    # latency, interruption rate and call length for every caller, the noisy tiers
+    # included.
     **{
         _ingested_id(slug, condition): DatasetMetrics(
             required=metric,
             optional=(
-                frozenset({Metric.V2V, Metric.CALL_LENGTH})
+                frozenset({Metric.V2V, Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH})
                 if metric is Metric.WORKFLOW_ADHERENCE
                 else frozenset()
             ),
