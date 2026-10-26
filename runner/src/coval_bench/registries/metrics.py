@@ -373,6 +373,7 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
             # turn-final.
             ("zoom", "scribe"),
             ("zoom", "scribe-pro"),
+            ("zoom", "scribe-pro-v2.1"),
         }
     ),
     Metric.TTFS: frozenset(
@@ -393,6 +394,7 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
             # endpoint detection.
             ("zoom", "scribe"),
             ("zoom", "scribe-pro"),
+            ("zoom", "scribe-pro-v2.1"),
         }
     ),
 }
