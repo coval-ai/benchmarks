@@ -509,6 +509,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
                     "dialog-rsn-1": "b9",
                     "eleven_realtime_v1_mini": "b10",
                     "eleven_realtime_v1_max": "b11",
+                    "gemini-3.8-live-extended-thinking": "b12",
                 },
             )
         },
@@ -529,6 +530,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
         ("polyai", "dialog-rsn-1"),
         ("elevenlabs", "eleven_realtime_v1_mini"),
         ("elevenlabs", "eleven_realtime_v1_max"),
+        ("google", "gemini-3.8-live-extended-thinking"),
     }
 
 

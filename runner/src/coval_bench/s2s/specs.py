@@ -119,6 +119,7 @@ SCENARIO_MODELS: tuple[tuple[str, str], ...] = (
     ("openai", "gpt-live-1"),
     ("google", "gemini-live"),
     ("google", "gemini-3.8-live"),
+    ("google", "gemini-3.8-live-extended-thinking"),
     ("xai", "grok-voice-think-fast-2.0"),
     ("xai", "grok-voice-3.0"),
     ("stepfun", "stepaudio-3-realtime-preview"),
