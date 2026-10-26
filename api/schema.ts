@@ -810,7 +810,8 @@ export interface components {
          *     One block per dataset with data in the window, sorted by dataset id.
          *     Series are deliberately absent: per-dataset timelines would multiply the
          *     payload by the dataset count and nothing consumes them batched — the
-         *     single-dataset endpoint serves that long tail.
+         *     single-dataset endpoint serves that long tail. ``primary_dataset`` is the
+         *     dataset the board's headline reads; None for boards without one.
          */
         AggregatesByDatasetResponse: {
             /**
@@ -823,6 +824,8 @@ export interface components {
              * @enum {string}
              */
             window: "24h" | "7d" | "30d";
+            /** Primary Dataset */
+            primary_dataset?: string | null;
             /** Blocks */
             blocks: components["schemas"]["DatasetAggregates"][];
             snapshot?: components["schemas"]["DashboardSnapshot"] | null;
@@ -834,7 +837,8 @@ export interface components {
          *     Wraps and returns all our ModelStatEntry and SeriesPoint data for a time
          *     window. ``dataset`` echoes the dataset the blocks were computed over
          *     ('__all__' = pooled across datasets); ``datasets`` lists the dataset ids
-         *     with data in the window.
+         *     with data in the window. ``primary_dataset`` is the dataset the board's
+         *     headline reads; None for boards without one.
          */
         AggregatesResponse: {
             /**
@@ -851,6 +855,8 @@ export interface components {
             dataset: string;
             /** Datasets */
             datasets: string[];
+            /** Primary Dataset */
+            primary_dataset?: string | null;
             /** Model Stats */
             model_stats: components["schemas"]["ModelStatEntry"][];
             /** Series */
