@@ -90,3 +90,46 @@ jobs:
             echo "- Scanned: \`${IMAGE}@${DIGEST}\`"
             echo "- Fixable HIGH/CRITICAL findings: $(jq '[.runs[].results[]] | length' "trivy-${NAME}.sarif")"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  notify:
+    name: Notify Slack on failure
+    needs: scan
+    if: failure()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SCANNER_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Publish to alerts topic
+        env:
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          payload="$(jq -nc \
+            --arg repo "$REPO" \
+            --arg ref "$REF" \
+            --arg actor "$ACTOR" \
+            --arg run_url "$RUN_URL" \
+            '{
+              source: "github-actions",
+              workflow: "trivy.yml",
+              repo: $repo,
+              ref: $ref,
+              actor: $actor,
+              run_url: $run_url,
+              status: "failure",
+              summary: "Trivy scan of deployed images failed, check the run for findings"
+            }')"
+          gcloud pubsub topics publish alerts \
+            --message="$payload" \
+            --project=coval-benchmarks-prod
