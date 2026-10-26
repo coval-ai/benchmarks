@@ -14,8 +14,9 @@ import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.smallest import SmallestTTSProvider
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 # ---------------------------------------------------------------------------
 # Helpers

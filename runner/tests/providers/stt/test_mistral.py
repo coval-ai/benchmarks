@@ -21,7 +21,8 @@ from pydantic import SecretStr
 from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.mistral import MistralSTTProvider
-from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 _CONNECT = "coval_bench.providers.stt._streaming.ws_client.connect"
 _CREATED = {"type": "session.created", "session": {"request_id": "r1", "audio_format": None}}
@@ -218,7 +219,7 @@ async def test_mistral_websocket_connect_setup(audio_pcm_bytes: bytes) -> None:
     assert query.get("model") == ["voxtral-mini-transcribe-realtime-2602"]
     assert captured["additional_headers"].get("Authorization") == "Bearer test-key-mistral"
 
-    sent_json = [json.loads(msg) for msg in captured["ws"]._sent if isinstance(msg, str)]
+    sent_json = [json.loads(msg) for msg in captured["ws"].sent if isinstance(msg, str)]
     assert sent_json[0]["type"] == "session.update"
     assert sent_json[0]["session"]["audio_format"] == {
         "encoding": "pcm_s16le",

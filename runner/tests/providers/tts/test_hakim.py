@@ -12,8 +12,9 @@ import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.hakim import HakimTTSProvider
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 _MODEL = "hakim-fast-v1"
 _VOICE = "amelia-en-us"

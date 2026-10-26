@@ -16,7 +16,8 @@ import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.stt.smallest import SmallestSTTProvider
-from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 
 def make_provider() -> SmallestSTTProvider:

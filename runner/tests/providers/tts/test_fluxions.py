@@ -15,8 +15,9 @@ from pydantic import SecretStr
 from coval_bench.config import Settings
 from coval_bench.providers.tts import fluxions as fluxions_module
 from coval_bench.providers.tts.fluxions import FluxionsTTSProvider
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 _VOICE = "maeve"
 _VOICE_ID = "maeve.h8ff7e07da"

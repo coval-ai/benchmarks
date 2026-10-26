@@ -15,8 +15,9 @@ import pytest
 
 from coval_bench.config import Settings  # noqa: E402
 from coval_bench.providers.tts.hume import SAMPLE_RATE, HumeTTSProvider  # noqa: E402
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes  # noqa: E402
+from .conftest import make_pcm_bytes  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Happy path

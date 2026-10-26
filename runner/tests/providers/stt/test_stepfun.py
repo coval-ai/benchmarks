@@ -21,7 +21,8 @@ from pydantic import SecretStr
 
 from coval_bench.config import Settings
 from coval_bench.providers.stt.stepfun import StepfunSTTProvider
-from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 _CONNECT = "coval_bench.providers.stt._streaming.ws_client.connect"
 _MODEL = "stt-model-under-test"
@@ -69,7 +70,7 @@ async def test_stepfun_success_and_wire_shape(audio_pcm_bytes: bytes) -> None:
     assert captured["url"] == "wss://api.stepfun.ai/v1/realtime/asr/stream"
     assert captured["headers"] == {"Authorization": "Bearer test-key-stepfun"}
 
-    sent = [json.loads(m) for m in captured["ws"]._sent if isinstance(m, str)]
+    sent = [json.loads(m) for m in captured["ws"].sent if isinstance(m, str)]
     assert all(m["event_id"] for m in sent)
     assert sent[0]["type"] == "session.update"
     assert sent[0]["session"]["audio"]["input"] == {

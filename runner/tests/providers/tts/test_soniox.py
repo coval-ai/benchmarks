@@ -13,8 +13,9 @@ import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.soniox import _WS_URL, SonioxTTSProvider
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 
 def _audio_events(pcm_chunks: list[bytes]) -> list[str]:

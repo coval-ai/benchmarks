@@ -18,7 +18,8 @@ from coval_bench.config import Settings
 from coval_bench.providers.stt import cloudflare
 from coval_bench.providers.stt.cloudflare import CloudflareSTTProvider
 from coval_bench.registries.provider_keys import PROVIDER_ENV
-from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 _CONNECT = "coval_bench.providers.stt._streaming.ws_client.connect"
 _ACCOUNT = "acct-0123"

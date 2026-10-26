@@ -20,8 +20,9 @@ import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.atlas import SAMPLE_RATE, VALID_VOICES, AtlasTTSProvider
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 _MODEL = "atlas-tts"
 _VOICE = "capella"
@@ -133,10 +134,10 @@ async def test_ttfa_excludes_session_setup(fake_settings: Settings) -> None:
     clock = {"t": 1000.0}
     original_send = ws.send
 
-    async def send(data: str | bytes) -> None:
-        if isinstance(data, str) and json.loads(data).get("type") == "start":
+    async def send(msg: bytes | str) -> None:
+        if isinstance(msg, str) and json.loads(msg).get("type") == "start":
             clock["t"] += 5.0
-        await original_send(data)
+        await original_send(msg)
 
     ws.send = send  # type: ignore[method-assign]
 

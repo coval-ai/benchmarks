@@ -13,23 +13,17 @@ from __future__ import annotations
 import json
 import math
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.together import TogetherSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events, make_settings
+from tests.providers.fakes import FakeWebSocket, fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 _CHUNK_BYTES = int(16000 * 2 * 0.1)
-
-
-def _fake_ws_connect(ws: FakeWebSocket) -> Any:
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
 
 
 def _frames(sent: list[Any]) -> list[dict[str, Any]]:
@@ -39,7 +33,7 @@ def _frames(sent: list[Any]) -> list[dict[str, Any]]:
 async def _run(provider: TogetherSTTProvider, ws: FakeWebSocket, audio: bytes) -> Any:
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_ws_connect(ws),
+        return_value=fake_connect(ws),
     ):
         return await provider.measure_ttft(
             audio_data=audio, channels=1, sample_width=2, sample_rate=16000

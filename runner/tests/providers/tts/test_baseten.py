@@ -19,8 +19,9 @@ from coval_bench.providers.tts.baseten import (
     _WARMUP_TIMEOUT_S,
     BasetenTTSProvider,
 )
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 _WS_URL = "wss://model-test.api.baseten.co/environments/production/websocket"
 

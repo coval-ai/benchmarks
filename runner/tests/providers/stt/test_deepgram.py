@@ -11,14 +11,14 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.stt.deepgram import DeepgramProvider
+from tests.providers.fakes import FakeWebSocket, fake_connect
 from tests.providers.stt.conftest import (  # noqa: E402
-    FakeWebSocket,
     load_fixture_events,
     make_settings,
 )
@@ -30,15 +30,6 @@ from tests.providers.stt.conftest import (  # noqa: E402
 
 def make_provider(model: str = "nova-3") -> DeepgramProvider:
     return DeepgramProvider(make_settings(), model=model)
-
-
-def _fake_connect(events: list[Any]) -> Any:
-    """Return an async context manager that yields a FakeWebSocket."""
-    ws = FakeWebSocket(events)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +44,7 @@ async def test_deepgram_nova3_success(stt_settings: Settings, audio_pcm_bytes: b
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -87,7 +78,7 @@ async def test_deepgram_default_success(stt_settings: Settings, audio_pcm_bytes:
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -143,9 +134,7 @@ async def test_nova_sends_finalize_before_close(stt_settings: Settings) -> None:
         "channel": {"alternatives": [{"transcript": "hello"}]},
     }
     ws = FakeWebSocket([final], on_send=sent.append)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect(ws)
     provider = DeepgramProvider(stt_settings, model="nova-3")
 
     with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
@@ -222,9 +211,7 @@ class _ForceEndTurnWS:
 async def test_flux_force_end_turn_before_close(stt_settings: Settings) -> None:
     audio = b"\x01" * 640
     ws = _ForceEndTurnWS(audio_len=len(audio))
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect(ws)
     provider = DeepgramProvider(stt_settings, model="flux-general-en")
 
     with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
@@ -255,9 +242,7 @@ async def test_flux_force_end_turn_before_close(stt_settings: Settings) -> None:
 async def test_flux_requires_manual_end_of_turn(stt_settings: Settings) -> None:
     audio = b"\x01" * 640
     ws = _ForceEndTurnWS(audio_len=len(audio), trigger="model")
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect(ws)
     provider = DeepgramProvider(stt_settings, model="flux-general-en")
 
     with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
@@ -279,9 +264,7 @@ async def test_flux_requires_manual_end_of_turn(stt_settings: Settings) -> None:
 async def test_flux_warning_does_not_promote_partial(stt_settings: Settings) -> None:
     audio = b"\x01" * 640
     ws = _ForceEndTurnWS(audio_len=len(audio), warning_code="FORCE_END_TURN_NO_ACTIVE_TURN")
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect(ws)
     provider = DeepgramProvider(stt_settings, model="flux-general-en")
 
     with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
@@ -306,9 +289,7 @@ async def test_flux_warning_does_not_promote_partial(stt_settings: Settings) -> 
 async def test_flux_timeout_does_not_promote_partial(stt_settings: Settings) -> None:
     audio = b"\x01" * 640
     ws = _ForceEndTurnWS(audio_len=len(audio), emit_final=False)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect(ws)
     provider = DeepgramProvider(stt_settings, model="flux-general-en")
 
     with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
@@ -331,9 +312,7 @@ async def test_flux_timeout_does_not_promote_partial(stt_settings: Settings) -> 
 async def test_flux_empty_manual_final_uses_latest_update(stt_settings: Settings) -> None:
     audio = b"\x01" * 640
     ws = _ForceEndTurnWS(audio_len=len(audio), final_transcript="")
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect(ws)
     provider = DeepgramProvider(stt_settings, model="flux-general-en")
 
     with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
@@ -377,7 +356,7 @@ async def test_deepgram_empty_stream(stt_settings: Settings, audio_pcm_bytes: by
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect([]),
+        return_value=fake_connect([]),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -404,7 +383,7 @@ async def test_deepgram_error_event(stt_settings: Settings, audio_pcm_bytes: byt
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -448,7 +427,7 @@ async def test_deepgram_audio_to_final_populated(
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -488,7 +467,7 @@ async def test_deepgram_audio_to_final_none_when_no_final(
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -517,7 +496,7 @@ async def test_deepgram_audio_to_final_uses_last_final(
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -569,7 +548,7 @@ async def test_deepgram_default_audio_to_final(
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -596,7 +575,7 @@ async def test_deepgram_flux_success(stt_settings: Settings, audio_pcm_bytes: by
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -649,7 +628,7 @@ async def test_deepgram_flux_concatenates_multiple_turns(
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -674,7 +653,7 @@ async def test_deepgram_flux_audio_to_final_none_when_no_transcript(
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect([]),
+        return_value=fake_connect([]),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -700,7 +679,7 @@ async def test_deepgram_flux_multi_success(stt_settings: Settings, audio_pcm_byt
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -752,7 +731,7 @@ async def test_deepgram_keeps_isfinal_only_segments(
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -799,7 +778,7 @@ async def test_deepgram_includes_unfinalized_tail(
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,

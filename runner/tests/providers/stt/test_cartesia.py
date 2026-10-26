@@ -9,25 +9,18 @@ All tests use FakeWebSocket — no live network calls are made.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.stt.cartesia import CartesiaSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 
 def make_provider() -> CartesiaSTTProvider:
     return CartesiaSTTProvider(make_settings())
-
-
-def _fake_connect(events: list[Any], sent: list[Any] | None = None) -> Any:
-    ws = FakeWebSocket(events, on_send=(sent.append if sent is not None else None))
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +35,7 @@ async def test_cartesia_success(stt_settings: Settings, audio_pcm_bytes: bytes) 
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -73,7 +66,7 @@ async def test_cartesia_keeps_space_deltas(stt_settings: Settings, audio_pcm_byt
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -145,7 +138,7 @@ async def test_finalize_and_close_sent(stt_settings: Settings, audio_pcm_bytes: 
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events, sent=sent),
+        return_value=fake_connect(events, sent=sent),
     ):
         await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -168,7 +161,7 @@ async def test_finalize_and_close_sent(stt_settings: Settings, audio_pcm_bytes: 
 @pytest.mark.asyncio
 async def test_connect_url_and_auth(stt_settings: Settings, audio_pcm_bytes: bytes) -> None:
     events = load_fixture_events("cartesia", "events-success")
-    connect_mock = MagicMock(return_value=_fake_connect(events))
+    connect_mock = MagicMock(return_value=fake_connect(events))
     provider = CartesiaSTTProvider(stt_settings)
 
     with patch("coval_bench.providers.stt._streaming.ws_client.connect", connect_mock):
@@ -209,7 +202,7 @@ async def test_reads_text_field_not_transcript(
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -234,7 +227,7 @@ async def test_cartesia_empty_stream(stt_settings: Settings, audio_pcm_bytes: by
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect([]),
+        return_value=fake_connect([]),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -262,7 +255,7 @@ async def test_no_done_marker_terminates(stt_settings: Settings, audio_pcm_bytes
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -293,7 +286,7 @@ async def test_audio_to_final_none_on_partial_only(
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -324,7 +317,7 @@ async def test_error_event_sets_error(stt_settings: Settings, audio_pcm_bytes: b
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -345,7 +338,7 @@ async def test_malformed_frame_sets_error(stt_settings: Settings, audio_pcm_byte
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(["not-json{"]),
+        return_value=fake_connect(["not-json{"]),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,

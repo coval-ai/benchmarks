@@ -13,8 +13,9 @@ from pydantic import SecretStr
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.fishaudio import FishAudioTTSProvider
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 _VOICE = "9a9cf47702da476aa4629e2506d4a857"
 

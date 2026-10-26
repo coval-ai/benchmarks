@@ -23,7 +23,8 @@ from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.base import TranscriptionResult
 from coval_bench.providers.stt._streaming import Transcription
 from coval_bench.providers.stt.guava import GuavaSTTProvider, ws_url_from_base
-from tests.providers.stt.conftest import fake_connect, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import make_settings
 
 _BASE_URL = "https://guava.example.internal"
 

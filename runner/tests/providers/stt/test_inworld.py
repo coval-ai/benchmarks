@@ -14,7 +14,7 @@ from __future__ import annotations
 import base64
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from pydantic import SecretStr
@@ -22,12 +22,8 @@ from pydantic import SecretStr
 from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.inworld import InworldSTTProvider
-from tests.providers.stt.conftest import (
-    FakeWebSocket,
-    fake_connect,
-    load_fixture_events,
-    make_settings,
-)
+from tests.providers.fakes import FakeWebSocket, fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 
 def make_provider() -> InworldSTTProvider:
@@ -86,7 +82,7 @@ async def test_inworld_ends_stream_with_close_only(
         )
 
     assert result.error is None
-    control = [json.loads(m) for m in cm.ws._sent if "audioChunk" not in m][1:]
+    control = [json.loads(m) for m in cm.ws.sent if "audioChunk" not in m][1:]
     assert control == [{"closeStream": {}}]
 
 
@@ -171,7 +167,7 @@ async def test_inworld_clamps_chunk_duration(stt_settings: Settings, resolution:
 
     chunk_byte_lengths = [
         len(base64.b64decode(json.loads(msg)["audioChunk"]["content"]))
-        for msg in cm.ws._sent
+        for msg in cm.ws.sent
         if isinstance(msg, str) and "audioChunk" in msg
     ]
     assert sum(chunk_byte_lengths) == len(audio)
@@ -196,7 +192,7 @@ async def test_inworld_rebalances_sub_20ms_tail_chunk(stt_settings: Settings) ->
 
     chunk_byte_lengths = [
         len(base64.b64decode(json.loads(msg)["audioChunk"]["content"]))
-        for msg in cm.ws._sent
+        for msg in cm.ws.sent
         if isinstance(msg, str) and "audioChunk" in msg
     ]
     assert chunk_byte_lengths == [16000, 8160, 8160]
@@ -363,9 +359,7 @@ async def test_inworld_surfaces_send_failure(
             raise RuntimeError("send boom")
 
     ws = FakeWebSocket([], on_send=_raise_on_audio, server_closes=False)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect(ws)
 
     provider = InworldSTTProvider(stt_settings)
     with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):
