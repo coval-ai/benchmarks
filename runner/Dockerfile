@@ -54,7 +54,7 @@ LABEL org.opencontainers.image.source="https://github.com/coval-ai/benchmarks" \
       org.opencontainers.image.title="coval-bench-runner"
 
 # Runtime native libs for soundfile / ffmpeg-based codecs
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         libsndfile1 \
         ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
