@@ -15,8 +15,9 @@ from pydantic import SecretStr
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.deepdub import SAMPLE_RATE, DeepdubTTSProvider
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 _MODEL = "dd-etts-3.3"
 _VOICE = "f60bad7d-1667-42ff-8410-e60b71d0cc34"

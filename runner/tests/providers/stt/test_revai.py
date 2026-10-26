@@ -20,12 +20,8 @@ import pytest
 from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.revai import RevAISTTProvider
-from tests.providers.stt.conftest import (
-    FakeWebSocket,
-    fake_connect,
-    load_fixture_events,
-    make_settings,
-)
+from tests.providers.fakes import FakeWebSocket, fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 
 def make_provider() -> RevAISTTProvider:

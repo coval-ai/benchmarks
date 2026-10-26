@@ -7,15 +7,15 @@ from __future__ import annotations
 
 import json
 import struct
-from collections.abc import AsyncIterator
 from unittest.mock import patch
 
 import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.azure import AzureTTSProvider
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 _VOICE = "en-US-AvaNeural"
 
@@ -53,13 +53,10 @@ def _sent_text_frames(ws: FakeWebSocket) -> list[tuple[dict[str, str], str]]:
 class AbortingWebSocket(FakeWebSocket):
     """Yields its frames, then fails like an abnormally closed connection."""
 
-    def __aiter__(self) -> AsyncIterator[str | bytes]:
-        async def gen() -> AsyncIterator[str | bytes]:
-            for message in self._messages:
-                yield message
+    async def __anext__(self) -> str | bytes:
+        if not self.events:
             raise RuntimeError("connection closed: internal server error")
-
-        return gen()
+        return await super().__anext__()
 
 
 @pytest.mark.asyncio

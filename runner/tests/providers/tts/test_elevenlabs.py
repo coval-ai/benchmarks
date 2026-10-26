@@ -14,8 +14,9 @@ import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.elevenlabs import ElevenLabsTTSProvider
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 _MODEL = "eleven_v3_conversational"
 _FLASH_MODEL = "eleven_flash_v2_5"

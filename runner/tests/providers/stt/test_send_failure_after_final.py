@@ -17,6 +17,7 @@ from websockets.frames import Close
 from coval_bench.providers.base import TranscriptionResult
 from coval_bench.providers.stt import STT_PROVIDERS
 from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
+from tests.providers.fakes import fake_connect
 from tests.providers.stt.conftest import make_settings
 
 _PCM = b"\x01\x02" * 1600
@@ -41,14 +42,11 @@ async def _final_arrives(self: Any, ws: Any, tx: Transcription) -> None:
     tx.final("the first sentence", time.monotonic())
 
 
-def _connect() -> MagicMock:
+def _connect() -> Any:
     ws = MagicMock()
     ws.send = AsyncMock()
     ws.close = AsyncMock()
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
+    return fake_connect(ws)
 
 
 async def _measure(provider: WebSocketSTTProvider, send: Any) -> TranscriptionResult:

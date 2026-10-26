@@ -24,7 +24,8 @@ from coval_bench.providers.stt.azure import (
     _parse_message,
     _wav_header,
 )
-from tests.providers.stt.conftest import fake_connect, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import make_settings
 
 REGION = "eastus"
 

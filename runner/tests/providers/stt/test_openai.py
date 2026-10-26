@@ -12,7 +12,7 @@ import asyncio
 import base64
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -21,7 +21,8 @@ from pydantic import SecretStr
 from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.openai import OpenAISTTProvider
-from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 _CONNECT = "coval_bench.providers.stt._streaming.ws_client.connect"
 
@@ -36,13 +37,6 @@ async def _measure(provider: OpenAISTTProvider, audio: bytes, **overrides: Any) 
     }
     kwargs.update(overrides)
     return await provider.measure_ttft(**kwargs)
-
-
-def _cm(ws: Any) -> Any:
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
 
 
 @pytest.mark.asyncio
@@ -94,7 +88,7 @@ async def test_openai_single_connection_and_session_shape(audio_pcm_bytes: bytes
     assert conn["additional_headers"].get("Authorization") == "Bearer test-key-openai"
     assert "OpenAI-Beta" not in conn["additional_headers"]
 
-    sent = [json.loads(m) for m in conn["ws"]._sent if isinstance(m, str)]
+    sent = [json.loads(m) for m in conn["ws"].sent if isinstance(m, str)]
     session_update = sent[0]
     assert session_update["type"] == "session.update"
     assert session_update["session"]["audio"]["input"]["turn_detection"] is None
@@ -207,7 +201,7 @@ async def test_openai_send_failure_propagates_without_hang(
         [{"type": "session.updated", "session": {"type": "transcription"}}]
     )
 
-    with patch(_CONNECT, return_value=_cm(ws)):
+    with patch(_CONNECT, return_value=fake_connect(ws)):
         result = await asyncio.wait_for(_measure(provider, audio_pcm_bytes), timeout=2.0)
 
     assert result.error is not None
@@ -281,7 +275,7 @@ async def test_openai_transcription_failed_aborts_sender_without_hang(
         },
     )
 
-    with patch(_CONNECT, return_value=_cm(ws)):
+    with patch(_CONNECT, return_value=fake_connect(ws)):
         result = await asyncio.wait_for(_measure(provider, audio_pcm_bytes), timeout=2.0)
 
     assert result.error is not None
@@ -299,7 +293,7 @@ async def test_openai_session_ready_timeout_fires(
 
     with (
         patch("coval_bench.providers.stt.openai._READY_TIMEOUT_S", 0.05),
-        patch(_CONNECT, return_value=_cm(ws)),
+        patch(_CONNECT, return_value=fake_connect(ws)),
     ):
         result = await asyncio.wait_for(_measure(provider, audio_pcm_bytes), timeout=2.0)
 
@@ -338,7 +332,7 @@ async def test_openai_session_update_carries_model(
         result = await _measure(provider, audio_pcm_bytes)
 
     assert result.error is None
-    sent = [json.loads(m) for m in cm.ws._sent if isinstance(m, str)]
+    sent = [json.loads(m) for m in cm.ws.sent if isinstance(m, str)]
     transcription = sent[0]["session"]["audio"]["input"]["transcription"]
     assert transcription["model"] == "gpt-4o-transcribe"
 

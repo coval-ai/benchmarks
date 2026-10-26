@@ -14,8 +14,9 @@ from pydantic import SecretStr
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.palabra import PalabraTTSProvider
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 _MODEL = "palabra-tts-v1"
 _FEMALE = "36b6daf6-4792-4106-a0ad-0069f582e7f8"

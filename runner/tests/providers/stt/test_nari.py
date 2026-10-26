@@ -23,7 +23,8 @@ from pydantic import SecretStr
 
 from coval_bench.config import Settings
 from coval_bench.providers.stt.nari import NariSTTProvider
-from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 _CONNECT = "coval_bench.providers.stt._streaming.ws_client.connect"
 _CONFIGURED = {"type": "session.configured", "session": {"id": "s"}}
@@ -74,7 +75,7 @@ async def test_nari_success_and_wire_shape(audio_pcm_bytes: bytes) -> None:
     assert parse_qs(parsed.query) == {"intent": ["transcription"]}
     assert captured["headers"] == {"Authorization": "Bearer test-key-nari"}
 
-    sent = [json.loads(m) for m in captured["ws"]._sent if isinstance(m, str)]
+    sent = [json.loads(m) for m in captured["ws"].sent if isinstance(m, str)]
     assert sent[0] == {
         "type": "session.configure",
         "session": {"model": "qwen3-asr-fast", "language": "en", "turn_detection": None},

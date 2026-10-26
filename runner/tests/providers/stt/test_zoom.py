@@ -20,7 +20,8 @@ from pydantic import SecretStr
 
 from coval_bench.config import Settings
 from coval_bench.providers.stt.zoom import ZoomSTTProvider
-from tests.providers.stt.conftest import fake_connect, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import make_settings
 
 _TEST_SECRET = "test-secret-zoom-0000000000000000"  # noqa: S105 - not a real credential
 

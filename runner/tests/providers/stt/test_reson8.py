@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from pydantic import SecretStr
@@ -21,12 +21,8 @@ from pydantic import SecretStr
 from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.reson8 import Reson8STTProvider
-from tests.providers.stt.conftest import (
-    FakeWebSocket,
-    fake_connect,
-    load_fixture_events,
-    make_settings,
-)
+from tests.providers.fakes import FakeWebSocket, fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 
 def make_provider() -> Reson8STTProvider:
@@ -82,13 +78,6 @@ class FlushGatedWebSocket:
         if item is None:
             raise StopAsyncIteration
         return item
-
-
-def _gated_connect(ws: FlushGatedWebSocket) -> Any:
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
 
 
 async def _run(provider: Reson8STTProvider, ws_cm: Any, audio: bytes) -> Any:
@@ -210,8 +199,8 @@ async def test_reson8_flushes_after_audio(stt_settings: Settings, audio_pcm_byte
 
     await _run(Reson8STTProvider(stt_settings), cm, audio_pcm_bytes)
 
-    assert all(isinstance(frame, bytes) for frame in cm.ws._sent[:-1])
-    assert cm.ws._sent[-1] == '{"type": "flush_request", "id": "eos"}'
+    assert all(isinstance(frame, bytes) for frame in cm.ws.sent[:-1])
+    assert cm.ws.sent[-1] == '{"type": "flush_request", "id": "eos"}'
 
 
 def test_reson8_url_config(stt_settings: Settings) -> None:
@@ -382,9 +371,7 @@ async def test_reson8_surfaces_send_failure(stt_settings: Settings, audio_pcm_by
             raise RuntimeError("send boom")
 
     ws = FakeWebSocket([], on_send=_raise_on_audio)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect(ws)
 
     result = await _run(Reson8STTProvider(stt_settings), cm, audio_pcm_bytes)
 
@@ -411,7 +398,7 @@ async def test_reson8_tail_final_requires_the_flush(
         ],
     )
 
-    result = await _run(Reson8STTProvider(stt_settings), _gated_connect(ws), audio_pcm_bytes)
+    result = await _run(Reson8STTProvider(stt_settings), fake_connect(ws), audio_pcm_bytes)
 
     assert ws.flush_seen
     assert result.error is None
@@ -433,7 +420,7 @@ async def test_reson8_receive_failure_after_a_segment_final_fails_the_row(
         post_flush=[],
     )
 
-    result = await _run(Reson8STTProvider(stt_settings), _gated_connect(ws), audio_pcm_bytes)
+    result = await _run(Reson8STTProvider(stt_settings), fake_connect(ws), audio_pcm_bytes)
 
     assert result.error is not None
     assert "ws_closed_without_final_transcript" not in result.error

@@ -12,7 +12,6 @@ from __future__ import annotations
 import math
 import struct
 import wave as _wave
-from collections.abc import AsyncIterator, Sequence
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -66,56 +65,6 @@ SAMPLE_TEXT = "Hello, this is a test of the text-to-speech system."
 def sample_text() -> str:
     """Short TTS test sentence."""
     return SAMPLE_TEXT
-
-
-# ---------------------------------------------------------------------------
-# FakeWebSocket — reusable across the WebSocket-based TTS provider tests
-# ---------------------------------------------------------------------------
-
-
-class FakeWebSocket:
-    """Minimal async context-manager fake for websockets.connect()."""
-
-    def __init__(self, messages: Sequence[str | bytes]) -> None:
-        self._messages = list(messages)
-        self._idx = 0
-        self.sent: list[str | bytes] = []
-
-    async def send(self, data: str | bytes) -> None:
-        self.sent.append(data)
-
-    async def recv(self) -> str | bytes:
-        if self._idx < len(self._messages):
-            msg = self._messages[self._idx]
-            self._idx += 1
-            return msg
-        raise StopAsyncIteration
-
-    def __aiter__(self) -> AsyncIterator[str | bytes]:
-        return _AsyncFakeWebSocketIter(self)
-
-    async def __aenter__(self) -> FakeWebSocket:
-        return self
-
-    async def __aexit__(self, *_: object) -> None:
-        pass
-
-
-class _AsyncFakeWebSocketIter:
-    """Async iterator over remaining FakeWebSocket messages (shares recv() index)."""
-
-    def __init__(self, ws: FakeWebSocket) -> None:
-        self._ws = ws
-
-    def __aiter__(self) -> _AsyncFakeWebSocketIter:
-        return self
-
-    async def __anext__(self) -> str | bytes:
-        if self._ws._idx >= len(self._ws._messages):
-            raise StopAsyncIteration
-        msg = self._ws._messages[self._ws._idx]
-        self._ws._idx += 1
-        return msg
 
 
 # ---------------------------------------------------------------------------

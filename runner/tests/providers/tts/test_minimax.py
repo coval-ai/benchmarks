@@ -13,8 +13,9 @@ from pydantic import SecretStr
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.minimax import MinimaxTTSProvider
+from tests.providers.fakes import FakeWebSocket
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 _VOICE = "English_expressive_narrator"
 

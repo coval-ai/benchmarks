@@ -24,7 +24,8 @@ import pytest
 from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.gemini import GeminiSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, fake_connect, load_fixture_events
+from tests.providers.fakes import FakeWebSocket, fake_connect
+from tests.providers.stt.conftest import load_fixture_events
 
 _CONNECT = "coval_bench.providers.stt._streaming.ws_client.connect"
 
@@ -61,11 +62,11 @@ async def test_gemini_success(stt_settings: Settings, audio_pcm_bytes: bytes) ->
     wer = compute_wer("hello world how are you", result.complete_transcript)
     assert wer.wer_percentage == pytest.approx(0.0)
 
-    setup = json.loads(ws._sent[0])["setup"]
+    setup = json.loads(ws.sent[0])["setup"]
     assert setup["model"] == "models/gemini-3.5-transcribe-live"
     # SMART mode cleans disfluencies, which would skew WER against verbatim references.
     assert setup["inputAudioTranscription"]["mode"] == "VERBATIM"
-    assert json.loads(ws._sent[-1]) == {"realtimeInput": {"audioStreamEnd": True}}
+    assert json.loads(ws.sent[-1]) == {"realtimeInput": {"audioStreamEnd": True}}
 
 
 @pytest.mark.asyncio

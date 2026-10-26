@@ -21,7 +21,8 @@ from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.base import TranscriptionResult
 from coval_bench.providers.stt.xai import XaiSTTProvider, _XaiTranscription
-from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 _CONNECT = "coval_bench.providers.stt._streaming.ws_client.connect"
 
@@ -370,8 +371,8 @@ async def test_xai_websocket_connect_setup(audio_pcm_bytes: bytes) -> None:
     assert query.get("filler_words") == ["true"]
     assert captured["additional_headers"].get("Authorization") == "Bearer test-key-xai"
 
-    sent_binary = [msg for msg in captured["ws"]._sent if isinstance(msg, bytes)]
-    sent_json = [json.loads(msg) for msg in captured["ws"]._sent if isinstance(msg, str)]
+    sent_binary = [msg for msg in captured["ws"].sent if isinstance(msg, bytes)]
+    sent_json = [json.loads(msg) for msg in captured["ws"].sent if isinstance(msg, str)]
     assert sent_binary, "expected raw audio frames to be sent"
     assert sent_json, "expected at least one JSON control message to be sent"
     assert sent_json[-1]["type"] == "audio.done"
@@ -391,7 +392,7 @@ async def test_xai_force_finalize_closes_socket(
 
     assert result.error is None
     assert result.audio_to_final_seconds is not None
-    assert cm.ws._closed.is_set()
+    assert cm.ws.closed.is_set()
 
 
 def test_xai_provider_name() -> None:

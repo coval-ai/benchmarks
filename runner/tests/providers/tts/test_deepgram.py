@@ -6,23 +6,15 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from urllib.parse import urlparse
 
 import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.deepgram import SAMPLE_RATE, DeepgramTTSProvider
-from tests.providers.stt.conftest import FakeWebSocket
+from tests.providers.fakes import FakeWebSocket, fake_connect
 from tests.providers.tts.conftest import make_pcm_bytes
-
-
-def _fake_connect(ws: FakeWebSocket) -> Any:
-    """Return an async context manager that yields *ws* (matches ``websockets.connect``)."""
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
 
 
 def _speak_fixture_events(pcm_chunks: list[bytes]) -> list[Any]:
@@ -40,7 +32,7 @@ async def test_deepgram_happy_path(fake_settings: Settings) -> None:
 
     with patch(
         "coval_bench.providers.tts.deepgram.ws_client.connect",
-        return_value=_fake_connect(ws),
+        return_value=fake_connect(ws),
     ):
         result = await provider.synthesize("Hello from Deepgram")
 
@@ -53,7 +45,7 @@ async def test_deepgram_happy_path(fake_settings: Settings) -> None:
     assert result.provider == "deepgram"
     assert result.model == "aura-2-thalia-en"
 
-    sent_strs = [s.decode() if isinstance(s, bytes) else s for s in ws._sent]
+    sent_strs = [s.decode() if isinstance(s, bytes) else s for s in ws.sent]
     assert any('"type": "Speak"' in s for s in sent_strs)
     assert any('"type": "Flush"' in s for s in sent_strs)
 
@@ -106,9 +98,7 @@ async def test_deepgram_network_error(fake_settings: Settings) -> None:
         async def __anext__(self) -> bytes:
             raise StopAsyncIteration
 
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=_BadWs())
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect(_BadWs())
 
     with patch("coval_bench.providers.tts.deepgram.ws_client.connect", return_value=cm):
         result = await provider.synthesize("error test")
@@ -127,7 +117,7 @@ async def test_deepgram_no_audio_chunks(fake_settings: Settings) -> None:
 
     with patch(
         "coval_bench.providers.tts.deepgram.ws_client.connect",
-        return_value=_fake_connect(ws),
+        return_value=fake_connect(ws),
     ):
         result = await provider.synthesize("silent test")
 
@@ -146,7 +136,7 @@ async def test_deepgram_voice_selects_the_speaker(fake_settings: Settings) -> No
 
     def _capture(url: str, **_kwargs: object) -> Any:
         captured["url"] = url
-        return _fake_connect(ws)
+        return fake_connect(ws)
 
     with patch("coval_bench.providers.tts.deepgram.ws_client.connect", side_effect=_capture):
         result = await provider.synthesize("Hello from Orion")
@@ -184,7 +174,7 @@ async def test_deepgram_warning_then_pcm(fake_settings: Settings) -> None:
 
     with patch(
         "coval_bench.providers.tts.deepgram.ws_client.connect",
-        return_value=_fake_connect(ws),
+        return_value=fake_connect(ws),
     ):
         result = await provider.synthesize("Hi")
 
@@ -213,7 +203,7 @@ async def test_synthesize_wav_contains_riff(fake_settings: Settings) -> None:
 
     def _capture(url: str, **_kwargs: object) -> Any:
         captured["url"] = url
-        return _fake_connect(ws)
+        return fake_connect(ws)
 
     with patch("coval_bench.providers.tts.deepgram.ws_client.connect", side_effect=_capture):
         result = await provider.synthesize("Hello world")
@@ -259,7 +249,7 @@ async def test_deepgram_flux_happy_path(fake_settings: Settings) -> None:
 
     def _capture(url: str, **_kwargs: object) -> Any:
         captured["url"] = url
-        return _fake_connect(ws)
+        return fake_connect(ws)
 
     with patch("coval_bench.providers.tts.deepgram.ws_client.connect", side_effect=_capture):
         result = await provider.synthesize("Hello from Flux")
@@ -281,7 +271,7 @@ async def test_deepgram_flux_happy_path(fake_settings: Settings) -> None:
     # Both PCM chunks made it into the WAV (44-byte header + payload).
     assert result.audio_path.stat().st_size == 44 + sum(len(c) for c in chunks)
 
-    sent_strs = [s.decode() if isinstance(s, bytes) else s for s in ws._sent]
+    sent_strs = [s.decode() if isinstance(s, bytes) else s for s in ws.sent]
     assert any('"type": "Speak"' in s for s in sent_strs)
     assert any('"type": "Flush"' in s for s in sent_strs)
 
@@ -300,7 +290,7 @@ async def test_deepgram_flux_error_event(fake_settings: Settings) -> None:
 
     with patch(
         "coval_bench.providers.tts.deepgram.ws_client.connect",
-        return_value=_fake_connect(ws),
+        return_value=fake_connect(ws),
     ):
         result = await provider.synthesize("error test")
 

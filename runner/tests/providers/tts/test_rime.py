@@ -8,26 +8,20 @@ from __future__ import annotations
 import base64
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.rime import _MODEL_SAMPLE_RATES, RimeTTSProvider
+from tests.providers.fakes import FakeWebSocket, fake_connect
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _fake_connect(ws: FakeWebSocket) -> Any:
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
 
 
 def _ws3_events(pcm_chunks: list[bytes]) -> list[str]:
@@ -54,7 +48,7 @@ async def test_rime_happy_path(fake_settings: Settings, model: str) -> None:
 
     with patch(
         "coval_bench.providers.tts.rime.ws_client.connect",
-        return_value=_fake_connect(ws),
+        return_value=fake_connect(ws),
     ):
         result = await provider.synthesize("Hello from Rime")
 
@@ -83,7 +77,7 @@ async def test_rime_sends_text_and_eos(fake_settings: Settings) -> None:
 
     with patch(
         "coval_bench.providers.tts.rime.ws_client.connect",
-        return_value=_fake_connect(ws),
+        return_value=fake_connect(ws),
     ):
         await provider.synthesize("test text")
 
@@ -102,7 +96,7 @@ async def test_rime_url_shape(fake_settings: Settings) -> None:
 
     def _capture(url: str, **_kwargs: object) -> Any:
         captured["url"] = url
-        return _fake_connect(ws)
+        return fake_connect(ws)
 
     provider = RimeTTSProvider(fake_settings, model="coda", voice="luna")
 
@@ -133,7 +127,7 @@ async def test_rime_url_model_id(fake_settings: Settings, model: str) -> None:
 
     def _capture(url: str, **_kwargs: object) -> Any:
         captured["url"] = url
-        return _fake_connect(ws)
+        return fake_connect(ws)
 
     provider = RimeTTSProvider(fake_settings, model=model, voice="luna")
 
@@ -154,7 +148,7 @@ async def test_rime_mistv3_uses_22050(fake_settings: Settings) -> None:
 
     def _capture(url: str, **_kwargs: object) -> Any:
         captured["url"] = url
-        return _fake_connect(ws)
+        return fake_connect(ws)
 
     provider = RimeTTSProvider(fake_settings, model="mistv3", voice="luna")
 
@@ -202,7 +196,7 @@ async def test_rime_timestamps_ignored(fake_settings: Settings) -> None:
 
     with patch(
         "coval_bench.providers.tts.rime.ws_client.connect",
-        return_value=_fake_connect(ws),
+        return_value=fake_connect(ws),
     ):
         result = await provider.synthesize("Hello")
 
@@ -229,7 +223,7 @@ async def test_rime_server_error_event(fake_settings: Settings) -> None:
 
     with patch(
         "coval_bench.providers.tts.rime.ws_client.connect",
-        return_value=_fake_connect(ws),
+        return_value=fake_connect(ws),
     ):
         result = await provider.synthesize("error test")
 
@@ -262,7 +256,7 @@ async def test_rime_empty_response(fake_settings: Settings) -> None:
 
     with patch(
         "coval_bench.providers.tts.rime.ws_client.connect",
-        return_value=_fake_connect(ws),
+        return_value=fake_connect(ws),
     ):
         result = await provider.synthesize("silent test")
 
@@ -289,7 +283,7 @@ async def test_rime_ttfa_set_on_first_chunk_only(fake_settings: Settings) -> Non
     clock = iter([0.0, 0.1, 0.5, 0.9])
 
     with (
-        patch("coval_bench.providers.tts.rime.ws_client.connect", return_value=_fake_connect(ws)),
+        patch("coval_bench.providers.tts.rime.ws_client.connect", return_value=fake_connect(ws)),
         patch("coval_bench.providers.tts.rime.time.monotonic", side_effect=clock),
     ):
         result = await provider.synthesize("three chunks")
@@ -309,7 +303,7 @@ async def test_rime_auth_header(fake_settings: Settings) -> None:
     def _capture(url: str, additional_headers: dict[str, str] | None = None, **_kw: object) -> Any:
         if additional_headers:
             captured.update(additional_headers)
-        return _fake_connect(ws)
+        return fake_connect(ws)
 
     provider = RimeTTSProvider(fake_settings, model="coda", voice="luna")
 
@@ -329,7 +323,7 @@ async def test_rime_empty_chunk_not_counted(fake_settings: Settings) -> None:
     ws = FakeWebSocket(events)
     provider = RimeTTSProvider(fake_settings, model="coda", voice="luna")
 
-    with patch("coval_bench.providers.tts.rime.ws_client.connect", return_value=_fake_connect(ws)):
+    with patch("coval_bench.providers.tts.rime.ws_client.connect", return_value=fake_connect(ws)):
         result = await provider.synthesize("test")
 
     assert result.error == ("provider closed the stream without sending audio or an error")
@@ -352,7 +346,7 @@ async def test_rime_voice_fallback(fake_settings: Settings) -> None:
 
     def _capture(url: str, **_kwargs: object) -> Any:
         captured["url"] = url
-        return _fake_connect(ws)
+        return fake_connect(ws)
 
     provider = RimeTTSProvider(fake_settings, model="coda", voice=None)
 

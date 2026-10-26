@@ -32,7 +32,8 @@ from coval_bench.providers.stt.baseten import (
     BasetenSTTProvider,
     endpoint_url,
 )
-from tests.providers.stt.conftest import fake_connect, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import make_settings
 
 _QWEN_MODEL = "qwen3-asr-1.7b"
 

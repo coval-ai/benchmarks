@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from pydantic import SecretStr
@@ -22,19 +22,12 @@ from pydantic import SecretStr
 from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.soniox import SonioxSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events, make_settings
+from tests.providers.fakes import FakeWebSocket, fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 
 def make_provider() -> SonioxSTTProvider:
     return SonioxSTTProvider(make_settings(soniox_api_key=SecretStr("test-key-soniox")))
-
-
-def _fake_connect(events: list[Any]) -> Any:
-    ws = FakeWebSocket(events)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +42,7 @@ async def test_soniox_success(stt_settings: Settings, audio_pcm_bytes: bytes) ->
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -74,9 +67,7 @@ async def test_soniox_success(stt_settings: Settings, audio_pcm_bytes: bytes) ->
 async def test_soniox_authenticates_with_header(audio_pcm_bytes: bytes) -> None:
     sent: list[object] = []
     ws = FakeWebSocket([{"finished": True}], on_send=sent.append)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect(ws)
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm
@@ -116,7 +107,7 @@ async def test_soniox_excludes_interim_tokens(
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -144,7 +135,7 @@ async def test_soniox_keeps_space_tokens(stt_settings: Settings, audio_pcm_bytes
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -237,7 +228,7 @@ async def test_soniox_error_event(stt_settings: Settings, audio_pcm_bytes: bytes
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=fake_connect(events),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -263,7 +254,7 @@ async def test_soniox_empty_stream(stt_settings: Settings, audio_pcm_bytes: byte
 
     with patch(
         "coval_bench.providers.stt._streaming.ws_client.connect",
-        return_value=_fake_connect([]),
+        return_value=fake_connect([]),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -314,9 +305,7 @@ async def test_soniox_surfaces_send_failure(stt_settings: Settings, audio_pcm_by
             raise RuntimeError("send boom")
 
     ws = FakeWebSocket([], on_send=_raise_on_audio)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect(ws)
 
     provider = SonioxSTTProvider(stt_settings)
     with patch("coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm):

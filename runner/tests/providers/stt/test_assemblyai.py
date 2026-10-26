@@ -15,7 +15,8 @@ import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.stt.assemblyai import AssemblyAIProvider
-from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 # A synthetic Pro id: the tests pin the id-to-wire rule, not any registry entry.
 PRO_MODEL = "universal-1.2-pro"

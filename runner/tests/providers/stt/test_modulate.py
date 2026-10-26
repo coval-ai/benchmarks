@@ -19,7 +19,8 @@ import pytest
 from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.modulate import ModulateSTTProvider
-from tests.providers.stt.conftest import fake_connect, load_fixture_events, make_settings
+from tests.providers.fakes import fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 _MULTILINGUAL = "velma-2-stt-streaming"
 
@@ -308,7 +309,7 @@ async def test_modulate_surfaces_send_failure(
     stt_settings: Settings, audio_pcm_bytes: bytes
 ) -> None:
     """A send failure inside the streaming task is surfaced, not swallowed by gather."""
-    from tests.providers.stt.conftest import FakeWebSocket
+    from tests.providers.fakes import FakeWebSocket
 
     def _raise_on_audio(msg: object) -> None:
         if isinstance(msg, (bytes, bytearray)):

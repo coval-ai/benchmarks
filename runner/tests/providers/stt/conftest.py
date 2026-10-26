@@ -21,7 +21,7 @@ wave at 16 kHz mono PCM_16 (~96 KB).  Regenerate with::
 ``FakeWebSocket`` pattern
 -------------------------
 Each WS-based provider test patches ``websockets.asyncio.client.connect`` with a
-``FakeWebSocket`` that replays JSON events loaded from
+``FakeWebSocket`` (``tests/providers/fakes.py``) that replays JSON events loaded from
 ``fixtures/<provider>/events-*.json``.  No real sockets are opened.
 ``pytest-socket`` is configured in ``pyproject.toml`` dev deps and should be
 used with ``--disable-socket --allow-unix-socket`` in CI to enforce this.
@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -48,91 +47,6 @@ from coval_bench.providers.stt._streaming import WebSocketSTTProvider
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 AUDIO_FIXTURE = FIXTURES_DIR / "audio" / "sample-16k-mono.wav"
-
-
-# ---------------------------------------------------------------------------
-# FakeWebSocket
-# ---------------------------------------------------------------------------
-
-
-class FakeWebSocket:
-    """Async context-manager WebSocket fake that replays JSON events from a list.
-
-    Each entry in *events* is either a ``dict`` (serialised to JSON) or a
-    ``str`` (sent verbatim).  ``bytes`` entries are forwarded as-is. With
-    ``server_closes=False`` the receive iterator blocks until the client closes,
-    modelling a server (e.g. Inworld) that keeps the socket open.
-    """
-
-    def __init__(
-        self,
-        events: list[dict[str, Any] | str | bytes],
-        on_send: Callable[[Any], None] | None = None,
-        *,
-        server_closes: bool = True,
-    ) -> None:
-        self._events: list[dict[str, Any] | str | bytes] = list(events)
-        self._on_send = on_send
-        self._server_closes = server_closes
-        self._closed = asyncio.Event()
-        self._sent: list[Any] = []
-
-    async def __aenter__(self) -> FakeWebSocket:
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        self._closed.set()
-
-    async def close(self) -> None:
-        self._closed.set()
-        self._events.clear()
-
-    async def send(self, msg: bytes | str) -> None:
-        if self._closed.is_set():
-            raise ConnectionError("send on a closed FakeWebSocket")
-        self._sent.append(msg)
-        if self._on_send is not None:
-            self._on_send(msg)
-
-    async def recv(self) -> str | bytes:
-        if not self._events:
-            raise StopAsyncIteration
-        evt = self._events.pop(0)
-        if isinstance(evt, dict):
-            return json.dumps(evt)
-        return evt
-
-    def __aiter__(self) -> AsyncFakeWebSocketIter:
-        return AsyncFakeWebSocketIter(self._events, self._closed, self._server_closes)
-
-
-class AsyncFakeWebSocketIter:
-    """Async iterator over the remaining events list."""
-
-    def __init__(
-        self,
-        events: list[dict[str, Any] | str | bytes],
-        closed: asyncio.Event,
-        server_closes: bool,
-    ) -> None:
-        self._events = events
-        self._closed = closed
-        self._server_closes = server_closes
-
-    def __aiter__(self) -> AsyncFakeWebSocketIter:
-        return self
-
-    async def __anext__(self) -> str | bytes:
-        while not self._events:
-            if self._server_closes or self._closed.is_set():
-                raise StopAsyncIteration
-            await self._closed.wait()
-        evt = self._events.pop(0)
-        if isinstance(evt, dict):
-            return json.dumps(evt)
-        if isinstance(evt, (str, bytes)):
-            return evt
-        raise StopAsyncIteration
 
 
 # ---------------------------------------------------------------------------
@@ -212,25 +126,6 @@ def stt_settings() -> Settings:
 @pytest.fixture
 def fake_api_key() -> SecretStr:
     return _TEST_KEY
-
-
-def fake_connect(
-    events: list[Any],
-    sent: list[Any] | None = None,
-    *,
-    server_closes: bool = True,
-) -> Any:
-    """A ``ws_client.connect`` stand-in: an async CM yielding a FakeWebSocket."""
-    from unittest.mock import AsyncMock, MagicMock
-
-    ws = FakeWebSocket(
-        events, on_send=(sent.append if sent is not None else None), server_closes=server_closes
-    )
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    cm.ws = ws
-    return cm
 
 
 @pytest.fixture

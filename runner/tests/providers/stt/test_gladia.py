@@ -20,21 +20,14 @@ import pytest
 from coval_bench.config import Settings
 from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.gladia import GladiaSTTProvider
-from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events, make_settings
+from tests.providers.fakes import FakeWebSocket, fake_connect
+from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 _WS_URL = "wss://api.gladia.io/v2/live/test-session"
 
 
 def make_provider() -> GladiaSTTProvider:
     return GladiaSTTProvider(make_settings())
-
-
-def _fake_ws_connect(events: list[Any]) -> Any:
-    ws = FakeWebSocket(events)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return cm
 
 
 def _fake_http_client(response: httpx.Response) -> Any:
@@ -66,7 +59,7 @@ async def test_gladia_success(stt_settings: Settings, audio_pcm_bytes: bytes) ->
         ),
         patch(
             "coval_bench.providers.stt._streaming.ws_client.connect",
-            return_value=_fake_ws_connect(events),
+            return_value=fake_connect(events),
         ),
     ):
         result = await provider.measure_ttft(
@@ -105,7 +98,7 @@ async def test_gladia_partials_only_falls_back_to_longest(
         ),
         patch(
             "coval_bench.providers.stt._streaming.ws_client.connect",
-            return_value=_fake_ws_connect(events),
+            return_value=fake_connect(events),
         ),
     ):
         result = await provider.measure_ttft(
@@ -189,7 +182,7 @@ async def test_gladia_error_event(stt_settings: Settings, audio_pcm_bytes: bytes
         ),
         patch(
             "coval_bench.providers.stt._streaming.ws_client.connect",
-            return_value=_fake_ws_connect(events),
+            return_value=fake_connect(events),
         ),
     ):
         result = await provider.measure_ttft(
@@ -211,9 +204,7 @@ async def test_gladia_cancels_sender_when_receiver_errors(
     """A receiver error cancels the still-streaming sender instead of draining it."""
     sent: list[Any] = []
     ws = FakeWebSocket(load_fixture_events("gladia", "events-error"), on_send=sent.append)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = fake_connect(ws)
     provider = GladiaSTTProvider(stt_settings)
 
     with (
@@ -250,7 +241,7 @@ async def test_gladia_empty_stream(stt_settings: Settings, audio_pcm_bytes: byte
         ),
         patch(
             "coval_bench.providers.stt._streaming.ws_client.connect",
-            return_value=_fake_ws_connect([]),
+            return_value=fake_connect([]),
         ),
     ):
         result = await provider.measure_ttft(
