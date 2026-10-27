@@ -85,6 +85,7 @@ _STT_KEY_FIELDS = (
     "gradium_api_key",
     "guava_api_key",
     "inworld_api_key",
+    "krisp_api_key",
     "meta_api_key",
     "mistral_api_key",
     "modulate_api_key",
