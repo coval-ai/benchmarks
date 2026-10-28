@@ -194,6 +194,7 @@ class Settings(BaseSettings):
     zoom_api_key: SecretStr | None = None
     zoom_api_secret: SecretStr | None = None
     meta_api_key: SecretStr | None = None
+    krisp_api_key: SecretStr | None = None
 
     # Azure region hosting the Speech resource (e.g. "eastus"). Determines the
     # region-scoped WebSocket host; required only when the Azure STT provider runs.
