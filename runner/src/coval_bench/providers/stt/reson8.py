@@ -24,6 +24,8 @@ _WS_HOST = "wss://api.reson8.dev"
 # Same model behind a US East edge; the row id carries the routing.
 _GLOBAL_WS_HOST = "wss://api.global.reson8.dev"
 _GLOBAL_SUFFIX = "-global"
+# Row id for the vendor default: the server rejects it as an explicit ``model``.
+_DEFAULT_MODEL = "realtime"
 
 # Pinned rather than auto-detected: the docs note detection is weaker on short
 # utterances, and the STT corpus is English.
@@ -76,11 +78,13 @@ class Reson8STTProvider(WebSocketSTTProvider):
     _PARTIAL_FALLBACK = "longest"
     _NO_FINAL_ERROR = "ws_closed_without_final_transcript"
 
-    def __init__(self, settings: Settings, model: str = "realtime") -> None:
+    def __init__(self, settings: Settings, model: str = _DEFAULT_MODEL) -> None:
         super().__init__(settings, model)
         self._api_key = self._require_secret("reson8_api_key")
         host = _GLOBAL_WS_HOST if model.endswith(_GLOBAL_SUFFIX) else _WS_HOST
         self._ws_base = host + _WS_PATH
+        vendor_model = model.removesuffix(_GLOBAL_SUFFIX)
+        self._vendor_model = None if vendor_model == _DEFAULT_MODEL else vendor_model
 
     @property
     def name(self) -> str:
@@ -100,6 +104,8 @@ class Reson8STTProvider(WebSocketSTTProvider):
             # Without this the server returns finals only, and no ``is_final`` flag.
             "include_interim": "true",
         }
+        if self._vendor_model is not None:
+            params["model"] = self._vendor_model
         return f"{self._ws_base}?{urlencode(params)}"
 
     def _headers(self) -> dict[str, str]:

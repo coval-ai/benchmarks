@@ -212,12 +212,29 @@ def test_reson8_url_config(stt_settings: Settings) -> None:
     assert "channels=1" in url
     assert "language=en" in url
     assert "include_interim=true" in url
+    assert "model=" not in url
 
 
 def test_reson8_global_model_routes_to_global_host(stt_settings: Settings) -> None:
     url = Reson8STTProvider(stt_settings, model="realtime-global")._ws_url(16000)
 
     assert url.startswith("wss://api.global.reson8.dev/v1/speech-to-text/realtime?")
+    assert "model=" not in url
+
+
+def test_reson8_named_model_is_forwarded(stt_settings: Settings) -> None:
+    url = Reson8STTProvider(stt_settings, model="rumble-2")._ws_url(16000)
+
+    assert url.startswith("wss://api.reson8.dev/")
+    assert "model=rumble-2" in url
+
+
+def test_reson8_named_global_model_strips_routing_suffix(stt_settings: Settings) -> None:
+    url = Reson8STTProvider(stt_settings, model="rumble-2-global")._ws_url(16000)
+
+    assert url.startswith("wss://api.global.reson8.dev/")
+    assert "model=rumble-2" in url
+    assert "model=rumble-2-global" not in url
 
 
 def test_reson8_url_omits_credentials(stt_settings: Settings) -> None:
