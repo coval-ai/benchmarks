@@ -511,6 +511,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
                     "eleven_realtime_v1_max": "b11",
                     "gemini-3.8-live-extended-thinking": "b12",
                     "prism": "b13",
+                    "phonic-1": "b14",
                 },
             )
         },
@@ -533,6 +534,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
         ("elevenlabs", "eleven_realtime_v1_max"),
         ("google", "gemini-3.8-live-extended-thinking"),
         ("rime", "prism"),
+        ("phonic", "phonic-1"),
     }
 
 
