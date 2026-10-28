@@ -23,7 +23,7 @@ import time
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Query
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -33,6 +33,7 @@ from coval_bench.config import Settings
 from coval_bench.db.mock_tool_store import record_call
 from coval_bench.mocktools.codecs import Codec, codec_for
 from coval_bench.mocktools.dispatch import Dispatcher
+from coval_bench.mocktools.scoring import schedule_scoring
 from coval_bench.mocktools.traces import schedule_export
 
 logger = structlog.get_logger("coval_bench.mocktools")
@@ -59,8 +60,8 @@ def require_mock_secret(
         raise HTTPException(401, f"a valid {SECRET_HEADER} is required")
 
 
-def get_dispatcher(request: Request) -> Dispatcher:
-    """The dispatcher the lifespan built, or 503.
+def get_dispatcher(request: Request, suite: str | None = Query(default=None)) -> Dispatcher:
+    """The dispatcher the lifespan built for ``?suite=``, or the default suite's; else 503.
 
     Deliberately does not build one here. Loading the fixtures can mean a call
     out to object storage, and a service that failed to load them at startup will
@@ -68,6 +69,12 @@ def get_dispatcher(request: Request) -> Dispatcher:
     trip in front of every tool call, in the middle of a live conversation, and a
     miss is not something a cache prevents. Startup has already logged why.
     """
+    if suite is not None:
+        suites: dict[str, Dispatcher] = getattr(request.app.state, "mock_suites", {})
+        named = suites.get(suite)
+        if named is None:
+            raise HTTPException(404, f"mock tool suite {suite!r} is not loaded")
+        return named
     dispatcher: Dispatcher | None = getattr(request.app.state, "mock_dispatcher", None)
     if dispatcher is None:
         raise HTTPException(503, "mock tool fixtures are not loaded")
@@ -146,6 +153,18 @@ async def _answer(
                 started_ns=started_ns,
                 ended_ns=ended_ns,
             )
+            if dispatcher.checks:
+                schedule_scoring(
+                    api_key=settings.coval_api_key,
+                    api_base=settings.coval_api_base,
+                    provider=provider,
+                    simulation_id=correlation.simulation_id,
+                    platform=codec.name,
+                    checks=dispatcher.checks,
+                    calls=calls,
+                    started_ns=started_ns,
+                    ended_ns=ended_ns,
+                )
     else:
         logger.debug("mock_tool_spans_skipped", platform=codec.name, reason="no simulation id")
 

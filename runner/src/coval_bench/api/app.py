@@ -66,7 +66,12 @@ from coval_bench.db.registry_store import fetch_models
 from coval_bench.fixture_sources import install_fixture_providers
 from coval_bench.llm.benchmark import llm_models, make_clients
 from coval_bench.logging import configure_logging
-from coval_bench.mocktools.dispatch import build_dispatcher
+from coval_bench.mocktools.dispatch import (
+    CORRAL_SUITES,
+    Dispatcher,
+    build_corral_dispatcher,
+    build_dispatcher,
+)
 from coval_bench.mocktools.traces import SERVICE_NAME as TRACE_SERVICE_NAME
 from coval_bench.mocktools.traces import drain as drain_mock_tool_exports
 from coval_bench.mocktools.traces import new_tracer_provider
@@ -142,6 +147,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError:
             app.state.mock_dispatcher = None
             logger.warning("mock_tools_fixtures_unusable", exc_info=True)
+        suites: dict[str, Dispatcher] = {}
+        if app.state.mock_dispatcher is not None:
+            suites[resolved.mock_tools_suite] = app.state.mock_dispatcher
+        for suite in CORRAL_SUITES:
+            try:
+                suites[suite] = build_corral_dispatcher(suite)
+            except (FileNotFoundError, NotADirectoryError, ValueError):
+                logger.warning("mock_tools_corral_suite_unusable", suite=suite, exc_info=True)
+        app.state.mock_suites = suites
         tracer_provider = new_tracer_provider(build_resource(resolved, TRACE_SERVICE_NAME))
         app.state.tracer_provider = tracer_provider
         try:

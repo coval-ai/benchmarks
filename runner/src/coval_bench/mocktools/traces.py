@@ -31,8 +31,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Coroutine, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from opentelemetry import trace
@@ -166,6 +166,58 @@ def build_spans(
     request.end(end_time=ended_ns)
     spans.append(_readable(request))
     return spans
+
+
+def build_check_span(
+    provider: TracerProvider,
+    name: str,
+    platform: str,
+    rates: Mapping[str, float],
+    test_case: str | None,
+    started_ns: int,
+    ended_ns: int,
+) -> ReadableSpan:
+    """One check's span, named after the check, one attribute per ``<tool>.<argument>``."""
+    attributes: dict[str, AttributeValue] = {"coval_bench.platform": platform, **rates}
+    if test_case:
+        attributes["coval_bench.test_case"] = test_case
+    span = provider.get_tracer(__name__).start_span(
+        name, start_time=started_ns, attributes=attributes
+    )
+    span.end(end_time=ended_ns)
+    return _readable(span)
+
+
+async def post_spans(
+    api_key: str, api_base: str, simulation_id: str, spans: Sequence[ReadableSpan]
+) -> SpanExportResult:
+    """Post spans to one simulation, sharing the concurrency cap with the tool-call copies."""
+    exporter: SpanExporter | None = None
+    try:
+        async with _exports:
+            exporter = coval_exporter(api_key, simulation_id, api_base)
+            return await asyncio.to_thread(export_spans, exporter, spans)
+    except asyncio.CancelledError:
+        if exporter is not None:
+            exporter.shutdown()
+        raise
+
+
+def queue(coroutine: Coroutine[Any, Any, None], *, simulation_id: str, platform: str) -> bool:
+    """Run an export off the request path, tracked so :func:`drain` waits for it."""
+    if len(_tasks) >= MAX_PENDING_EXPORTS:
+        coroutine.close()
+        logger.warning(
+            "mock_tool_spans_dropped",
+            simulation_id=simulation_id,
+            platform=platform,
+            pending=len(_tasks),
+        )
+        return False
+    task = asyncio.get_running_loop().create_task(coroutine)
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+    return True
 
 
 def export_spans(exporter: SpanExporter, spans: Sequence[ReadableSpan]) -> SpanExportResult:

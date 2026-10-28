@@ -21,11 +21,20 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from coval_bench.mocktools.fixtures import MockFixtures, parse_fixtures
+from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture, parse_fixtures
 from coval_bench.mocktools.resolver import Resolution, resolve
+from coval_bench.mocktools.tool_checks import CHARACTER_ERROR_RATE
 from coval_bench.scenarios import read_contract_file, read_private_fixture
 
 TOOL_DEFINITIONS_FILE = "tool-definitions.json"
+# A Corral scenario's tools: one fixed answer per tool, plus the checks on its arguments.
+CORRAL_TOOLS_FILE = "tools.json"
+# Suites answered from a Corral ``tools.json`` instead of private fixtures. A copy until the
+# scenario is published as an asset; then it is read from there.
+CORRAL_SUITES: tuple[str, ...] = ("id_roulette",)
+
+# An argument's right value: one string for every test case, or one per test case.
+Check = dict[str, str | dict[str, str]]
 
 # JSON Schema types the contract can declare, mapped to what the transport
 # actually delivers once the body is parsed.
@@ -116,16 +125,27 @@ def load_tool_specs(suite: str) -> dict[str, ToolSpec]:
 class Dispatcher:
     """Answers tool calls for one suite from one set of fixtures."""
 
-    def __init__(self, specs: dict[str, ToolSpec], fixtures: MockFixtures) -> None:
+    def __init__(
+        self,
+        specs: dict[str, ToolSpec],
+        fixtures: MockFixtures,
+        checks: dict[str, Check] | None = None,
+    ) -> None:
         """Bind fixtures to specs, refusing any disagreement between them."""
         _assert_fixtures_cover_contract(specs, fixtures)
         self._specs = specs
         self._fixtures = fixtures
+        self._checks = checks or {}
 
     @property
     def tools(self) -> frozenset[str]:
         """The tool names this dispatcher answers."""
         return frozenset(self._specs)
+
+    @property
+    def checks(self) -> dict[str, Check]:
+        """Each checked tool's right argument values; empty when nothing is checked."""
+        return self._checks
 
     def call(self, tool: str, args: dict[str, Any]) -> Outcome:
         """Answer one tool call. Never raises; every outcome is a recordable response."""
@@ -192,3 +212,45 @@ def build_dispatcher(suite: str) -> Dispatcher:
     ``ValueError`` where they disagree with the contract.
     """
     return Dispatcher(load_tool_specs(suite), parse_fixtures(read_private_fixture(suite)))
+
+
+def parse_corral_tools(raw: str | bytes) -> Dispatcher:
+    """A dispatcher for a Corral ``tools.json``: every tool answers its one fixed response.
+
+    Every argument is required, as Corral declares them. Per-test-case answers are refused,
+    because the service answers before it knows which test case is on the line.
+    """
+    document = json.loads(raw)
+    if document.get("test_cases"):
+        raise ValueError("per-test-case answers are not supported; each tool needs one answer")
+    responses: dict[str, Any] = document.get("responses") or {}
+    specs: dict[str, ToolSpec] = {}
+    fixtures: dict[str, ToolFixture] = {}
+    checks: dict[str, Check] = {}
+    for tool in document.get("tools") or []:
+        name = tool["name"]
+        parameters: dict[str, str] = tool.get("parameters") or {}
+        if name not in responses:
+            raise ValueError(f"tool {name!r} has no response")
+        check: Check = tool.get(CHARACTER_ERROR_RATE) or {}
+        if unknown := sorted(set(check) - set(parameters)):
+            raise ValueError(f"{name} checks arguments it does not take: {', '.join(unknown)}")
+        specs[name] = ToolSpec(
+            name=name,
+            properties=frozenset(parameters),
+            required=frozenset(parameters),
+            types=dict(parameters),
+        )
+        fixtures[name] = ToolFixture(fallback=Seed(id=f"{name}_fixed", response=responses[name]))
+        if check:
+            checks[name] = check
+    if extra := sorted(set(responses) - set(specs)):
+        raise ValueError(f"responses for tools that do not exist: {', '.join(extra)}")
+    if not specs:
+        raise ValueError("no tools declared")
+    return Dispatcher(specs, MockFixtures(tools=fixtures), checks)
+
+
+def build_corral_dispatcher(suite: str) -> Dispatcher:
+    """Build a Corral suite's dispatcher from its committed ``tools.json``."""
+    return parse_corral_tools(read_contract_file(suite, CORRAL_TOOLS_FILE))
