@@ -127,6 +127,7 @@ SCENARIO_MODELS: tuple[tuple[str, str], ...] = (
     ("polyai", "dialog-rsn-1"),
     ("elevenlabs", "eleven_realtime_v1_mini"),
     ("elevenlabs", "eleven_realtime_v1_max"),
+    ("rime", "prism"),
 )
 
 
