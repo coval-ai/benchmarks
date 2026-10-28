@@ -29,12 +29,11 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 # Provider voice slugs. Cloned (Arena) voices are addressed by their UUID instead.
 VALID_VOICES = (
-    "aai-isaiah-2",
-    "aai-eric-2",
+    "aai-isaiah",
+    "aai-eric",
     "aai-audrey",
-    "aai-emilia-2",
-    "aai-cameron-2",
-    "aai-eric-6",
+    "aai-emilia",
+    "aai-cameron",
     "aai-nancy",
     "aai-carrie",
 )
