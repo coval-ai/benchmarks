@@ -14,6 +14,7 @@ from coval_bench.mocktools.dispatch import (
     build_corral_dispatcher,
     parse_corral_tools,
 )
+from coval_bench.scenarios import PUBLIC_CONTRACT_FILES, public_contract_sha256
 
 
 def _tools(**overrides: object) -> str:
@@ -34,6 +35,11 @@ def _tools(**overrides: object) -> str:
 def test_every_corral_suite_loads_from_its_committed_file() -> None:
     for suite in CORRAL_SUITES:
         assert build_corral_dispatcher(suite).tools
+
+
+def test_the_tools_file_is_part_of_the_contract_hash() -> None:
+    assert "tools.json" in PUBLIC_CONTRACT_FILES
+    assert public_contract_sha256("id_roulette") != public_contract_sha256("no_such_suite")
 
 
 def test_id_roulette_answers_lookup_and_checks_its_value() -> None:
@@ -60,6 +66,41 @@ def test_a_check_on_an_argument_the_tool_does_not_take_is_refused() -> None:
     document = json.loads(_tools())
     document["tools"][0]["character_error_rate"] = {"other": "x"}
     with pytest.raises(ValueError, match="checks arguments it does not take"):
+        parse_corral_tools(json.dumps(document))
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        "not json",
+        json.dumps({"tools": {"lookup": {}}, "responses": {}}),
+        json.dumps({"tools": [{"parameters": {}}], "responses": {}}),
+        json.dumps({"tools": [{"name": "lookup"}], "responses": [{"received": True}]}),
+        json.dumps({"tools": [], "responses": {}}),
+        json.dumps(
+            {
+                "tools": [
+                    {
+                        "name": "lookup",
+                        "parameters": {"value": "string"},
+                        "character_error_rate": {"value": ["KD7B"]},
+                    }
+                ],
+                "responses": {"lookup": {}},
+            }
+        ),
+    ],
+    ids=["not-json", "tools-not-a-list", "nameless", "responses-a-list", "no-tools", "bad-check"],
+)
+def test_a_malformed_file_is_a_value_error_not_a_crash(document: str) -> None:
+    with pytest.raises(ValueError):
+        parse_corral_tools(document)
+
+
+def test_two_tools_with_one_name_are_refused() -> None:
+    document = json.loads(_tools())
+    document["tools"].append(document["tools"][0])
+    with pytest.raises(ValueError, match="two tools are named"):
         parse_corral_tools(json.dumps(document))
 
 

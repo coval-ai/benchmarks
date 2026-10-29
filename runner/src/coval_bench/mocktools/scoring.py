@@ -37,9 +37,11 @@ logger = structlog.get_logger("coval_bench.mocktools.scoring")
 
 TEST_CASE_ATTRIBUTE = "test_case"
 LOOKUP_TIMEOUT_S = 10.0
+MAX_CONCURRENT_LOOKUPS = 8
 MAX_REMEMBERED = 10_000
 
 _scored: OrderedDict[tuple[str, str], None] = OrderedDict()
+_lookups = asyncio.Semaphore(MAX_CONCURRENT_LOOKUPS)
 
 
 def claim_first_calls(
@@ -58,6 +60,12 @@ def claim_first_calls(
     return claimed
 
 
+def release(simulation_id: str, calls: Sequence[ToolCall]) -> None:
+    """Give back claims whose score never reached Coval, so a later call can be scored."""
+    for call in calls:
+        _scored.pop((simulation_id, call.tool), None)
+
+
 def right_values(check: Check, test_case: str | None) -> dict[str, str]:
     """Each checked argument's right value for this test case; per-case ones need a case."""
     values: dict[str, str] = {}
@@ -71,9 +79,12 @@ def right_values(check: Check, test_case: str | None) -> dict[str, str]:
 
 async def test_case_key(api_key: str, api_base: str, simulation_id: str) -> str | None:
     """The calling test case's ``test_case`` attribute in Coval, or None when it has none."""
-    async with httpx.AsyncClient(
-        base_url=api_base, headers={"X-API-Key": api_key}, timeout=LOOKUP_TIMEOUT_S
-    ) as client:
+    async with (
+        _lookups,
+        httpx.AsyncClient(
+            base_url=api_base, headers={"X-API-Key": api_key}, timeout=LOOKUP_TIMEOUT_S
+        ) as client,
+    ):
         response = await client.get(
             f"/simulations/{simulation_id}/attributes/{TEST_CASE_ATTRIBUTE}"
         )
@@ -120,8 +131,10 @@ async def _score(
         )
         result = await post_spans(api_key, api_base, simulation_id, [span])
     except asyncio.CancelledError:
+        release(simulation_id, calls)
         raise
     except Exception:
+        release(simulation_id, calls)
         logger.warning(
             "mock_tool_check_failed", simulation_id=simulation_id, platform=platform, exc_info=True
         )
@@ -131,6 +144,7 @@ async def _score(
             "mock_tool_check_exported", simulation_id=simulation_id, platform=platform, **rates
         )
     else:
+        release(simulation_id, calls)
         logger.warning("mock_tool_check_failed", simulation_id=simulation_id, platform=platform)
 
 
@@ -152,7 +166,7 @@ def schedule_scoring(
     claimed = claim_first_calls(simulation_id, calls, checks)
     if not claimed:
         return False
-    return queue(
+    queued = queue(
         _score(
             api_key.get_secret_value(),
             api_base,
@@ -166,4 +180,8 @@ def schedule_scoring(
         ),
         simulation_id=simulation_id,
         platform=platform,
+        count=len(claimed),
     )
+    if not queued:
+        release(simulation_id, claimed)
+    return queued

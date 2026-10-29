@@ -21,9 +21,10 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture, parse_fixtures
 from coval_bench.mocktools.resolver import Resolution, resolve
-from coval_bench.mocktools.tool_checks import CHARACTER_ERROR_RATE
 from coval_bench.scenarios import read_contract_file, read_private_fixture
 
 TOOL_DEFINITIONS_FILE = "tool-definitions.json"
@@ -214,40 +215,56 @@ def build_dispatcher(suite: str) -> Dispatcher:
     return Dispatcher(load_tool_specs(suite), parse_fixtures(read_private_fixture(suite)))
 
 
+class CorralTool(BaseModel, extra="forbid"):
+    """One tool in a Corral ``tools.json``; ``parameters`` maps each argument to its JSON type."""
+
+    name: str = Field(min_length=1)
+    description: str = ""
+    parameters: dict[str, str] = Field(default_factory=dict)
+    character_error_rate: Check = Field(default_factory=dict)
+
+
+class CorralToolsFile(BaseModel, extra="forbid"):
+    """A Corral ``tools.json``: the tools, each one's answer, and per-test-case overrides."""
+
+    tools: list[CorralTool] = Field(min_length=1)
+    responses: dict[str, dict[str, Any]]
+    test_cases: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
 def parse_corral_tools(raw: str | bytes) -> Dispatcher:
     """A dispatcher for a Corral ``tools.json``: every tool answers its one fixed response.
 
     Every argument is required, as Corral declares them. Per-test-case answers are refused,
-    because the service answers before it knows which test case is on the line.
+    because the service answers before it knows which test case is on the line. Any
+    malformed file raises ``ValueError``.
     """
-    document = json.loads(raw)
-    if document.get("test_cases"):
+    document = CorralToolsFile.model_validate_json(raw)
+    if document.test_cases:
         raise ValueError("per-test-case answers are not supported; each tool needs one answer")
-    responses: dict[str, Any] = document.get("responses") or {}
     specs: dict[str, ToolSpec] = {}
     fixtures: dict[str, ToolFixture] = {}
     checks: dict[str, Check] = {}
-    for tool in document.get("tools") or []:
-        name = tool["name"]
-        parameters: dict[str, str] = tool.get("parameters") or {}
-        if name not in responses:
-            raise ValueError(f"tool {name!r} has no response")
-        check: Check = tool.get(CHARACTER_ERROR_RATE) or {}
-        if unknown := sorted(set(check) - set(parameters)):
-            raise ValueError(f"{name} checks arguments it does not take: {', '.join(unknown)}")
-        specs[name] = ToolSpec(
-            name=name,
-            properties=frozenset(parameters),
-            required=frozenset(parameters),
-            types=dict(parameters),
+    for tool in document.tools:
+        if tool.name in specs:
+            raise ValueError(f"two tools are named {tool.name!r}")
+        if tool.name not in document.responses:
+            raise ValueError(f"tool {tool.name!r} has no response")
+        if unknown := sorted(set(tool.character_error_rate) - set(tool.parameters)):
+            raise ValueError(f"{tool.name} checks arguments it does not take: {', '.join(unknown)}")
+        specs[tool.name] = ToolSpec(
+            name=tool.name,
+            properties=frozenset(tool.parameters),
+            required=frozenset(tool.parameters),
+            types=dict(tool.parameters),
         )
-        fixtures[name] = ToolFixture(fallback=Seed(id=f"{name}_fixed", response=responses[name]))
-        if check:
-            checks[name] = check
-    if extra := sorted(set(responses) - set(specs)):
+        fixtures[tool.name] = ToolFixture(
+            fallback=Seed(id=f"{tool.name}_fixed", response=document.responses[tool.name])
+        )
+        if tool.character_error_rate:
+            checks[tool.name] = tool.character_error_rate
+    if extra := sorted(set(document.responses) - set(specs)):
         raise ValueError(f"responses for tools that do not exist: {', '.join(extra)}")
-    if not specs:
-        raise ValueError("no tools declared")
     return Dispatcher(specs, MockFixtures(tools=fixtures), checks)
 
 

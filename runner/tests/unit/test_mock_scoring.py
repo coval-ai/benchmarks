@@ -12,6 +12,7 @@ import pytest
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
+from pydantic import SecretStr
 
 from coval_bench.mocktools import scoring
 from coval_bench.mocktools.codecs import ToolCall
@@ -122,6 +123,41 @@ async def test_a_failed_lookup_is_logged_not_raised(
     monkeypatch.setattr(scoring, "test_case_key", broken)
     await _score([ToolCall("lookup", {"value": "x"})])
     assert posted == []
+
+
+async def test_a_failed_score_gives_its_claim_back(
+    monkeypatch: pytest.MonkeyPatch, posted: list[tuple[str, list[ReadableSpan]]]
+) -> None:
+    async def broken(api_key: str, api_base: str, simulation_id: str) -> str | None:
+        raise RuntimeError("coval down")
+
+    monkeypatch.setattr(scoring, "test_case_key", broken)
+    calls = scoring.claim_first_calls(SIM, [ToolCall("lookup", {"value": "x"})], CHECKS)
+    await _score(calls)
+    assert not scoring._scored
+    assert scoring.claim_first_calls(SIM, calls, CHECKS) == calls
+
+
+async def test_a_dropped_score_gives_its_claim_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    def full(coroutine: Any, **_: Any) -> bool:  # noqa: ANN401
+        coroutine.close()
+        return False
+
+    monkeypatch.setattr(scoring, "queue", full)
+    provider = new_tracer_provider(Resource.create({"service.name": "test"}))
+    queued = scoring.schedule_scoring(
+        api_key=SecretStr("key"),
+        api_base="https://coval.test/v1",
+        provider=provider,
+        simulation_id=SIM,
+        platform="vapi",
+        checks=CHECKS,
+        calls=[ToolCall("lookup", {"value": "x"})],
+        started_ns=1,
+        ended_ns=2,
+    )
+    assert queued is False
+    assert not scoring._scored
 
 
 def test_nothing_is_scheduled_without_a_coval_key() -> None:

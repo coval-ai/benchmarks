@@ -203,7 +203,9 @@ async def post_spans(
         raise
 
 
-def queue(coroutine: Coroutine[Any, Any, None], *, simulation_id: str, platform: str) -> bool:
+def queue(
+    coroutine: Coroutine[Any, Any, None], *, simulation_id: str, platform: str, count: int
+) -> bool:
     """Run an export off the request path, tracked so :func:`drain` waits for it."""
     if len(_tasks) >= MAX_PENDING_EXPORTS:
         coroutine.close()
@@ -211,6 +213,7 @@ def queue(coroutine: Coroutine[Any, Any, None], *, simulation_id: str, platform:
             "mock_tool_spans_dropped",
             simulation_id=simulation_id,
             platform=platform,
+            count=count,
             pending=len(_tasks),
         )
         return False
@@ -245,15 +248,10 @@ async def _export(
     started_ns: int,
     ended_ns: int,
 ) -> None:
-    exporter: SpanExporter | None = None
     try:
-        async with _exports:
-            spans = build_spans(provider, platform, calls, outcomes, started_ns, ended_ns)
-            exporter = coval_exporter(api_key, simulation_id, api_base)
-            result = await asyncio.to_thread(export_spans, exporter, spans)
+        spans = build_spans(provider, platform, calls, outcomes, started_ns, ended_ns)
+        result = await post_spans(api_key, api_base, simulation_id, spans)
     except asyncio.CancelledError:
-        if exporter is not None:
-            exporter.shutdown()
         raise
     except Exception:
         logger.warning(
@@ -299,16 +297,7 @@ def schedule_export(
             logger.warning("mock_tool_traces_disabled", reason="no coval api key configured")
             _disabled_warned = True
         return False
-    if len(_tasks) >= MAX_PENDING_EXPORTS:
-        logger.warning(
-            "mock_tool_spans_dropped",
-            simulation_id=simulation_id,
-            platform=platform,
-            count=len(calls),
-            pending=len(_tasks),
-        )
-        return False
-    task = asyncio.get_running_loop().create_task(
+    return queue(
         _export(
             api_key.get_secret_value(),
             api_base,
@@ -319,11 +308,11 @@ def schedule_export(
             outcomes,
             started_ns,
             ended_ns,
-        )
+        ),
+        simulation_id=simulation_id,
+        platform=platform,
+        count=len(calls),
     )
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
-    return True
 
 
 async def drain(timeout_s: float = EXPORT_TIMEOUT_S) -> int:

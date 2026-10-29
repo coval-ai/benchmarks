@@ -102,6 +102,7 @@ PUBLIC_CONTRACT_FILES: tuple[str, ...] = (
     "system-prompt.txt",
     "first-message.txt",
     "tool-definitions.json",
+    "tools.json",
 )
 
 # Hashed but never committed. Including them means the published hash identifies
