@@ -99,6 +99,8 @@ async def _validate_model(candidate: NewModel | ModelRecord, store: RegistryStor
         candidate.architecture is not None or candidate.orchestration is not None
     ):
         raise HTTPException(422, "architecture and orchestration are S2S-only")
+    if candidate.modality is Benchmark.S2S and candidate.architecture is None:
+        raise HTTPException(422, "an S2S model needs an architecture")
     if candidate.voices:
         if candidate.modality is not Benchmark.TTS:
             raise HTTPException(422, "voice pools are TTS-only")

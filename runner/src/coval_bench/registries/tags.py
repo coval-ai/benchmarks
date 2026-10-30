@@ -17,8 +17,6 @@ class TagCategory(StrEnum):
     """
 
     TYPE = "type"
-    ARCHITECTURE = "architecture"
-    ORCHESTRATION = "orchestration"
     HOST = "host"
     CREATOR = "creator"
     FEATURES = "features"
@@ -26,6 +24,8 @@ class TagCategory(StrEnum):
     LICENSING = "licensing"
     DEPLOYMENT = "deployment"
     REGION = "region"
+    ARCHITECTURE = "architecture"
+    ORCHESTRATION = "orchestration"
 
 
 # Display label per category.

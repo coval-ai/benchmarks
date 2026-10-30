@@ -318,8 +318,6 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
     categories = data["tag_categories"]
     assert [c["category"] for c in categories] == [
         "type",
-        "architecture",
-        "orchestration",
         "host",
         "creator",
         "features",
@@ -327,6 +325,8 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
         "licensing",
         "deployment",
         "region",
+        "architecture",
+        "orchestration",
     ]
     by_category = {c["category"]: c for c in categories}
     assert by_category["features"]["label"] == "Features"
@@ -411,4 +411,4 @@ async def test_the_catalogue_survives_a_database_without_the_agent_kind_columns(
         conn.close()
     entry = _entry(await _public(client), "acme", "live")
     assert entry["display_name"] == "Live"
-    assert not any(t["category"] == "architecture" for t in entry["tags"])
+    assert not any(t["category"] in {"architecture", "orchestration"} for t in entry["tags"])
