@@ -475,6 +475,34 @@ async def test_an_empty_display_name_is_rejected(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
+async def test_agent_kind_is_set_cleared_and_s2s_only(client: AsyncClient) -> None:
+    created = (
+        await _post_model(
+            client,
+            modality="S2S",
+            provider="vapi",
+            model="bank-pinned",
+            architecture="cascaded",
+            orchestration="platform",
+        )
+    ).json()
+    assert (created["architecture"], created["orchestration"]) == ("cascaded", "platform")
+
+    cleared = await _patch(client, created["id"], created["updated_at"], {"orchestration": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["model"]["orchestration"] is None
+
+    assert (await _post_model(client, architecture="cascaded")).status_code == 422
+    stt = (await _post_model(client)).json()
+    response = await _patch(client, stt["id"], stt["updated_at"], {"orchestration": "harness"})
+    assert response.status_code == 422
+
+
+async def test_an_unknown_agent_kind_is_rejected(client: AsyncClient) -> None:
+    response = await _post_model(client, modality="S2S", model="s2s-new", architecture="hybrid")
+    assert response.status_code == 422
+
+
 async def test_patch_unknown_model_is_404(client: AsyncClient) -> None:
     created = (await _post_model(client)).json()
     response = await _patch(client, created["id"] + 1, created["updated_at"], {})

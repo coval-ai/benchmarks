@@ -24,7 +24,7 @@ from coval_bench.db.registry_store import (
     StaleEdit,
     TagRecord,
 )
-from coval_bench.registries import Benchmark, Gender, Voice
+from coval_bench.registries import Architecture, Benchmark, Gender, Orchestration, Voice
 
 from .conftest import apply_migrations, open_pool
 
@@ -353,5 +353,63 @@ def test_display_name_roundtrips_and_clears(registry_pg: psycopg.Connection[Any]
         assert cleared.display_name is None
         changes = await store.history(created.id)
         assert [change.new["display_name"] for change in changes] == [None, "Acme", None]
+
+    _with_store(registry_pg, scenario)
+
+
+def test_the_migration_marks_every_seeded_s2s_model_speech_to_speech(
+    registry_pg: psycopg.Connection[Any],
+) -> None:
+    apply_migrations(registry_pg)
+    rows = registry_pg.execute(
+        """SELECT modality, architecture, orchestration, count(*)
+           FROM benchmarks_v2.models GROUP BY 1, 2, 3 ORDER BY 1"""
+    ).fetchall()
+    kinds = {
+        (modality, architecture, orchestration) for modality, architecture, orchestration, _ in rows
+    }
+    assert ("S2S", "speech-to-speech", None) in kinds
+    assert all(
+        (architecture, orchestration) == ("speech-to-speech", None)
+        if modality == "S2S"
+        else (architecture, orchestration) == (None, None)
+        for modality, architecture, orchestration in kinds
+    )
+
+
+def test_agent_kind_roundtrips_clears_and_stays_s2s_only(
+    registry_pg: psycopg.Connection[Any],
+) -> None:
+    async def scenario(store: RegistryStore) -> None:
+        created = await store.insert_model(
+            NewModel(
+                modality=Benchmark.S2S,
+                provider="vapi",
+                model="bank-pinned",
+                architecture=Architecture.CASCADED,
+                orchestration=Orchestration.PLATFORM,
+            ),
+            **_EDITOR,
+        )
+        assert (await store.get_model(created.id)) == created
+        result = await store.update_model(
+            created.id, {"orchestration": None}, expected_updated_at=created.updated_at, **_EDITOR
+        )
+        assert result is not None
+        _, cleared = result
+        assert (cleared.architecture, cleared.orchestration) == (Architecture.CASCADED, None)
+        changes = await store.history(created.id)
+        assert [change.new["orchestration"] for change in changes] == [None, "platform"]
+
+        with pytest.raises(psycopg.errors.CheckViolation):
+            await store.insert_model(
+                NewModel(
+                    modality=Benchmark.STT,
+                    provider="acme",
+                    model="stt-1",
+                    architecture=Architecture.CASCADED,
+                ),
+                **_EDITOR,
+            )
 
     _with_store(registry_pg, scenario)

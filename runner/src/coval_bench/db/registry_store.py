@@ -26,8 +26,10 @@ from pydantic import BaseModel, field_validator
 
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import (
+    Architecture,
     HexColor,
     Licensing,
+    Orchestration,
     RegisteredModel,
     Source,
     Voice,
@@ -55,6 +57,8 @@ EDITABLE_FIELDS = frozenset(
         "tags",
         "color",
         "display_name",
+        "architecture",
+        "orchestration",
     }
 )
 
@@ -98,6 +102,8 @@ class NewModel(BaseModel):
     tags: tuple[str, ...] = ()
     color: HexColor = None
     display_name: str | None = None
+    architecture: Architecture | None = None
+    orchestration: Orchestration | None = None
 
     @field_validator("tags")
     @classmethod
@@ -134,7 +140,8 @@ class ModelChange(BaseModel):
 _SELECT_MODELS = """
     SELECT m.id, m.modality, m.provider, m.model, m.voice, m.voices, m.creator,
            m.source, m.licensing, m.on_prem, m.region, m.arena_enabled,
-           m.collected, m.published, m.color, m.display_name, m.updated_by_user_id,
+           m.collected, m.published, m.color, m.display_name,
+           m.architecture, m.orchestration, m.updated_by_user_id,
            m.updated_by_email, m.updated_at, COALESCE(t.tags, '{}') AS tags
     FROM benchmarks_v2.models m
     LEFT JOIN (
@@ -148,8 +155,8 @@ _INSERT_MODEL = """
     INSERT INTO benchmarks_v2.models
         (modality, provider, model, voice, voices, creator, source, licensing,
          on_prem, region, arena_enabled, collected, published, color, display_name,
-         updated_by_user_id, updated_by_email)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         architecture, orchestration, updated_by_user_id, updated_by_email)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     RETURNING id, updated_at
 """
 
@@ -158,7 +165,7 @@ _UPDATE_MODEL = """
     SET provider = %s, model = %s, voice = %s, voices = %s, creator = %s,
         source = %s, licensing = %s, on_prem = %s, region = %s,
         arena_enabled = %s, collected = %s, published = %s, color = %s,
-        display_name = %s,
+        display_name = %s, architecture = %s, orchestration = %s,
         updated_by_user_id = %s, updated_by_email = %s,
         -- Strictly monotonic per row: the 412 stale check compares this exactly,
         -- so same-microsecond updates must still produce a new value.
@@ -180,7 +187,10 @@ _INSERT_HISTORY = """
 # the read behind /v1/providers and the orchestrator's roster — the whole site
 # goes dark if it fails for the window between the two. Each missing column
 # reads as unset until it exists.
-_SELECT_MODELS_BEFORE_DISPLAY_NAME = _SELECT_MODELS.replace(
+_SELECT_MODELS_BEFORE_AGENT_KIND = _SELECT_MODELS.replace(
+    "m.architecture, m.orchestration,", "NULL AS architecture, NULL AS orchestration,"
+)
+_SELECT_MODELS_BEFORE_DISPLAY_NAME = _SELECT_MODELS_BEFORE_AGENT_KIND.replace(
     "m.display_name,", "NULL AS display_name,"
 )
 _SELECT_MODELS_BEFORE_COLOR = _SELECT_MODELS_BEFORE_DISPLAY_NAME.replace(
@@ -188,6 +198,7 @@ _SELECT_MODELS_BEFORE_COLOR = _SELECT_MODELS_BEFORE_DISPLAY_NAME.replace(
 )
 _SELECT_MODELS_SHAPES = (
     _SELECT_MODELS,
+    _SELECT_MODELS_BEFORE_AGENT_KIND,
     _SELECT_MODELS_BEFORE_DISPLAY_NAME,
     _SELECT_MODELS_BEFORE_COLOR,
 )
@@ -283,6 +294,8 @@ class RegistryStore:
                             new.published,
                             new.color,
                             new.display_name,
+                            new.architecture,
+                            new.orchestration,
                             user_id,
                             email,
                         ),
@@ -372,6 +385,8 @@ class RegistryStore:
                             merged.published,
                             merged.color,
                             merged.display_name,
+                            merged.architecture,
+                            merged.orchestration,
                             user_id,
                             email,
                             model_id,
@@ -479,6 +494,8 @@ def _registered(record: ModelRecord) -> RegisteredModel:
         arena_enabled=record.arena_enabled,
         color=record.color,
         display_name=record.display_name,
+        architecture=record.architecture,
+        orchestration=record.orchestration,
     )
 
 

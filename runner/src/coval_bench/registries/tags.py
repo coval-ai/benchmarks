@@ -12,10 +12,13 @@ class TagCategory(StrEnum):
 
     TYPE/HOST/CREATOR are derived from registry columns and SOURCE/LICENSING/
     DEPLOYMENT from model attributes, all at the API boundary; FEATURES values
-    and labels come from ``benchmarks_v2.tags``.
+    and labels come from ``benchmarks_v2.tags``. ARCHITECTURE and ORCHESTRATION
+    are S2S-only columns, absent from a model that leaves them unset.
     """
 
     TYPE = "type"
+    ARCHITECTURE = "architecture"
+    ORCHESTRATION = "orchestration"
     HOST = "host"
     CREATOR = "creator"
     FEATURES = "features"
@@ -28,6 +31,8 @@ class TagCategory(StrEnum):
 # Display label per category.
 CATEGORY_LABELS: dict[TagCategory, str] = {
     TagCategory.TYPE: "Type",
+    TagCategory.ARCHITECTURE: "Architecture",
+    TagCategory.ORCHESTRATION: "Orchestration",
     TagCategory.HOST: "Host",
     TagCategory.CREATOR: "Creator",
     TagCategory.FEATURES: "Features",
@@ -57,6 +62,10 @@ _VALUE_LABELS: dict[str, str] = {
     "shared-inference": "Shared inference",
     "dedicated-inference": "Dedicated inference",
     "official-api": "Official API",
+    "speech-to-speech": "Native speech-to-speech",
+    "cascaded": "Cascaded (STT→LLM→TTS)",
+    "harness": "Coval harness",
+    "platform": "Voice agent platform",
 }
 
 

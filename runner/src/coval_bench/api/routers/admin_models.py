@@ -50,7 +50,9 @@ from coval_bench.registries.provider_keys import provider_names
 router = APIRouter(tags=["admin"], dependencies=[Depends(require_coval_admin)])
 
 # PATCH fields where null is a value, not an omission.
-_NULLABLE_FIELDS = frozenset({"voice", "creator", "region", "color", "display_name"})
+_NULLABLE_FIELDS = frozenset(
+    {"voice", "creator", "region", "color", "display_name", "architecture", "orchestration"}
+)
 
 
 def _model_out(record: ModelRecord, history: list[ModelChange]) -> AdminModelOut:
@@ -93,6 +95,10 @@ async def _validate_model(candidate: NewModel | ModelRecord, store: RegistryStor
         and not candidate.voices
     ):
         raise HTTPException(422, "a collected TTS model needs a voice or a voice pool")
+    if candidate.modality is not Benchmark.S2S and (
+        candidate.architecture is not None or candidate.orchestration is not None
+    ):
+        raise HTTPException(422, "architecture and orchestration are S2S-only")
     if candidate.voices:
         if candidate.modality is not Benchmark.TTS:
             raise HTTPException(422, "voice pools are TTS-only")
