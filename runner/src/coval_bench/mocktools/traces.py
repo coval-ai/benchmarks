@@ -251,8 +251,6 @@ async def _export(
     try:
         spans = build_spans(provider, platform, calls, outcomes, started_ns, ended_ns)
         result = await post_spans(api_key, api_base, simulation_id, spans)
-    except asyncio.CancelledError:
-        raise
     except Exception:
         logger.warning(
             "mock_tool_spans_failed", simulation_id=simulation_id, platform=platform, exc_info=True

@@ -17,6 +17,7 @@ from pydantic import SecretStr
 from coval_bench.mocktools import scoring
 from coval_bench.mocktools.codecs import ToolCall
 from coval_bench.mocktools.dispatch import Check
+from coval_bench.mocktools.tool_checks import character_error_rates
 from coval_bench.mocktools.traces import new_tracer_provider
 
 SIM = "sim_1"
@@ -36,6 +37,19 @@ def test_only_each_checked_tools_first_call_per_simulation_is_claimed() -> None:
     assert scoring.claim_first_calls(SIM, [first, other], CHECKS) == [first]
     assert scoring.claim_first_calls(SIM, [retry], CHECKS) == []
     assert scoring.claim_first_calls("sim_2", [retry], CHECKS) == [retry]
+
+
+def test_a_batch_claims_only_its_first_call() -> None:
+    first, retry = ToolCall("lookup", {"value": "a"}), ToolCall("lookup", {"value": "b"})
+    assert scoring.claim_first_calls(SIM, [first, retry], CHECKS) == [first]
+
+
+def test_a_rejected_first_call_is_scored_as_corral_scores_it() -> None:
+    expected = {"lookup": {"value": "4242"}}
+    assert character_error_rates(expected, [ToolCall("lookup", {"value": 4242})]) == {
+        "lookup.value": 0.0
+    }
+    assert character_error_rates(expected, [ToolCall("lookup", {})]) == {"lookup.value": 1.0}
 
 
 def test_remembered_simulations_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:

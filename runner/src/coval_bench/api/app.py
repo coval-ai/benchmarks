@@ -155,6 +155,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 suites[suite] = build_corral_dispatcher(suite)
             except (FileNotFoundError, NotADirectoryError, ValueError):
                 logger.warning("mock_tools_corral_suite_unusable", suite=suite, exc_info=True)
+                continue
+            if not suites[suite].checks:
+                logger.warning("mock_tools_corral_answers_absent", suite=suite)
         app.state.mock_suites = suites
         tracer_provider = new_tracer_provider(build_resource(resolved, TRACE_SERVICE_NAME))
         app.state.tracer_provider = tracer_provider

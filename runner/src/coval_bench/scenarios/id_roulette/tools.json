@@ -5,25 +5,6 @@
       "description": "Look up the detail the caller gave, exactly as you heard it.",
       "parameters": {
         "value": "string"
-      },
-      "character_error_rate": {
-        "value": {
-          "account-1": "KD7BO0RWNLMX0O4BYD",
-          "account-2": "M0N8DBW3OEN5",
-          "account-3": "B9DPTV0OEG2M4N",
-          "email-1": "j.okafor_88@example.com",
-          "email-2": "mbdn.weiss-07@example.org",
-          "email-3": "s_nguyen.ott@example.net",
-          "card-1": "4242424242424242",
-          "card-2": "5555555555554444",
-          "card-3": "378282246310005",
-          "postcode-1": "K1A 0B1",
-          "postcode-2": "V6B 4Y8",
-          "postcode-3": "SW1A 1AA",
-          "surname-1": "Szczepanski",
-          "surname-2": "O'Neill",
-          "surname-3": "Nguyen"
-        }
       }
     }
   ],

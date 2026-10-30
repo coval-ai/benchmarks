@@ -21,7 +21,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture, parse_fixtures
 from coval_bench.mocktools.resolver import Resolution, resolve
@@ -268,6 +268,27 @@ def parse_corral_tools(raw: str | bytes) -> Dispatcher:
     return Dispatcher(specs, MockFixtures(tools=fixtures), checks)
 
 
+_ANSWER_KEY = TypeAdapter(dict[str, Check])
+
+
 def build_corral_dispatcher(suite: str) -> Dispatcher:
-    """Build a Corral suite's dispatcher from its committed ``tools.json``."""
-    return parse_corral_tools(read_contract_file(suite, CORRAL_TOOLS_FILE))
+    """Build a Corral suite from its committed ``tools.json`` and its private answer key.
+
+    The right values are the evaluator, so they sit in the suite's private fixture as
+    ``{tool: {argument: value}}``, not in the public file. Without one the suite still
+    answers but checks nothing.
+    """
+    document = CorralToolsFile.model_validate_json(read_contract_file(suite, CORRAL_TOOLS_FILE))
+    try:
+        answers = _ANSWER_KEY.validate_json(read_private_fixture(suite))
+    except (FileNotFoundError, NotADirectoryError):
+        answers = {}
+    if unknown := sorted(answers.keys() - {tool.name for tool in document.tools}):
+        raise ValueError(f"answers for tools that do not exist: {', '.join(unknown)}")
+    tools = [
+        tool.model_copy(update={"character_error_rate": answers[tool.name]})
+        if tool.name in answers
+        else tool
+        for tool in document.tools
+    ]
+    return parse_corral_tools(document.model_copy(update={"tools": tools}).model_dump_json())

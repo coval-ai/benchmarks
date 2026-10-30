@@ -9,12 +9,17 @@ import json
 
 import pytest
 
+from coval_bench.mocktools import dispatch
 from coval_bench.mocktools.dispatch import (
     CORRAL_SUITES,
     build_corral_dispatcher,
     parse_corral_tools,
 )
-from coval_bench.scenarios import PUBLIC_CONTRACT_FILES, public_contract_sha256
+from coval_bench.scenarios import (
+    PUBLIC_CONTRACT_FILES,
+    public_contract_sha256,
+    read_contract_file,
+)
 
 
 def _tools(**overrides: object) -> str:
@@ -42,12 +47,54 @@ def test_the_tools_file_is_part_of_the_contract_hash() -> None:
     assert public_contract_sha256("id_roulette") != public_contract_sha256("no_such_suite")
 
 
-def test_id_roulette_answers_lookup_and_checks_its_value() -> None:
+def _answer_key(monkeypatch: pytest.MonkeyPatch, answers: object) -> None:
+    def private(suite: str) -> bytes:
+        if answers is None:
+            raise FileNotFoundError(suite)
+        return json.dumps(answers).encode()
+
+    monkeypatch.setattr(dispatch, "read_private_fixture", private)
+
+
+def test_the_committed_tools_file_holds_no_right_values() -> None:
+    document = json.loads(read_contract_file("id_roulette", "tools.json"))
+    assert all("character_error_rate" not in tool for tool in document["tools"])
+
+
+def test_id_roulette_answers_lookup_and_checks_its_private_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _answer_key(monkeypatch, {"lookup": {"value": {"account-1": "KD7BO0RWNLMX0O4BYD"}}})
     dispatcher = build_corral_dispatcher("id_roulette")
     outcome = dispatcher.call("lookup", {"value": "KD7BO0RWNLMX0O4BYD"})
     assert (outcome.http_status, outcome.response) == (200, {"received": True})
-    assert set(dispatcher.checks) == {"lookup"}
-    assert dispatcher.checks["lookup"]["value"]["account-1"] == "KD7BO0RWNLMX0O4BYD"  # type: ignore[index]
+    assert dispatcher.checks == {"lookup": {"value": {"account-1": "KD7BO0RWNLMX0O4BYD"}}}
+
+
+def test_without_an_answer_key_the_suite_answers_and_checks_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _answer_key(monkeypatch, None)
+    dispatcher = build_corral_dispatcher("id_roulette")
+    assert dispatcher.call("lookup", {"value": "x"}).http_status == 200
+    assert dispatcher.checks == {}
+
+
+@pytest.mark.parametrize(
+    ("answers", "match"),
+    [
+        ({"ghost": {"value": "x"}}, "answers for tools that do not exist"),
+        ({"lookup": {"other": "x"}}, "checks arguments it does not take"),
+        ({"lookup": ["x"]}, "validation error"),
+    ],
+    ids=["unknown-tool", "unknown-argument", "malformed"],
+)
+def test_a_bad_answer_key_is_refused(
+    monkeypatch: pytest.MonkeyPatch, answers: object, match: str
+) -> None:
+    _answer_key(monkeypatch, answers)
+    with pytest.raises(ValueError, match=match):
+        build_corral_dispatcher("id_roulette")
 
 
 def test_a_missing_or_mistyped_argument_is_rejected_like_any_other_suite() -> None:
