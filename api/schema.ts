@@ -593,6 +593,8 @@ export interface components {
             color?: string | null;
             /** Display Name */
             display_name?: string | null;
+            architecture?: components["schemas"]["Architecture"] | null;
+            orchestration?: components["schemas"]["Orchestration"] | null;
         };
         /**
          * AdminModelOut
@@ -636,6 +638,8 @@ export interface components {
             color?: string | null;
             /** Display Name */
             display_name?: string | null;
+            architecture?: components["schemas"]["Architecture"] | null;
+            orchestration?: components["schemas"]["Orchestration"] | null;
             /** Updated By User Id */
             updated_by_user_id: string;
             /** Updated By Email */
@@ -687,6 +691,8 @@ export interface components {
             color?: string | null;
             /** Display Name */
             display_name?: string | null;
+            architecture?: components["schemas"]["Architecture"] | null;
+            orchestration?: components["schemas"]["Orchestration"] | null;
         };
         /**
          * AdminModelPricingOut
@@ -863,6 +869,12 @@ export interface components {
             series: components["schemas"]["SeriesPoint"][];
             snapshot?: components["schemas"]["DashboardSnapshot"] | null;
         };
+        /**
+         * Architecture
+         * @description How an S2S agent makes speech: one model, or speech-to-text, an LLM and text-to-speech.
+         * @enum {string}
+         */
+        Architecture: "speech-to-speech" | "cascaded";
         /**
          * Benchmark
          * @description Which benchmark a model or result belongs to.
@@ -1097,6 +1109,12 @@ export interface components {
             /** Label */
             label: string;
         };
+        /**
+         * Orchestration
+         * @description Who runs an S2S agent's turn-taking and tools: our harness, or a hosted platform.
+         * @enum {string}
+         */
+        Orchestration: "harness" | "platform";
         /**
          * PricingRateOut
          * @description One model's rate in force on the requested day, with the earlier spans oldest first.
@@ -1417,10 +1435,11 @@ export interface components {
          *
          *     TYPE/HOST/CREATOR are derived from registry columns and SOURCE/LICENSING/
          *     DEPLOYMENT from model attributes, all at the API boundary; FEATURES values
-         *     and labels come from ``benchmarks_v2.tags``.
+         *     and labels come from ``benchmarks_v2.tags``. ARCHITECTURE and ORCHESTRATION
+         *     are S2S-only columns, absent from a model that leaves them unset.
          * @enum {string}
          */
-        TagCategory: "type" | "host" | "creator" | "features" | "source" | "licensing" | "deployment" | "region";
+        TagCategory: "type" | "host" | "creator" | "features" | "source" | "licensing" | "deployment" | "region" | "architecture" | "orchestration";
         /**
          * TagCategoryOut
          * @description A facet category's display metadata. Sent in display order.
@@ -2300,7 +2319,9 @@ export interface operations {
     };
     call_tools_mock__platform__post: {
         parameters: {
-            query?: never;
+            query?: {
+                suite?: string | null;
+            };
             header?: {
                 "x-mock-tools-key"?: string | null;
             };
@@ -2339,7 +2360,9 @@ export interface operations {
     };
     call_tool_mock__platform___tool__post: {
         parameters: {
-            query?: never;
+            query?: {
+                suite?: string | null;
+            };
             header?: {
                 "x-mock-tools-key"?: string | null;
             };
