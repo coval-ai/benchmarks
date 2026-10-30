@@ -34,6 +34,20 @@ class Licensing(StrEnum):
     OPEN_WEIGHT = "open-weight"
 
 
+class Architecture(StrEnum):
+    """How an S2S agent makes speech: one model, or speech-to-text, an LLM and text-to-speech."""
+
+    SPEECH_TO_SPEECH = "speech-to-speech"
+    CASCADED = "cascaded"
+
+
+class Orchestration(StrEnum):
+    """Who runs an S2S agent's turn-taking and tools: our harness, or a hosted platform."""
+
+    HARNESS = "harness"
+    PLATFORM = "platform"
+
+
 class Gender(StrEnum):
     """Perceived gender of a voice — an editorial label, not ground truth.
 
@@ -116,3 +130,7 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     # What the site labels the model. None means the site still picks the label
     # from its compiled slug-to-name map.
     display_name: str | None = None
+    # S2S only. None for every other modality, and for orchestration while Coval
+    # calls the model directly.
+    architecture: Architecture | None = None
+    orchestration: Orchestration | None = None

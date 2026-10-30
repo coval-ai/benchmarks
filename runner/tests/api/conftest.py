@@ -310,10 +310,13 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 published     boolean NOT NULL,
                 color         text CHECK (color IS NULL OR color ~ '^#[0-9a-f]{6}$'),
                 display_name  text CHECK (display_name IS NULL OR display_name <> ''),
+                architecture  text CHECK (architecture IN ('speech-to-speech', 'cascaded')),
+                orchestration text CHECK (orchestration IN ('harness', 'platform')),
                 updated_by_user_id text NOT NULL CHECK (updated_by_user_id <> ''),
                 updated_by_email   text CHECK (updated_by_email IS NULL OR updated_by_email <> ''),
                 updated_at    timestamptz NOT NULL DEFAULT now(),
-                UNIQUE (modality, provider, model)
+                UNIQUE (modality, provider, model),
+                CHECK (modality = 'S2S' OR (architecture IS NULL AND orchestration IS NULL))
             )
         """)
         conn.execute("""
@@ -410,8 +413,8 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
             INSERT INTO benchmarks_v2.models
                 (modality, provider, model, voice, voices, creator, source, licensing,
                  on_prem, region, arena_enabled, collected, published, color,
-                 display_name, updated_by_user_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'tests')
+                 display_name, architecture, orchestration, updated_by_user_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'tests')
             RETURNING id
             """,
             (
@@ -430,6 +433,8 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
                 model.published,
                 model.color,
                 model.display_name,
+                model.architecture,
+                model.orchestration,
             ),
         ).fetchone()
         assert row is not None

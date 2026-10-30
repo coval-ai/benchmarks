@@ -303,7 +303,9 @@ async def test_a_stopped_model_may_name_a_dead_provider(client: AsyncClient) -> 
 
 
 async def test_create_s2s_skips_the_provider_check(client: AsyncClient) -> None:
-    response = await _post_model(client, modality="S2S", provider="anyone", model="s2s-1")
+    response = await _post_model(
+        client, modality="S2S", provider="anyone", model="s2s-1", architecture="speech-to-speech"
+    )
     assert response.status_code == 201
 
 
@@ -329,7 +331,14 @@ async def test_a_voice_pool_is_one_female_one_male(client: AsyncClient) -> None:
 
 async def test_voices_are_tts_only(client: AsyncClient) -> None:
     assert (await _post_model(client, voice="v")).status_code == 422
-    s2s = await _post_model(client, modality="S2S", provider="anyone", model="s2s-1", voice="v")
+    s2s = await _post_model(
+        client,
+        modality="S2S",
+        provider="anyone",
+        model="s2s-1",
+        architecture="speech-to-speech",
+        voice="v",
+    )
     assert s2s.status_code == 422
     pool = [{"id": "a", "gender": "female"}, {"id": "b", "gender": "male"}]
     assert (await _post_model(client, voices=pool)).status_code == 422
@@ -475,6 +484,40 @@ async def test_an_empty_display_name_is_rejected(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
+async def test_agent_kind_is_set_cleared_and_s2s_only(client: AsyncClient) -> None:
+    created = (
+        await _post_model(
+            client,
+            modality="S2S",
+            provider="vapi",
+            model="bank-pinned",
+            architecture="cascaded",
+            orchestration="platform",
+        )
+    ).json()
+    assert (created["architecture"], created["orchestration"]) == ("cascaded", "platform")
+
+    cleared = await _patch(client, created["id"], created["updated_at"], {"orchestration": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["model"]["orchestration"] is None
+
+    assert (await _post_model(client, architecture="cascaded")).status_code == 422
+    unlabeled = await _post_model(client, modality="S2S", model="s2s-unlabeled")
+    assert unlabeled.status_code == 422
+    unset = await _patch(
+        client, created["id"], cleared.json()["model"]["updated_at"], {"architecture": None}
+    )
+    assert unset.status_code == 422
+    stt = (await _post_model(client)).json()
+    response = await _patch(client, stt["id"], stt["updated_at"], {"orchestration": "harness"})
+    assert response.status_code == 422
+
+
+async def test_an_unknown_agent_kind_is_rejected(client: AsyncClient) -> None:
+    response = await _post_model(client, modality="S2S", model="s2s-new", architecture="hybrid")
+    assert response.status_code == 422
+
+
 async def test_patch_unknown_model_is_404(client: AsyncClient) -> None:
     created = (await _post_model(client)).json()
     response = await _patch(client, created["id"] + 1, created["updated_at"], {})
@@ -501,7 +544,15 @@ async def test_a_rename_warns_about_code_references(client: AsyncClient) -> None
 
 async def test_a_rename_warns_about_retired_board_keys(client: AsyncClient) -> None:
     provider, model = _CURRENT_KEY
-    created = (await _post_model(client, modality="S2S", provider=provider, model=model)).json()
+    created = (
+        await _post_model(
+            client,
+            modality="S2S",
+            provider=provider,
+            model=model,
+            architecture="speech-to-speech",
+        )
+    ).json()
     response = await _patch(
         client, created["id"], created["updated_at"], {"model": _RETIRED_KEY[1]}
     )

@@ -19,7 +19,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from coval_bench.api.common import BenchmarkLiteral, StatisticLiteral, WindowLiteral
 from coval_bench.arena.domains import ArenaDomain
-from coval_bench.registries import Benchmark, HexColor, Licensing, Source, TagCategory, Voice
+from coval_bench.registries import (
+    Architecture,
+    Benchmark,
+    HexColor,
+    Licensing,
+    Orchestration,
+    Source,
+    TagCategory,
+    Voice,
+)
 from coval_bench.scenarios import binding_for_dataset
 
 
@@ -539,6 +548,8 @@ class AdminModelOut(BaseModel):
     tags: list[str] = []
     color: str | None = None
     display_name: str | None = None
+    architecture: Architecture | None = None
+    orchestration: Orchestration | None = None
     updated_by_user_id: str
     updated_by_email: str | None = None
     updated_at: datetime
@@ -570,6 +581,8 @@ class AdminModelCreate(BaseModel):
     tags: list[str] = []
     color: HexColor = None
     display_name: str | None = Field(default=None, min_length=1)
+    architecture: Architecture | None = None
+    orchestration: Orchestration | None = None
 
 
 class AdminModelPatch(BaseModel):
@@ -594,6 +607,8 @@ class AdminModelPatch(BaseModel):
     tags: list[str] | None = None
     color: HexColor = None
     display_name: str | None = Field(default=None, min_length=1)
+    architecture: Architecture | None = None
+    orchestration: Orchestration | None = None
 
 
 class AdminModelUpdateResponse(BaseModel):

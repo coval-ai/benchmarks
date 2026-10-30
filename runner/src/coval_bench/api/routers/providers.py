@@ -69,6 +69,8 @@ def _model_tags(m: RegisteredModel, vocabulary: Mapping[str, TagRecord]) -> list
     deployment = "on-prem" if m.on_prem else "cloud"
     return [
         _tag(TagCategory.TYPE, m.benchmark),
+        *([_tag(TagCategory.ARCHITECTURE, m.architecture)] if m.architecture else []),
+        *([_tag(TagCategory.ORCHESTRATION, m.orchestration)] if m.orchestration else []),
         _tag(TagCategory.HOST, m.provider),
         _tag(TagCategory.CREATOR, m.creator or m.provider),
         _tag(TagCategory.SOURCE, m.source),

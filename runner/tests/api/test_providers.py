@@ -16,7 +16,14 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from coval_bench.registries import Benchmark, Licensing, RegisteredModel, Source
+from coval_bench.registries import (
+    Architecture,
+    Benchmark,
+    Licensing,
+    Orchestration,
+    RegisteredModel,
+    Source,
+)
 from tests.api.conftest import COVAL_ORG, _make_db_url, add_models, bearer
 
 
@@ -274,6 +281,36 @@ async def test_region_facet_buckets_and_labels(client: AsyncClient, postgresql: 
     }
 
 
+async def test_agent_kind_facets_show_on_s2s_rows_that_set_them(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    add_models(
+        postgresql,
+        _model(
+            Benchmark.S2S,
+            "vapi",
+            "bank-pinned",
+            architecture=Architecture.CASCADED,
+            orchestration=Orchestration.PLATFORM,
+        ),
+        _model(Benchmark.S2S, "acme", "live", architecture=Architecture.SPEECH_TO_SPEECH),
+        _model(Benchmark.S2S, "acme", "unset"),
+    )
+
+    data = await _public(client)
+    platform = _entry(data, "vapi", "bank-pinned")
+    assert {("architecture", "cascaded"), ("orchestration", "platform")} <= _facets(platform)
+    assert _labels(platform)[("architecture", "cascaded")] == "Cascaded (STT→LLM→TTS)"
+    assert _labels(platform)[("orchestration", "platform")] == "Voice agent platform"
+
+    live = _facets(_entry(data, "acme", "live"))
+    assert ("architecture", "speech-to-speech") in live
+    assert not any(category == "orchestration" for category, _ in live)
+
+    unset = _facets(_entry(data, "acme", "unset"))
+    assert not any(category in {"architecture", "orchestration"} for category, _ in unset)
+
+
 async def test_tag_categories_metadata(client: AsyncClient) -> None:
     """tag_categories ships the full vocabulary in display order with labels."""
     data = await _public(client)
@@ -288,6 +325,8 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
         "licensing",
         "deployment",
         "region",
+        "architecture",
+        "orchestration",
     ]
     by_category = {c["category"]: c for c in categories}
     assert by_category["features"]["label"] == "Features"
@@ -347,3 +386,29 @@ async def test_the_catalogue_survives_a_database_without_the_display_name_column
         conn.close()
     entry = _entry(await _public(client), "acme", "m")
     assert (entry["color"], entry["display_name"]) == ("#1db098", None)
+
+
+async def test_the_catalogue_survives_a_database_without_the_agent_kind_columns(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Migration 0046 lags the deploy; display names still read while agent kinds read as unset."""
+    add_models(
+        postgresql,
+        _model(
+            Benchmark.S2S,
+            "acme",
+            "live",
+            display_name="Live",
+            architecture=Architecture.SPEECH_TO_SPEECH,
+        ),
+    )
+    conn = psycopg.connect(_make_db_url(postgresql))
+    try:
+        conn.execute("ALTER TABLE benchmarks_v2.models DROP COLUMN architecture")
+        conn.execute("ALTER TABLE benchmarks_v2.models DROP COLUMN orchestration")
+        conn.commit()
+    finally:
+        conn.close()
+    entry = _entry(await _public(client), "acme", "live")
+    assert entry["display_name"] == "Live"
+    assert not any(t["category"] in {"architecture", "orchestration"} for t in entry["tags"])

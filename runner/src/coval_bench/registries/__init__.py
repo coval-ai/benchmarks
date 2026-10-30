@@ -22,9 +22,11 @@ from coval_bench.registries.metrics import (
     validate_metric_values,
 )
 from coval_bench.registries.models import (
+    Architecture,
     Gender,
     HexColor,
     Licensing,
+    Orchestration,
     RegisteredModel,
     Source,
     Voice,
@@ -42,7 +44,9 @@ from coval_bench.registries.tags import (
 )
 
 __all__ = [
+    "Architecture",
     "Benchmark",
+    "Orchestration",
     "METRIC_EXCLUSIONS",
     "METRIC_SPECS",
     "METRIC_VALUE_CONTRACTS",
