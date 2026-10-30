@@ -31,8 +31,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Coroutine, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from opentelemetry import trace
@@ -168,6 +168,61 @@ def build_spans(
     return spans
 
 
+def build_check_span(
+    provider: TracerProvider,
+    name: str,
+    platform: str,
+    rates: Mapping[str, float],
+    test_case: str | None,
+    started_ns: int,
+    ended_ns: int,
+) -> ReadableSpan:
+    """One check's span, named after the check, one attribute per ``<tool>.<argument>``."""
+    attributes: dict[str, AttributeValue] = {"coval_bench.platform": platform, **rates}
+    if test_case:
+        attributes["coval_bench.test_case"] = test_case
+    span = provider.get_tracer(__name__).start_span(
+        name, start_time=started_ns, attributes=attributes
+    )
+    span.end(end_time=ended_ns)
+    return _readable(span)
+
+
+async def post_spans(
+    api_key: str, api_base: str, simulation_id: str, spans: Sequence[ReadableSpan]
+) -> SpanExportResult:
+    """Post spans to one simulation, sharing the concurrency cap with the tool-call copies."""
+    exporter: SpanExporter | None = None
+    try:
+        async with _exports:
+            exporter = coval_exporter(api_key, simulation_id, api_base)
+            return await asyncio.to_thread(export_spans, exporter, spans)
+    except asyncio.CancelledError:
+        if exporter is not None:
+            exporter.shutdown()
+        raise
+
+
+def queue(
+    coroutine: Coroutine[Any, Any, None], *, simulation_id: str, platform: str, count: int
+) -> bool:
+    """Run an export off the request path, tracked so :func:`drain` waits for it."""
+    if len(_tasks) >= MAX_PENDING_EXPORTS:
+        coroutine.close()
+        logger.warning(
+            "mock_tool_spans_dropped",
+            simulation_id=simulation_id,
+            platform=platform,
+            count=count,
+            pending=len(_tasks),
+        )
+        return False
+    task = asyncio.get_running_loop().create_task(coroutine)
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+    return True
+
+
 def export_spans(exporter: SpanExporter, spans: Sequence[ReadableSpan]) -> SpanExportResult:
     """One POST for the batch, bounded by the exporter's timeout. Never raises."""
     try:
@@ -193,16 +248,9 @@ async def _export(
     started_ns: int,
     ended_ns: int,
 ) -> None:
-    exporter: SpanExporter | None = None
     try:
-        async with _exports:
-            spans = build_spans(provider, platform, calls, outcomes, started_ns, ended_ns)
-            exporter = coval_exporter(api_key, simulation_id, api_base)
-            result = await asyncio.to_thread(export_spans, exporter, spans)
-    except asyncio.CancelledError:
-        if exporter is not None:
-            exporter.shutdown()
-        raise
+        spans = build_spans(provider, platform, calls, outcomes, started_ns, ended_ns)
+        result = await post_spans(api_key, api_base, simulation_id, spans)
     except Exception:
         logger.warning(
             "mock_tool_spans_failed", simulation_id=simulation_id, platform=platform, exc_info=True
@@ -247,16 +295,7 @@ def schedule_export(
             logger.warning("mock_tool_traces_disabled", reason="no coval api key configured")
             _disabled_warned = True
         return False
-    if len(_tasks) >= MAX_PENDING_EXPORTS:
-        logger.warning(
-            "mock_tool_spans_dropped",
-            simulation_id=simulation_id,
-            platform=platform,
-            count=len(calls),
-            pending=len(_tasks),
-        )
-        return False
-    task = asyncio.get_running_loop().create_task(
+    return queue(
         _export(
             api_key.get_secret_value(),
             api_base,
@@ -267,11 +306,11 @@ def schedule_export(
             outcomes,
             started_ns,
             ended_ns,
-        )
+        ),
+        simulation_id=simulation_id,
+        platform=platform,
+        count=len(calls),
     )
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
-    return True
 
 
 async def drain(timeout_s: float = EXPORT_TIMEOUT_S) -> int:

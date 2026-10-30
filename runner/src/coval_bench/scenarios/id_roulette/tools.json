@@ -1,0 +1,16 @@
+{
+  "tools": [
+    {
+      "name": "lookup",
+      "description": "Look up the detail the caller gave, exactly as you heard it.",
+      "parameters": {
+        "value": "string"
+      }
+    }
+  ],
+  "responses": {
+    "lookup": {
+      "received": true
+    }
+  }
+}
