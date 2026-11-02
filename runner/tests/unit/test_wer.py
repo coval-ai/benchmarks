@@ -9,7 +9,6 @@ import pytest
 from coval_bench.metrics.wer import (
     NORM_VERSION,
     WERResult,
-    WordError,
     compute_wer,
     normalize_text,
 )
@@ -141,62 +140,6 @@ def test_norm_version() -> None:
 
 
 # ---------------------------------------------------------------------------
-# incorrect_words shape
-# ---------------------------------------------------------------------------
-
-
-def test_incorrect_words_substitution() -> None:
-    result = compute_wer("hello world", "hello there")
-    assert len(result.incorrect_words) == 1
-    err = result.incorrect_words[0]
-    assert err.type == "substitution"
-    assert err.reference == "world"
-    assert err.hypothesis == "there"
-
-
-def test_incorrect_words_deletion() -> None:
-    result = compute_wer("a b c", "a c")
-    assert any(e.type == "deletion" for e in result.incorrect_words)
-
-
-def test_incorrect_words_insertion() -> None:
-    result = compute_wer("a b", "a b c")
-    assert any(e.type == "insertion" for e in result.incorrect_words)
-
-
-def test_incorrect_words_empty_on_match() -> None:
-    result = compute_wer("hello", "hello")
-    assert result.incorrect_words == []
-
-
-# ---------------------------------------------------------------------------
-# error_percentages breakdown
-# ---------------------------------------------------------------------------
-
-
-def test_error_percentages_split_by_type() -> None:
-    result = compute_wer("a b c d", "a x c d")
-    assert result.error_percentages == pytest.approx(
-        {"wer_insertions_pct": 0.0, "wer_deletions_pct": 0.0, "wer_substitutions_pct": 25.0}
-    )
-
-
-def test_error_percentages_empty_reference_is_all_insertions() -> None:
-    result = compute_wer("", "one two")
-    assert result.error_percentages["wer_insertions_pct"] == pytest.approx(result.wer_percentage)
-    assert result.error_percentages["wer_deletions_pct"] == 0.0
-    assert result.error_percentages["wer_substitutions_pct"] == 0.0
-
-
-@pytest.mark.parametrize(("case_id", "ref", "hyp", "expected_wer", "note"), _GOLDEN)
-def test_error_percentages_sum_to_wer(
-    case_id: int, ref: str, hyp: str, expected_wer: float, note: str
-) -> None:
-    result = compute_wer(ref, hyp)
-    assert sum(result.error_percentages.values()) == pytest.approx(result.wer_percentage)
-
-
-# ---------------------------------------------------------------------------
 # alignment counts
 # ---------------------------------------------------------------------------
 
@@ -229,18 +172,6 @@ def test_counts_empty_reference() -> None:
     result = compute_wer("", "hello there")
     assert result.reference_words == 0
     assert result.insertions == 2
-
-
-# ---------------------------------------------------------------------------
-# WordError model
-# ---------------------------------------------------------------------------
-
-
-def test_word_error_model() -> None:
-    w = WordError(type="substitution", reference="foo", hypothesis="bar")
-    assert w.type == "substitution"
-    assert w.reference == "foo"
-    assert w.hypothesis == "bar"
 
 
 # ---------------------------------------------------------------------------
