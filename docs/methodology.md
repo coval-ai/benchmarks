@@ -148,7 +148,8 @@ ratios. Counts are recorded from this point forward and were not backfilled;
 until every clip in the 30-day window carried counts (2026-10-09) a window
 fell back to the mean. Since then the pooled ratio is the only computation:
 a WER row without counts is excluded from every window, bucket, and timeline
-point. Headline numbers before and after are **not comparable**. See
+point, so no WER aggregate or custom timeline range reaches back before
+2026-09-09. Headline numbers before and after are **not comparable**. See
 [ADR-024](#adr-references).
 
 ## 4. Latency metrics (TTFA)
