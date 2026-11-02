@@ -19,7 +19,7 @@ from httpx import AsyncClient
 
 import coval_bench.scenarios as contracts_module
 from coval_bench.api.routers import mocktools as mocktools_router
-from coval_bench.mocktools.dispatch import Dispatcher, load_tool_specs
+from coval_bench.mocktools.dispatch import Dispatcher, Suite, load_tool_specs
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture
 from tests.api.conftest import MOCK_TOOLS_KEY, _make_db_url
 
@@ -66,8 +66,11 @@ def _test_fixtures() -> MockFixtures:
 @pytest_asyncio.fixture
 async def mock_app(app: FastAPI) -> FastAPI:
     """The app with the test seeds bound, and no artificial latency."""
-    app.state.mock_dispatcher = Dispatcher(load_tool_specs("dental"), _test_fixtures())
-    app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 0.0})
+    suite = Suite(Dispatcher(load_tool_specs("dental"), _test_fixtures()))
+    app.state.mock_suites = {"codec-test": suite}
+    app.state.settings = app.state.settings.model_copy(
+        update={"mock_tools_latency_ms": 0.0, "mock_tools_suite": "codec-test"}
+    )
     return app
 
 
@@ -123,7 +126,7 @@ async def test_unloaded_fixtures_answer_503_without_reaching_storage(
     the middle of a live conversation, and a miss is not something a cache
     prevents. A provider registered here must never be consulted.
     """
-    app.state.mock_dispatcher = None
+    app.state.mock_suites = {}
     consulted = False
 
     def never(suite: str) -> bytes:
@@ -258,7 +261,11 @@ def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 async def test_every_answer_is_held_to_the_latency_budget(
     client: AsyncClient, app: FastAPI, sleeps: list[float]
 ) -> None:
-    app.state.mock_dispatcher = Dispatcher(load_tool_specs("dental"), _test_fixtures())
+    app.state.mock_suites = {
+        app.state.settings.mock_tools_suite: Suite(
+            Dispatcher(load_tool_specs("dental"), _test_fixtures())
+        )
+    }
     app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 120.0})
     response = await client.post(
         "/mock/generic/lookup_patient", json={"phone": PHONE}, headers=AUTH
@@ -374,7 +381,11 @@ async def test_vapi_batch_writes_one_row_per_call_in_order(
 async def test_vapi_batch_is_held_to_the_budget_per_call(
     client: AsyncClient, app: FastAPI, sleeps: list[float]
 ) -> None:
-    app.state.mock_dispatcher = Dispatcher(load_tool_specs("dental"), _test_fixtures())
+    app.state.mock_suites = {
+        app.state.settings.mock_tools_suite: Suite(
+            Dispatcher(load_tool_specs("dental"), _test_fixtures())
+        )
+    }
     app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 60.0})
     body = _vapi(
         {"id": "tc_1", "name": "lookup_patient", "arguments": {"phone": PHONE}},
@@ -389,7 +400,11 @@ async def test_vapi_batch_is_held_to_the_budget_per_call(
 async def test_vapi_with_no_calls_answers_empty_and_writes_nothing(
     client: AsyncClient, app: FastAPI, postgresql: Any, sleeps: list[float]
 ) -> None:
-    app.state.mock_dispatcher = Dispatcher(load_tool_specs("dental"), _test_fixtures())
+    app.state.mock_suites = {
+        app.state.settings.mock_tools_suite: Suite(
+            Dispatcher(load_tool_specs("dental"), _test_fixtures())
+        )
+    }
     app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 200.0})
     response = await client.post("/mock/vapi", json=_vapi(), headers=AUTH)
     assert response.json() == {"results": []}

@@ -32,7 +32,7 @@ from coval_bench.api.deps import get_pool, get_settings, secret_matches
 from coval_bench.config import Settings
 from coval_bench.db.mock_tool_store import record_call
 from coval_bench.mocktools.codecs import Codec, codec_for
-from coval_bench.mocktools.dispatch import Dispatcher
+from coval_bench.mocktools.dispatch import Suite
 from coval_bench.mocktools.scoring import schedule_scoring
 from coval_bench.mocktools.traces import schedule_export
 
@@ -60,8 +60,12 @@ def require_mock_secret(
         raise HTTPException(401, f"a valid {SECRET_HEADER} is required")
 
 
-def get_dispatcher(request: Request, suite: str | None = Query(default=None)) -> Dispatcher:
-    """The dispatcher the lifespan built for ``?suite=``, or the default suite's; else 503.
+def get_suite(
+    request: Request,
+    suite: str | None = Query(default=None),
+    settings: Settings = Depends(get_settings),
+) -> Suite:
+    """The suite the lifespan built for ``?suite=``, or the default suite; else 404 or 503.
 
     Deliberately does not build one here. Loading the fixtures can mean a call
     out to object storage, and a service that failed to load them at startup will
@@ -69,16 +73,13 @@ def get_dispatcher(request: Request, suite: str | None = Query(default=None)) ->
     trip in front of every tool call, in the middle of a live conversation, and a
     miss is not something a cache prevents. Startup has already logged why.
     """
-    if suite is not None:
-        suites: dict[str, Dispatcher] = getattr(request.app.state, "mock_suites", {})
-        named = suites.get(suite)
-        if named is None:
+    suites: dict[str, Suite] = getattr(request.app.state, "mock_suites", {})
+    loaded = suites.get(suite or settings.mock_tools_suite)
+    if loaded is None:
+        if suite is not None:
             raise HTTPException(404, f"mock tool suite {suite!r} is not loaded")
-        return named
-    dispatcher: Dispatcher | None = getattr(request.app.state, "mock_dispatcher", None)
-    if dispatcher is None:
         raise HTTPException(503, "mock tool fixtures are not loaded")
-    return dispatcher
+    return loaded
 
 
 def get_codec(platform: str) -> Codec:
@@ -94,7 +95,7 @@ async def _answer(
     body: dict[str, Any] | None,
     request: Request,
     background: BackgroundTasks,
-    dispatcher: Dispatcher,
+    suite: Suite,
     settings: Settings,
     pool: AsyncConnectionPool[Any],
 ) -> JSONResponse:
@@ -102,7 +103,7 @@ async def _answer(
     started_ns = time.time_ns()
     calls = codec.decode(body, request.headers, tool)
     correlation = codec.correlate(body, request.headers)
-    outcomes = [dispatcher.call(call.tool, call.args) for call in calls]
+    outcomes = [suite.dispatcher.call(call.tool, call.args) for call in calls]
 
     budget_s = len(calls) * settings.mock_tools_latency_ms / 1000
     remaining = budget_s - (time.perf_counter() - started)
@@ -153,14 +154,14 @@ async def _answer(
                 started_ns=started_ns,
                 ended_ns=ended_ns,
             )
-            if dispatcher.checks:
+            if suite.checks:
                 schedule_scoring(
                     api_key=settings.coval_api_key,
                     api_base=settings.coval_api_base,
                     provider=provider,
                     simulation_id=correlation.simulation_id,
                     platform=codec.name,
-                    checks=dispatcher.checks,
+                    checks=suite.checks,
                     calls=calls,
                     started_ns=started_ns,
                     ended_ns=ended_ns,
@@ -178,7 +179,7 @@ async def call_tools(
     request: Request,
     background: BackgroundTasks,
     body: dict[str, Any] | None = Body(default=None),
-    dispatcher: Dispatcher = Depends(get_dispatcher),
+    suite: Suite = Depends(get_suite),
     settings: Settings = Depends(get_settings),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> JSONResponse:
@@ -187,7 +188,7 @@ async def call_tools(
         raise HTTPException(
             404, f"{platform} names the tool in the path: /mock/{platform}/{{tool}}"
         )
-    return await _answer(codec, None, body, request, background, dispatcher, settings, pool)
+    return await _answer(codec, None, body, request, background, suite, settings, pool)
 
 
 @router.post("/{platform}/{tool}", dependencies=[Depends(require_mock_secret)])
@@ -197,11 +198,11 @@ async def call_tool(
     request: Request,
     background: BackgroundTasks,
     body: dict[str, Any] | None = Body(default=None),
-    dispatcher: Dispatcher = Depends(get_dispatcher),
+    suite: Suite = Depends(get_suite),
     settings: Settings = Depends(get_settings),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> JSONResponse:
     codec = get_codec(platform)
     if not codec.tool_in_path:
         raise HTTPException(404, f"{platform} names the tool in the body: /mock/{platform}")
-    return await _answer(codec, tool, body, request, background, dispatcher, settings, pool)
+    return await _answer(codec, tool, body, request, background, suite, settings, pool)

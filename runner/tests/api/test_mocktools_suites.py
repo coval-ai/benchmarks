@@ -15,7 +15,7 @@ from pydantic import SecretStr
 
 import coval_bench.api.routers.mocktools as router_module
 from coval_bench.mocktools import dispatch
-from coval_bench.mocktools.dispatch import build_corral_dispatcher
+from coval_bench.mocktools.dispatch import build_suite
 from tests.api.test_mocktools import AUTH, PHONE, SIMULATION_ID
 from tests.api.test_mocktools import mock_app as _mock_app
 
@@ -27,7 +27,10 @@ def roulette(mock_app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setattr(
         dispatch, "read_private_fixture", lambda _suite: b'{"lookup": {"value": {"a": "KD7B"}}}'
     )
-    mock_app.state.mock_suites = {"id_roulette": build_corral_dispatcher("id_roulette")}
+    mock_app.state.mock_suites = {
+        **mock_app.state.mock_suites,
+        "id_roulette": build_suite("id_roulette"),
+    }
     mock_app.state.settings = mock_app.state.settings.model_copy(
         update={"coval_api_key": SecretStr("test-coval-key")}
     )
