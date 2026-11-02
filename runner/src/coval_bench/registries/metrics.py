@@ -248,9 +248,10 @@ METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
     version="v1",
     values=(
         _primary(Metric.WER),
-        MetricValueDefinition(key="insertions", unit="percent", minimum=0.0),
-        MetricValueDefinition(key="deletions", unit="percent", minimum=0.0),
-        MetricValueDefinition(key="substitutions", unit="percent", minimum=0.0),
+        # Percent-point split: written until 2026-11, kept so stored rows validate.
+        MetricValueDefinition(key="insertions", unit="percent", minimum=0.0, required=False),
+        MetricValueDefinition(key="deletions", unit="percent", minimum=0.0, required=False),
+        MetricValueDefinition(key="substitutions", unit="percent", minimum=0.0, required=False),
         MetricValueDefinition(key="substitution_count", unit="count", minimum=0.0, required=False),
         MetricValueDefinition(key="deletion_count", unit="count", minimum=0.0, required=False),
         MetricValueDefinition(key="insertion_count", unit="count", minimum=0.0, required=False),
@@ -258,6 +259,7 @@ METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
     ),
     component_sum_tolerance=0.0001,
     optional_all_or_none=(
+        frozenset({"insertions", "deletions", "substitutions"}),
         frozenset({"substitution_count", "deletion_count", "insertion_count", "reference_words"}),
     ),
 )

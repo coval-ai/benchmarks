@@ -1021,6 +1021,7 @@ async def test_metric_payload_insert_waits_for_completion_then_rejects(
 
 
 def test_metric_value_contracts_cover_wer_and_optional_ttfa_components() -> None:
+    # The percent split stopped being written in 2026-11; stored rows still validate.
     validate_metric_values(
         Metric.WER,
         "v1",
@@ -1031,6 +1032,27 @@ def test_metric_value_contracts_cover_wer_and_optional_ttfa_components() -> None
             ("substitutions", "percent", 1, MetricValueRole.COMPONENT),
         ),
     )
+    validate_metric_values(
+        Metric.WER,
+        "v1",
+        (
+            ("primary", "percent", 3, MetricValueRole.PRIMARY),
+            ("substitution_count", "count", 1, MetricValueRole.COMPONENT),
+            ("deletion_count", "count", 1, MetricValueRole.COMPONENT),
+            ("insertion_count", "count", 1, MetricValueRole.COMPONENT),
+            ("reference_words", "count", 100, MetricValueRole.COMPONENT),
+        ),
+    )
+    with pytest.raises(ValueError, match="optional metric value group"):
+        validate_metric_values(
+            Metric.WER,
+            "v1",
+            (
+                ("primary", "percent", 3, MetricValueRole.PRIMARY),
+                ("insertions", "percent", 1, MetricValueRole.COMPONENT),
+                ("deletions", "percent", 2, MetricValueRole.COMPONENT),
+            ),
+        )
     validate_metric_values(
         Metric.WER,
         "v1",

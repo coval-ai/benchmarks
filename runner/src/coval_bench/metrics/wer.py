@@ -9,9 +9,8 @@ edit-distance is delegated to ``jiwer`` for correctness and speed.
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Callable
-from typing import Literal, get_args
+from typing import Literal
 
 import jiwer
 from pydantic import BaseModel
@@ -22,26 +21,14 @@ from whisper_normalizer.english import EnglishTextNormalizer
 # Documented in ``docs/methodology.md`` and ADR-021.
 NORM_VERSION: Literal["2"] = "2"
 
-WordErrorType = Literal["substitution", "insertion", "deletion"]
-
-# Fixes the order of the ``wer_*_pct`` columns and the stacked chart segments.
-WORD_ERROR_TYPES: tuple[WordErrorType, ...] = get_args(WordErrorType)
-
 # ---------------------------------------------------------------------------
 # Public data models
 # ---------------------------------------------------------------------------
 
 
-class WordError(BaseModel):
-    type: WordErrorType
-    reference: str | None
-    hypothesis: str | None
-
-
 class WERResult(BaseModel):
     wer: float
     wer_percentage: float
-    incorrect_words: list[WordError]
     normalized_reference: str
     normalized_hypothesis: str
     substitutions: int
@@ -58,16 +45,6 @@ class WERResult(BaseModel):
             "wer_insertions": self.insertions,
             "wer_reference_words": self.reference_words,
         }
-
-    @property
-    def error_percentages(self) -> dict[str, float]:
-        """Split ``wer_percentage`` into per-error-type points that sum back to
-        it by construction — the dashboard's split must reconcile to the total.
-        Splitting by error share (not count/N) stays exact even for the
-        empty-reference convention, where the score is a count, not a ratio."""
-        share = self.wer_percentage / len(self.incorrect_words) if self.incorrect_words else 0.0
-        counts = Counter(e.type for e in self.incorrect_words)
-        return {f"wer_{t}s_pct": counts[t] * share for t in WORD_ERROR_TYPES}
 
 
 # ---------------------------------------------------------------------------
@@ -88,65 +65,6 @@ def normalize_text(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_word_errors(ref_words: list[str], hyp_words: list[str]) -> list[WordError]:
-    """Build the incorrect-words list via a hand-rolled DP backtrace.
-
-    Mirrors the legacy ``find_incorrect_words`` implementation so that the
-    error breakdown is consistent with historical data.
-    """
-    n = len(ref_words)
-    m = len(hyp_words)
-    # Build edit-distance matrix
-    d: list[list[int]] = [[0] * (m + 1) for _ in range(n + 1)]
-    for ii in range(n + 1):
-        d[ii][0] = ii
-    for jj in range(m + 1):
-        d[0][jj] = jj
-    for ii in range(1, n + 1):
-        for jj in range(1, m + 1):
-            if ref_words[ii - 1] == hyp_words[jj - 1]:
-                d[ii][jj] = d[ii - 1][jj - 1]
-            else:
-                d[ii][jj] = 1 + min(
-                    d[ii - 1][jj - 1],  # substitution
-                    d[ii][jj - 1],  # insertion
-                    d[ii - 1][jj],  # deletion
-                )
-
-    # Backtrace
-    errors: list[WordError] = []
-    ii, jj = n, m
-    while ii > 0 or jj > 0:
-        if ii > 0 and jj > 0 and ref_words[ii - 1] == hyp_words[jj - 1]:
-            ii -= 1
-            jj -= 1
-        elif ii > 0 and jj > 0 and d[ii][jj] == d[ii - 1][jj - 1] + 1:
-            errors.append(
-                WordError(
-                    type="substitution",
-                    reference=ref_words[ii - 1],
-                    hypothesis=hyp_words[jj - 1],
-                )
-            )
-            ii -= 1
-            jj -= 1
-        elif jj > 0 and d[ii][jj] == d[ii][jj - 1] + 1:
-            errors.append(WordError(type="insertion", reference=None, hypothesis=hyp_words[jj - 1]))
-            jj -= 1
-        elif ii > 0 and d[ii][jj] == d[ii - 1][jj] + 1:
-            errors.append(WordError(type="deletion", reference=ref_words[ii - 1], hypothesis=None))
-            ii -= 1
-        else:
-            # Safety: shouldn't happen, but avoid infinite loop
-            if ii > 0:
-                ii -= 1
-            if jj > 0:
-                jj -= 1
-
-    errors.reverse()
-    return errors
-
-
 def compute_wer(
     reference: str,
     hypothesis: str,
@@ -162,8 +80,8 @@ def compute_wer(
             :func:`normalize_text` pipeline.
 
     Returns:
-        :class:`WERResult` with ``wer`` in [0, ∞), ``wer_percentage``,
-        ``incorrect_words``, and both normalized strings.
+        :class:`WERResult` with ``wer`` in [0, ∞), ``wer_percentage``, the
+        jiwer alignment counts, and both normalized strings.
 
     Notes:
         - Empty reference + empty hypothesis → ``wer == 0.0``.
@@ -185,7 +103,6 @@ def compute_wer(
         return WERResult(
             wer=0.0,
             wer_percentage=0.0,
-            incorrect_words=[],
             normalized_reference=norm_ref,
             normalized_hypothesis=norm_hyp,
             substitutions=0,
@@ -200,11 +117,9 @@ def compute_wer(
     if not ref_words:
         ins_count = len(hyp_words)
         empty_ref_wer = float(ins_count)
-        errors = [WordError(type="insertion", reference=None, hypothesis=w) for w in hyp_words]
         return WERResult(
             wer=empty_ref_wer,
             wer_percentage=empty_ref_wer * 100.0,
-            incorrect_words=errors,
             normalized_reference=norm_ref,
             normalized_hypothesis=norm_hyp,
             substitutions=0,
@@ -213,16 +128,13 @@ def compute_wer(
             reference_words=0,
         )
 
-    # Use jiwer for the WER ratio (fast, correctness-tested Levenshtein)
+    # jiwer is the sole alignment: the ratio and the S/I/D counts come from it.
     aligned = jiwer.process_words(norm_ref, norm_hyp)
     raw_wer: float = aligned.wer
-
-    incorrect = _build_word_errors(ref_words, hyp_words)
 
     return WERResult(
         wer=raw_wer,
         wer_percentage=raw_wer * 100.0,
-        incorrect_words=incorrect,
         normalized_reference=norm_ref,
         normalized_hypothesis=norm_hyp,
         substitutions=aligned.substitutions,

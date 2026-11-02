@@ -575,7 +575,6 @@ class _ItemRows:
             status=self.result_status.SUCCESS,
             audio_filename=audio_filename,
             transcript=hypothesis,
-            **wer_result.error_percentages,
             **wer_result.error_counts,
         )
         logger.debug(
