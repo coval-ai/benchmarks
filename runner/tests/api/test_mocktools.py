@@ -129,10 +129,10 @@ async def test_unloaded_fixtures_answer_503_without_reaching_storage(
     app.state.mock_suites = {}
     consulted = False
 
-    def never(suite: str) -> bytes:
+    def never(suite: str, name: str) -> bytes:
         nonlocal consulted
         consulted = True
-        raise FileNotFoundError(suite)
+        raise FileNotFoundError(f"{suite}/{name}")
 
     contracts_module._FIXTURE_PROVIDERS.append(never)
     try:

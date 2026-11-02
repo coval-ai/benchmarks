@@ -12,6 +12,8 @@ from pydantic import ValidationError
 
 import coval_bench.scenarios as contracts_module
 from coval_bench.scenarios import (
+    FIXTURE_FILE,
+    FixtureProvider,
     LlmPin,
     Stack,
     contract_sha256,
@@ -156,10 +158,21 @@ def checkout_without_fixtures(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(contracts_module, "_read_bytes", missing_private)
 
 
+def _serving(data: bytes, file: str = FIXTURE_FILE) -> FixtureProvider:
+    """A provider carrying one file for every suite, and nothing else."""
+
+    def provider(suite: str, name: str) -> bytes:
+        if name != file:
+            raise FileNotFoundError(f"{suite}/{name}")
+        return data
+
+    return provider
+
+
 def test_a_provider_answers_when_the_checkout_has_none(
     no_providers: None, checkout_without_fixtures: None
 ) -> None:
-    register_fixture_provider(lambda suite: SEEDED)
+    register_fixture_provider(_serving(SEEDED))
     assert read_private_fixture("dental") == SEEDED
 
 
@@ -167,18 +180,18 @@ def test_the_local_checkout_wins_over_a_provider(no_providers: None) -> None:
     """Editing the file is what a developer expects to take effect."""
     if not has_private_contract("dental"):
         pytest.skip("local fixtures are not installed")
-    register_fixture_provider(lambda suite: SEEDED)
+    register_fixture_provider(_serving(SEEDED))
     assert read_private_fixture("dental") != SEEDED
 
 
 def test_a_provider_without_the_suite_falls_through(
     no_providers: None, checkout_without_fixtures: None
 ) -> None:
-    def absent(suite: str) -> bytes:
-        raise FileNotFoundError(suite)
+    def absent(suite: str, name: str) -> bytes:
+        raise FileNotFoundError(f"{suite}/{name}")
 
     register_fixture_provider(absent)
-    register_fixture_provider(lambda suite: SEEDED)
+    register_fixture_provider(_serving(SEEDED))
     assert read_private_fixture("dental") == SEEDED
 
 
@@ -210,7 +223,7 @@ def test_the_published_hash_is_the_same_whichever_source_supplied_the_bytes(
         return real(*parts)
 
     monkeypatch.setattr(contracts_module, "_read_bytes", missing_private)
-    register_fixture_provider(lambda suite: seeded)
+    register_fixture_provider(_serving(seeded))
     assert contract_sha256("dental") == from_disk
     assert contract_sha256("dental") != public_contract_sha256("dental")
 

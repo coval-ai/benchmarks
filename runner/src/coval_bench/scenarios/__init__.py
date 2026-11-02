@@ -83,6 +83,8 @@ __all__ = [
     "read_contract_file",
     "has_private_contract",
     "read_private_fixture",
+    "read_private_file",
+    "CORRAL_TOOLS_FILE",
     "FixtureProvider",
     "register_fixture_provider",
     "AnnotatedModel",
@@ -102,14 +104,16 @@ PUBLIC_CONTRACT_FILES: tuple[str, ...] = (
     "system-prompt.txt",
     "first-message.txt",
     "tool-definitions.json",
-    "tools.json",
 )
 
 # Hashed but never committed. Including them means the published hash identifies
 # exactly which fixtures a run used without revealing what they contain; a
 # checkout without them produces a different hash, which is why the pinned test
-# skips rather than fails when the directory is absent.
-PRIVATE_CONTRACT_FILES: tuple[str, ...] = ("_private/mock-tools.json",)
+# skips rather than fails when the directory is absent. ``tools.json`` is a
+# Corral suite's tools and answer key, published from the assets in benchmark-infra.
+FIXTURE_FILE = "mock-tools.json"
+CORRAL_TOOLS_FILE = "tools.json"
+PRIVATE_CONTRACT_FILES: tuple[str, ...] = (FIXTURE_FILE, CORRAL_TOOLS_FILE)
 
 
 class LlmPin(AnnotatedModel):
@@ -216,14 +220,20 @@ def contract_sha256(suite: str) -> str:
     ``stack.json`` too, because changing a pin changes what the agent is just
     as surely as changing its prompt.
     """
-    # The private half goes through `read_private_fixture`, not `_read_bytes`, so
+    # The private half goes through `read_private_file`, not `_read_bytes`, so
     # the hash covers whatever the service actually loaded. Reading the checkout
     # directly here would make a deployment that fetched its fixtures from a
     # provider publish the fixture-less hash while serving the fixtures.
-    private: bytes | None = None
-    with contextlib.suppress(FileNotFoundError, NotADirectoryError):
-        private = read_private_fixture(suite)
-    return _digest(suite, PUBLIC_CONTRACT_FILES, extra=private)
+    return _digest(suite, PUBLIC_CONTRACT_FILES, extra=_private_bytes(suite))
+
+
+def _private_bytes(suite: str) -> bytes | None:
+    """The suite's private files that exist, in ``PRIVATE_CONTRACT_FILES`` order."""
+    parts: list[bytes] = []
+    for name in PRIVATE_CONTRACT_FILES:
+        with contextlib.suppress(FileNotFoundError, NotADirectoryError):
+            parts.append(read_private_file(suite, name))
+    return b"".join(parts) if parts else None
 
 
 def has_private_contract(suite: str) -> bool:
@@ -232,11 +242,7 @@ def has_private_contract(suite: str) -> bool:
     False in a fresh checkout and in CI, since ``_private/`` is never committed.
     Callers that need the fixtures should skip rather than fail.
     """
-    try:
-        read_private_fixture(suite)
-    except (FileNotFoundError, NotADirectoryError):
-        return False
-    return True
+    return _private_bytes(suite) is not None
 
 
 # A source of fixtures that is not the local checkout. The deployed image cannot
@@ -244,7 +250,7 @@ def has_private_contract(suite: str) -> bool:
 # so production reads the seeded world from somewhere else. That somewhere
 # registers itself here rather than being imported, because this module is
 # deliberately dependency-light and has no business knowing about object storage.
-FixtureProvider = Callable[[str], bytes]
+FixtureProvider = Callable[[str, str], bytes]
 
 _FIXTURE_PROVIDERS: list[FixtureProvider] = []
 
@@ -252,14 +258,19 @@ _FIXTURE_PROVIDERS: list[FixtureProvider] = []
 def register_fixture_provider(provider: FixtureProvider) -> None:
     """Add a fallback source, consulted in registration order when local is absent.
 
-    A provider raises ``FileNotFoundError`` for a suite it does not carry, and
-    the chain moves on.
+    A provider is called with a suite and a file name, and raises
+    ``FileNotFoundError`` for one it does not carry, and the chain moves on.
     """
     _FIXTURE_PROVIDERS.append(provider)
 
 
 def read_private_fixture(suite: str) -> bytes:
-    """Read the suite's uncommitted mock fixtures: local checkout, then providers.
+    """Read the suite's uncommitted mock fixtures (``mock-tools.json``)."""
+    return read_private_file(suite, FIXTURE_FILE)
+
+
+def read_private_file(suite: str, name: str) -> bytes:
+    """Read one of the suite's uncommitted files: local checkout, then providers.
 
     Local wins, so that editing the file is what a developer sees take effect.
 
@@ -274,15 +285,15 @@ def read_private_fixture(suite: str) -> bytes:
     ``has_private_contract`` first.
     """
     try:
-        return _read_bytes(suite, "_private", "mock-tools.json")
+        return _read_bytes(suite, "_private", name)
     except (FileNotFoundError, NotADirectoryError):
         pass
     for provider in _FIXTURE_PROVIDERS:
         try:
-            return provider(suite)
+            return provider(suite, name)
         except (FileNotFoundError, NotADirectoryError):
             continue
-    raise FileNotFoundError(f"no mock fixtures for suite {suite!r}, locally or from a provider")
+    raise FileNotFoundError(f"no {name} for suite {suite!r}, locally or from a provider")
 
 
 def stack_as_dict(stack: Stack) -> dict[str, Any]:

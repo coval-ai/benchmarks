@@ -62,23 +62,32 @@ def no_providers(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _client(**objects: bytes) -> Any:
-    return _FakeClient({FIXTURE_OBJECT.format(suite=s): b for s, b in objects.items()})
+    return _FakeClient(
+        {FIXTURE_OBJECT.format(suite=s, name="mock-tools.json"): b for s, b in objects.items()}
+    )
 
 
 def test_the_object_path_mirrors_the_layout_on_disk() -> None:
-    assert FIXTURE_OBJECT.format(suite="dental") == "scenarios/dental/mock-tools.json"
+    assert (
+        FIXTURE_OBJECT.format(suite="dental", name="mock-tools.json")
+        == "scenarios/dental/mock-tools.json"
+    )
+    assert (
+        FIXTURE_OBJECT.format(suite="id_roulette", name="tools.json")
+        == "scenarios/id_roulette/tools.json"
+    )
 
 
 def test_a_seeded_suite_is_returned() -> None:
     provider = gcs_fixture_provider(BUCKET, storage_client=_client(dental=SEEDED))
-    assert provider("dental") == SEEDED
+    assert provider("dental", "mock-tools.json") == SEEDED
 
 
 def test_a_missing_object_raises_file_not_found_so_the_chain_continues() -> None:
     """Not an error: another provider may carry the suite."""
     provider = gcs_fixture_provider(BUCKET, storage_client=_client(dental=SEEDED))
     with pytest.raises(FileNotFoundError):
-        provider("insurance")
+        provider("insurance", "mock-tools.json")
 
 
 def test_the_fetch_is_memoised() -> None:
@@ -90,8 +99,18 @@ def test_the_fetch_is_memoised() -> None:
     client = _client(dental=SEEDED)
     provider = gcs_fixture_provider(BUCKET, storage_client=client)
     for _ in range(3):
-        assert provider("dental") == SEEDED
+        assert provider("dental", "mock-tools.json") == SEEDED
     assert client.downloads == 1
+
+
+def test_a_miss_is_memoised_too() -> None:
+    """A file a suite does not have is asked for once, not on every hash."""
+    client = _client(dental=SEEDED)
+    provider = gcs_fixture_provider(BUCKET, storage_client=client)
+    for _ in range(3):
+        with pytest.raises(FileNotFoundError):
+            provider("dental", "tools.json")
+    assert len(client.blobs) == 1
 
 
 def test_nothing_is_registered_without_a_bucket(no_providers: None) -> None:

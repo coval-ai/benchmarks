@@ -24,9 +24,17 @@ mock_app = _mock_app
 
 @pytest.fixture
 def roulette(mock_app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    monkeypatch.setattr(
-        dispatch, "read_private_fixture", lambda _suite: b'{"lookup": {"value": {"a": "KD7B"}}}'
-    )
+    published = {
+        "tools": [
+            {
+                "name": "lookup",
+                "parameters": {"value": "string"},
+                "character_error_rate": {"value": {"a": "KD7B"}},
+            }
+        ],
+        "responses": {"lookup": {"received": True}},
+    }
+    monkeypatch.setattr(dispatch, "read_private_file", lambda _suite, _name: json.dumps(published))
     mock_app.state.mock_suites = {
         **mock_app.state.mock_suites,
         "id_roulette": build_suite("id_roulette"),

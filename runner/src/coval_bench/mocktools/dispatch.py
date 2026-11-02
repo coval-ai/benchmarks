@@ -21,17 +21,19 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field
 
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture, parse_fixtures
 from coval_bench.mocktools.resolver import Resolution, resolve
-from coval_bench.scenarios import read_contract_file, read_private_fixture
+from coval_bench.scenarios import (
+    CORRAL_TOOLS_FILE,
+    read_contract_file,
+    read_private_file,
+    read_private_fixture,
+)
 
 TOOL_DEFINITIONS_FILE = "tool-definitions.json"
-# A Corral scenario's tools: one fixed answer per tool, plus the checks on its arguments.
-CORRAL_TOOLS_FILE = "tools.json"
-# Every suite the service loads, each answered from its Corral ``tools.json``. A copy until
-# the scenario is published as an asset; then it is read from there.
+# Every suite the service loads, each answered from the ``tools.json`` the assets publish.
 SUITES: tuple[str, ...] = ("id_roulette",)
 
 # An argument's right value: one string for every test case, or one per test case.
@@ -265,27 +267,12 @@ def parse_corral_tools(raw: str | bytes) -> Suite:
     return Suite(Dispatcher(specs, MockFixtures(tools=fixtures)), checks)
 
 
-_ANSWER_KEY = TypeAdapter(dict[str, Check])
-
-
 def build_suite(suite: str) -> Suite:
-    """Build a Corral suite from its committed ``tools.json`` and its private answer key.
+    """Build a Corral suite from its ``tools.json``: the tools and their answer key.
 
-    The right values are the evaluator, so they sit in the suite's private fixture as
-    ``{tool: {argument: value}}``, not in the public file. Without one the suite still
-    answers but checks nothing.
+    The file is written once, in the assets (benchmark-infra), and published to the
+    private bucket, because the right values are the evaluator and this repository is
+    public. Read through ``read_private_file`` so the contract hash covers the same bytes.
+    Raises ``FileNotFoundError`` when the file is neither local nor published.
     """
-    document = CorralToolsFile.model_validate_json(read_contract_file(suite, CORRAL_TOOLS_FILE))
-    try:
-        answers = _ANSWER_KEY.validate_json(read_private_fixture(suite))
-    except (FileNotFoundError, NotADirectoryError):
-        answers = {}
-    if unknown := sorted(answers.keys() - {tool.name for tool in document.tools}):
-        raise ValueError(f"answers for tools that do not exist: {', '.join(unknown)}")
-    tools = [
-        tool.model_copy(update={"character_error_rate": answers[tool.name]})
-        if tool.name in answers
-        else tool
-        for tool in document.tools
-    ]
-    return parse_corral_tools(document.model_copy(update={"tools": tools}).model_dump_json())
+    return parse_corral_tools(read_private_file(suite, CORRAL_TOOLS_FILE))
