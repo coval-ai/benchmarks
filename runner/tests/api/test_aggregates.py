@@ -57,21 +57,6 @@ async def _insert_wer_with_counts(
     )
 
 
-async def _insert_wer(postgresql: Any, run_id: int, *, dataset_id: str, value: float) -> None:
-    await _insert_metric(
-        postgresql,
-        run_id,
-        dataset_id=dataset_id,
-        metric_type="WER",
-        values={
-            "primary": value,
-            "insertions": 1.0,
-            "deletions": 2.0,
-            "substitutions": value - 3.0,
-        },
-    )
-
-
 def test_intervals_cover_every_window() -> None:
     """Every WindowLiteral value must have a duration and a view — a window
     added to the literal but not the dicts 500s after validation."""
@@ -149,54 +134,55 @@ async def test_single_sample_stddev_is_zero(client: AsyncClient, postgresql: Any
     assert s["sample_count"] == 1
 
 
-async def test_wer_breakdown_averages_and_reconciles(client: AsyncClient, postgresql: Any) -> None:
-    """Each error type averages independently, and the three sum to avg_value."""
+async def test_wer_breakdown_pools_counts_and_reconciles(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Each error type is its summed count over summed reference words, so the
+    three add up to avg_value exactly."""
     run_id = await _insert_run(postgresql)
-    for ins, dele, sub in ((1.0, 2.0, 3.0), (3.0, 4.0, 11.0)):
-        await _insert_metric(
-            postgresql,
-            run_id,
-            dataset_id="stt-v1",
-            metric_type="WER",
-            values={
-                "primary": ins + dele + sub,
-                "insertions": ins,
-                "deletions": dele,
-                "substitutions": sub,
-            },
+    for sub, dele, ins, refs in ((1, 2, 3, 40), (3, 4, 11, 60)):
+        await _insert_wer_with_counts(
+            postgresql, run_id, counts=(sub, dele, ins), reference_words=refs
         )
     await _publish(postgresql)
 
     response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     s = response.json()["model_stats"][0]
-    assert s["wer_insertions_pct"] == pytest.approx(2.0)
-    assert s["wer_deletions_pct"] == pytest.approx(3.0)
-    assert s["wer_substitutions_pct"] == pytest.approx(7.0)
-    assert s["avg_value"] == pytest.approx(12.0)
+    assert s["wer_substitutions_pct"] == pytest.approx(4.0)
+    assert s["wer_deletions_pct"] == pytest.approx(6.0)
+    assert s["wer_insertions_pct"] == pytest.approx(14.0)
+    assert s["avg_value"] == pytest.approx(24.0)
     parts = ("wer_insertions_pct", "wer_deletions_pct", "wer_substitutions_pct")
     assert sum(s[k] for k in parts) == pytest.approx(s["avg_value"])
 
 
-async def test_wer_breakdown_null_when_any_component_missing(
+async def test_wer_rows_without_counts_leave_every_window(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    """A row carrying only some components nulls the whole split — two real
-    averages beside a null third could never reconcile with avg_value."""
-    run_id = await _insert_run(postgresql)
+    """A WER row with no reference-word count cannot join a ratio, so it is not
+    in the stats, the series, or the timeline at all."""
+    scheduled = datetime.now(dt.UTC).replace(microsecond=0) - timedelta(hours=1)
+    run_id = await _insert_run(postgresql, scheduled_at=scheduled)
+    await _insert_wer_with_counts(postgresql, run_id, counts=(1, 0, 0), reference_words=10)
     await _insert_metric(
         postgresql,
         run_id,
-        dataset_id="stt-v1",
+        dataset_id="stt-v2",
         metric_type="WER",
-        values={"primary": 6.0, "insertions": 1.0, "deletions": 2.0},
+        values={"primary": 20.0, "insertions": 1.0, "deletions": 2.0, "substitutions": 17.0},
+        counted=False,
     )
     await _publish(postgresql)
 
-    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
-    s = response.json()["model_stats"][0]
-    assert s["wer_insertions_pct"] is None
-    assert s["wer_deletions_pct"] is None
-    assert s["wer_substitutions_pct"] is None
+    body = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
+    [stat] = body["model_stats"]
+    assert stat["sample_count"] == 1
+    assert stat["avg_value"] == pytest.approx(10.0)
+    assert stat["wer_substitutions_pct"] == pytest.approx(10.0)
+    [point] = body["series"]
+    assert (point["sample_count"], point["error_sum"], point["reference_word_sum"]) == (1, 1, 10)
+    timeline = await client.get("/v1/results/timeline", params={"benchmark": "STT"})
+    assert [p["value"] for p in timeline.json()["points"]] == [pytest.approx(10.0)]
 
 
 async def test_dataset_filter_splits_and_default_pools(
@@ -358,7 +344,6 @@ async def test_stats_pool_scope_and_group_exact_distribution(
     await _publish(postgresql)
     pooled = (await client.get("/v1/results/aggregates", params=params)).json()["model_stats"][0]
     assert pooled["sample_count"] == 4
-    assert pooled["mean_value"] == pytest.approx(2.5)
     assert pooled["avg_value"] == pytest.approx(2.5)
     assert pooled["stddev_value"] == pytest.approx(1.2909944, rel=1e-6)
     assert pooled["p25"] == pytest.approx(1.75)
@@ -377,14 +362,14 @@ async def test_stats_pool_scope_and_group_exact_distribution(
         )
     ).json()["model_stats"][0]
     assert scoped["sample_count"] == 2
-    assert scoped["mean_value"] == pytest.approx(3.5)
+    assert scoped["avg_value"] == pytest.approx(3.5)
 
     await _publish(postgresql)
     by_dataset = (
         await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
     ).json()["blocks"]
     assert [block["dataset"] for block in by_dataset] == ["stt-v1", "stt-v3"]
-    assert [block["model_stats"][0]["mean_value"] for block in by_dataset] == pytest.approx(
+    assert [block["model_stats"][0]["avg_value"] for block in by_dataset] == pytest.approx(
         [1.5, 3.5]
     )
 
@@ -451,8 +436,10 @@ async def test_projection_reads_current_metadata_eligibility_and_window(
         assert body["datasets"] == []
 
 
-async def test_wer_zero_reference_falls_back_to_mean(client: AsyncClient, postgresql: Any) -> None:
-    """Complete count rows with no reference words cannot produce a ratio."""
+async def test_wer_zero_reference_words_produce_no_stat(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """A group whose reference words sum to zero has no ratio, so no row."""
     run_id = await _insert_run(postgresql, dataset_id="stt-v2")
     await _insert_metric(
         postgresql,
@@ -469,58 +456,9 @@ async def test_wer_zero_reference_falls_back_to_mean(client: AsyncClient, postgr
     )
 
     await _publish(postgresql)
-    stat = (
-        await client.get(
-            "/v1/results/aggregates",
-            params={"benchmark": "STT", "include_series": "false"},
-        )
-    ).json()["model_stats"][0]
-    assert stat["sample_count"] == 1
-    assert stat["avg_value"] == pytest.approx(0.0)
-    assert stat["pooled_value"] is None
-
-
-async def test_wer_count_and_split_cohorts_fall_back_independently(
-    client: AsyncClient, postgresql: Any
-) -> None:
-    """Incomplete count or split cohorts cannot manufacture pooled breakdowns."""
-    run_id = await _insert_run(postgresql, dataset_id="stt-v2")
-    await _insert_metric(
-        postgresql,
-        run_id,
-        dataset_id="stt-v2",
-        metric_type="WER",
-        values={
-            "primary": 10.0,
-            "insertions": 1.0,
-            "deletions": 2.0,
-            "substitutions": 7.0,
-            "substitution_count": 1.0,
-            "deletion_count": 1.0,
-            "insertion_count": 0.0,
-            "reference_words": 10.0,
-        },
-    )
-    await _insert_metric(
-        postgresql,
-        run_id,
-        dataset_id="stt-v2",
-        metric_type="WER",
-        values={"primary": 20.0},
-    )
-
-    await _publish(postgresql)
-    stat = (
-        await client.get(
-            "/v1/results/aggregates",
-            params={"benchmark": "STT", "include_series": "false"},
-        )
-    ).json()["model_stats"][0]
-    assert stat["sample_count"] == 2
-    assert stat["mean_value"] == pytest.approx(15.0)
-    assert stat["avg_value"] == pytest.approx(15.0)
-    assert stat["pooled_value"] is None
-    assert stat["wer_insertions_pct"] is None
+    body = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
+    assert body["model_stats"] == []
+    assert body["series"] == []
 
 
 async def test_ttfa_derived_name_collision_keeps_public_count(
@@ -556,7 +494,7 @@ async def test_ttfa_derived_name_collision_keeps_public_count(
         ).json()["model_stats"]
     }
     assert stats["TTFARoundtrip"]["sample_count"] == 2
-    assert stats["TTFARoundtrip"]["mean_value"] == pytest.approx(82.5)
+    assert stats["TTFARoundtrip"]["avg_value"] == pytest.approx(82.5)
 
 
 async def test_pooled_wer_is_a_ratio_of_sums(client: AsyncClient, postgresql: Any) -> None:
@@ -565,24 +503,14 @@ async def test_pooled_wer_is_a_ratio_of_sums(client: AsyncClient, postgresql: An
     await _insert_wer_with_counts(postgresql, run_id, counts=(1, 0, 0), reference_words=4)
     await _insert_wer_with_counts(postgresql, run_id, counts=(0, 0, 0), reference_words=36)
 
-    app = client._transport.app  # type: ignore[attr-defined]
     await _publish(postgresql)
     s = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
     s = s["model_stats"][0]
-    keys = ("mean_value", "avg_value", "pooled_value", "wer_substitutions_pct")
-    assert [s[k] for k in keys] == pytest.approx([12.5, 2.5, 2.5, 2.5])
-    assert (s["pooled_deletions_pct"], s["pooled_insertions_pct"]) == (0, 0)
-    await _publish(postgresql)
+    assert (s["avg_value"], s["wer_substitutions_pct"]) == pytest.approx((2.5, 2.5))
+    assert (s["wer_deletions_pct"], s["wer_insertions_pct"]) == (0, 0)
+    assert s["p50"] == pytest.approx(12.5)
     board = await client.get("/v1/leaderboard", params={"metric": "WER", "benchmark": "STT"})
     assert board.json()["entries"][0]["avg"] == pytest.approx(2.5)
-
-    await _insert_wer(postgresql, run_id, dataset_id="stt-v2", value=6.0)
-    app.state.response_cache.clear()
-    await _publish(postgresql)
-    s = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
-    s = s["model_stats"][0]
-    assert s["pooled_value"] is None
-    assert s["avg_value"] == pytest.approx(s["mean_value"]) == pytest.approx(31 / 3)
 
 
 async def test_bucket_pooled_wer_uses_word_totals(client: AsyncClient, postgresql: Any) -> None:
@@ -595,7 +523,7 @@ async def test_bucket_pooled_wer_uses_word_totals(client: AsyncClient, postgresq
     await _publish(postgresql)
     pooled = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     [point] = pooled.json()["series"]
-    assert (point["pooled_value"], point["error_sum"], point["reference_word_sum"]) == (5.0, 2, 40)
+    assert (point["error_sum"], point["reference_word_sum"]) == (2, 40)
     timeline = await client.get("/v1/results/timeline", params={"benchmark": "STT"})
     assert timeline.json()["points"][0]["value"] == pytest.approx(5.0)
     compact = await client.get(
@@ -1096,29 +1024,30 @@ async def test_timeline_custom_average_weights_source_counts(
     assert body["aggregation"] == "average"
     assert body["bucket_seconds"] == 3600
     assert [point["value"] for point in body["points"]] == [pytest.approx(7.0)]
-    assert body["points"][0]["aggregation_method"] == "mean_fallback"
+    assert body["points"][0]["aggregation_method"] == "ratio"
     assert body["points"][0]["sample_count"] == 4
 
 
 @pytest.mark.parametrize(
-    ("coverage", "first_refs", "second_refs", "expected", "pooled"),
+    ("coverage", "first_refs", "second_refs", "expected", "count"),
     [
-        ("complete", 10, 30, 2.5, True),
-        ("partial", 10, 30, 6.0, False),
-        ("complete", 0, 30, 100 / 30, True),
-        ("complete", 0, 0, 6.0, False),
+        ("complete", 10, 30, 2.5, 2),
+        ("partial", 10, 30, 10.0, 1),
+        ("complete", 0, 30, 100 / 30, 2),
+        ("complete", 0, 0, None, 0),
     ],
 )
-async def test_timeline_average_uses_complete_wer_pool_or_fallback(
+async def test_timeline_average_pools_only_counted_wer(
     client: AsyncClient,
     postgresql: Any,
     coverage: str,
     first_refs: int,
     second_refs: int,
-    expected: float,
-    pooled: bool,
+    expected: float | None,
+    count: int,
 ) -> None:
-    """A bucket pools WER only when every evaluation in it carried word totals."""
+    """A bucket's WER is its counted evaluations' ratio; uncounted ones drop out,
+    and a bucket with no reference words yields no point."""
     bucket = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=2)
     for offset, value, errors, refs in [(0, 10.0, 1, first_refs), (15, 2.0, 0, second_refs)]:
         run_id = await _insert_run(postgresql, scheduled_at=bucket + timedelta(minutes=offset))
@@ -1130,6 +1059,7 @@ async def test_timeline_average_uses_complete_wer_pool_or_fallback(
             dataset_id="stt-v2",
             metric_type="WER",
             values={"primary": value, **(counts | {"reference_words": refs} if complete else {})},
+            counted=complete,
         )
     await _publish(postgresql)
     response = await client.get(
@@ -1142,11 +1072,14 @@ async def test_timeline_average_uses_complete_wer_pool_or_fallback(
         },
     )
     assert response.status_code == 200
-    [point] = response.json()["points"]
+    points = response.json()["points"]
+    if expected is None:
+        assert points == []
+        return
+    [point] = points
     assert point["value"] == pytest.approx(expected)
-    assert point["pooled_value"] == (pytest.approx(expected) if pooled else None)
-    assert point["aggregation_method"] == ("ratio" if pooled else "mean_fallback")
-    assert point["sample_count"] == 2
+    assert point["aggregation_method"] == "ratio"
+    assert point["sample_count"] == count
 
 
 async def test_timeline_uses_weighted_wer_and_latency_p50(
@@ -1354,7 +1287,6 @@ async def test_exact_wer_percentile_does_not_pool_reference_words(
     assert response.status_code == 200
     point = response.json()["points"][0]
     assert point["value"] == pytest.approx(50.0)
-    assert point["pooled_value"] is None
     assert point["value"] != pytest.approx((1.0 + 90.0) / 110.0 * 100.0)
 
 

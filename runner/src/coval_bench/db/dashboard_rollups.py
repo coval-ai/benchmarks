@@ -66,6 +66,7 @@ WITH evaluations AS (
   JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
   JOIN benchmarks_v2.runs run ON run.id = o.run_id
   WHERE o.status = 'succeeded' AND run.status IN ('succeeded', 'partial')
+    AND (e.metric_type <> 'WER' OR e.reference_words IS NOT NULL)
     AND {slot_filter}
 ), measurements AS (
   SELECT e.*, part.value_key, part.measured
@@ -84,10 +85,8 @@ SELECT provider, model, benchmark, COALESCE(dataset_id, '__all__'),
        PERCENTILE_CONT(.9) WITHIN GROUP (ORDER BY measured)::float8,
        PERCENTILE_CONT(.95) WITHIN GROUP (ORDER BY measured)::float8,
        MAX(measured)::float8, SUM(measured)::float8, COUNT(*)::int,
-       CASE WHEN value_key = 'primary' AND COUNT(error_words) = COUNT(*)
-             AND COUNT(reference_words) = COUNT(*) THEN SUM(error_words)::float8 END,
-       CASE WHEN value_key = 'primary' AND COUNT(error_words) = COUNT(*)
-             AND COUNT(reference_words) = COUNT(*) THEN SUM(reference_words)::float8 END,
+       CASE WHEN value_key = 'primary' THEN SUM(error_words)::float8 END,
+       CASE WHEN value_key = 'primary' THEN SUM(reference_words)::float8 END,
        MAX(scheduled_at)
 FROM measurements
 GROUP BY GROUPING SETS (

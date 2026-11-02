@@ -291,6 +291,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(legacy_drop, "op", SimpleNamespace(execute=conn.execute)):
             legacy_drop.upgrade()
+        pooled_only = import_module(
+            "coval_bench.db.migrations.versions.20261102_0047_pooled_wer_only"
+        )
+        with patch.object(pooled_only, "op", SimpleNamespace(execute=conn.execute)):
+            pooled_only.upgrade()
         # Model/tag registry tables (mirrors migration 20260824_0020).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.models (
@@ -696,8 +701,21 @@ async def _insert_metric(
     provider: str = "deepgram",
     model: str = "nova-3",
     captured_at: datetime | None = None,
+    counted: bool = True,
 ) -> None:
-    """Seed one evaluation."""
+    """Seed one evaluation.
+
+    A WER row without explicit counts gets its value as errors over 100 reference
+    words, so equal-weight clips pool to the same figure a per-clip mean gives.
+    """
+    if counted and metric_type == "WER" and "reference_words" not in values:
+        values = {
+            **values,
+            "substitution_count": values[primary_key],
+            "deletion_count": 0.0,
+            "insertion_count": 0.0,
+            "reference_words": 100.0,
+        }
     observation_id, evaluation_id = uuid4(), uuid4()
     async with await psycopg.AsyncConnection.connect(
         _make_db_url(postgresql), autocommit=True

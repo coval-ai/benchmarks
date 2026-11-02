@@ -133,11 +133,12 @@ reference into a raw insertion count. Pooling weights every word equally and
 absorbs both.
 
 **Methodology change (2026-09).** WER was previously the mean of per-clip
-ratios. Counts are recorded from this point forward and were not backfilled,
-so a window reports the pooled figure only once every clip in it carries
-counts; until then it falls back to the mean and says so (`pooled_value` is
-null, `mean_value` is always present). Headline numbers before and after are
-**not comparable**. See [ADR-024](#adr-references).
+ratios. Counts are recorded from this point forward and were not backfilled;
+until every clip in the 30-day window carried counts (2026-10-09) a window
+fell back to the mean. Since then the pooled ratio is the only computation:
+a WER row without counts is excluded from every window, bucket, and timeline
+point. Headline numbers before and after are **not comparable**. See
+[ADR-024](#adr-references).
 
 ## 4. Latency metrics (TTFA)
 
@@ -292,8 +293,8 @@ exact source reproduction for those rows is unsupported.
   aggregates pool across datasets.
 - ADR-024 — Corpus-level WER as the headline: per-clip S/I/D and reference-word
   counts persisted as WER components; aggregates report sum(errors) /
-  sum(reference words), falling back to the per-clip mean until a window is
-  fully counted; no backfill.
+  sum(reference words); no backfill, and the interim per-clip mean fallback
+  was removed once every window was counted (2026-11).
 
 ADR rationale is referenced inline in the relevant source files and READMEs
 where the decision context is load-bearing.
