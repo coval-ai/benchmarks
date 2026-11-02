@@ -103,6 +103,16 @@ def test_the_fetch_is_memoised() -> None:
     assert client.downloads == 1
 
 
+def test_a_miss_is_memoised_too() -> None:
+    """A file a suite does not have is asked for once, not on every hash."""
+    client = _client(dental=SEEDED)
+    provider = gcs_fixture_provider(BUCKET, storage_client=client)
+    for _ in range(3):
+        with pytest.raises(FileNotFoundError):
+            provider("dental", "tools.json")
+    assert len(client.blobs) == 1
+
+
 def test_nothing_is_registered_without_a_bucket(no_providers: None) -> None:
     """Every developer machine: local fixtures only, no cloud call attempted."""
     install_fixture_providers(Settings(mock_fixtures_bucket=""))

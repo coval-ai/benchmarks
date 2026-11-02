@@ -83,6 +83,8 @@ __all__ = [
     "read_contract_file",
     "has_private_contract",
     "read_private_fixture",
+    "read_private_file",
+    "CORRAL_TOOLS_FILE",
     "FixtureProvider",
     "register_fixture_provider",
     "AnnotatedModel",
@@ -110,7 +112,8 @@ PUBLIC_CONTRACT_FILES: tuple[str, ...] = (
 # skips rather than fails when the directory is absent. ``tools.json`` is a
 # Corral suite's tools and answer key, published from the assets in benchmark-infra.
 FIXTURE_FILE = "mock-tools.json"
-PRIVATE_CONTRACT_FILES: tuple[str, ...] = (FIXTURE_FILE, "tools.json")
+CORRAL_TOOLS_FILE = "tools.json"
+PRIVATE_CONTRACT_FILES: tuple[str, ...] = (FIXTURE_FILE, CORRAL_TOOLS_FILE)
 
 
 class LlmPin(AnnotatedModel):

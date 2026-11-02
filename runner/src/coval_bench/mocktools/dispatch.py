@@ -25,11 +25,14 @@ from pydantic import BaseModel, Field
 
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture, parse_fixtures
 from coval_bench.mocktools.resolver import Resolution, resolve
-from coval_bench.scenarios import read_contract_file, read_private_file, read_private_fixture
+from coval_bench.scenarios import (
+    CORRAL_TOOLS_FILE,
+    read_contract_file,
+    read_private_file,
+    read_private_fixture,
+)
 
 TOOL_DEFINITIONS_FILE = "tool-definitions.json"
-# A Corral scenario's tools: one fixed answer per tool, plus the checks on its arguments.
-CORRAL_TOOLS_FILE = "tools.json"
 # Every suite the service loads, each answered from the ``tools.json`` the assets publish.
 SUITES: tuple[str, ...] = ("id_roulette",)
 

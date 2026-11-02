@@ -52,13 +52,22 @@ def gcs_fixture_provider(
     """
 
     @functools.cache
-    def provider(suite: str, name: str) -> bytes:
+    def fetch(suite: str, name: str) -> bytes | None:
         key = FIXTURE_OBJECT.format(suite=suite, name=name)
         data = gcs.read_bytes(bucket, key, storage_client=storage_client)
+        if data is not None:
+            logger.info(
+                "mock_fixtures_loaded", suite=suite, file=name, bucket=bucket, bytes=len(data)
+            )
+        return data
+
+    def provider(suite: str, name: str) -> bytes:
+        data = fetch(suite, name)
         if data is None:
             # Not an error: the chain moves on to the next provider.
-            raise FileNotFoundError(f"gs://{bucket}/{key}")
-        logger.info("mock_fixtures_loaded", suite=suite, file=name, bucket=bucket, bytes=len(data))
+            raise FileNotFoundError(
+                f"gs://{bucket}/{FIXTURE_OBJECT.format(suite=suite, name=name)}"
+            )
         return data
 
     return provider
