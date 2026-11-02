@@ -267,6 +267,31 @@ def parse_corral_tools(raw: str | bytes) -> Suite:
     return Suite(Dispatcher(specs, MockFixtures(tools=fixtures)), checks)
 
 
+def vendor_tool_definitions(raw: str | bytes) -> list[dict[str, Any]]:
+    """A Corral ``tools.json`` as the tool definitions a platform is configured with.
+
+    Each tool becomes a JSON Schema function with every argument required, and the right
+    values are left out, because they are the evaluator and the platforms must not see them.
+    """
+    return [
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": {
+                "type": "object",
+                "properties": {name: {"type": kind} for name, kind in tool.parameters.items()},
+                "required": list(tool.parameters),
+            },
+        }
+        for tool in CorralToolsFile.model_validate_json(raw).tools
+    ]
+
+
+def load_vendor_tools(suite: str) -> list[dict[str, Any]]:
+    """The suite's platform tool definitions, read from the same ``tools.json`` ``/mock`` serves."""
+    return vendor_tool_definitions(read_private_file(suite, CORRAL_TOOLS_FILE))
+
+
 def build_suite(suite: str) -> Suite:
     """Build a Corral suite from its ``tools.json``: the tools and their answer key.
 

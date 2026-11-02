@@ -12,7 +12,10 @@ import pytest
 from click.testing import CliRunner
 
 import coval_bench.platform_assets as platform_assets
+import coval_bench.scenarios as scenarios
 from coval_bench.assets import SecretRef
+from coval_bench.mocktools import dispatch
+from coval_bench.mocktools.dispatch import vendor_tool_definitions
 from coval_bench.platform_assets import (
     AGENTS,
     CovalClient,
@@ -29,16 +32,40 @@ from coval_bench.platform_assets import (
     plan,
     platform_for,
     register,
+    register_dial_target,
     spec_for,
     vendor_drift,
 )
-from coval_bench.scenarios import read_contract_file
 from coval_bench.variants.platforms import redact
 
 BASE = "https://mock.example.com/"
 SECRET = "s3cr3t-value"  # noqa: S105
-CONTRACT = json.loads(read_contract_file("dental", "tool-definitions.json"))
-DENTAL = spec_for("vapi-dental")
+TOOLS = json.dumps(
+    {
+        "tools": [
+            {
+                "name": "lookup",
+                "description": "Look up the detail the caller gave.",
+                "parameters": {"value": "string"},
+                "character_error_rate": {"value": {"card-1": "4111111111111111"}},
+            }
+        ],
+        "responses": {"lookup": {"received": True}},
+    }
+).encode()
+CONTRACT = vendor_tool_definitions(TOOLS)
+PROMPT = "You look up a caller's detail. Begin with: What can I look up for you?"
+VAPI = spec_for("vapi/pinned")
+# The full Coval reconcile, for an agent the assets do not own.
+UNMAPPED = VAPI.model_copy(update={"suite": "dental", "scenario": None})
+
+
+def _published(suite: str, name: str) -> bytes:
+    files = {"tools.json": TOOLS, "system-prompt.txt": f"{PROMPT}\n".encode()}
+    if suite != "id_roulette" or name not in files:
+        raise FileNotFoundError(name)
+    return files[name]
+
 
 LIVE: dict[str, Any] = {
     "id": "asst_1",
@@ -48,19 +75,27 @@ LIVE: dict[str, Any] = {
         "provider": "openai",
         "model": "gpt-4.1",
         "temperature": 0,
-        "messages": [{"role": "system", "content": "You are the front desk."}],
+        "messages": [{"role": "system", "content": PROMPT}],
         "tools": [],
     },
     "voice": {"provider": "vapi", "voiceId": "Elliot"},
+    "firstMessageMode": "assistant-speaks-first-with-model-generated-message",
 }
+
+
+@pytest.fixture(autouse=True)
+def published(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scenarios, "_FIXTURE_PROVIDERS", [_published])
+    monkeypatch.setattr(dispatch, "read_private_file", _published)
+    monkeypatch.setattr(scenarios, "read_private_file", _published)
 
 
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("VAPI_DENTAL_ASSISTANT_ID", "asst_1")
+    monkeypatch.setenv("VAPI_ID_ROULETTE_ASSISTANT_ID", "asst_1")
     monkeypatch.setenv("VAPI_API_KEY", "vapi-key")
     monkeypatch.setenv("MOCK_TOOLS_SECRET", SECRET)
-    monkeypatch.setenv("VAPI_DENTAL_DIAL_TARGET", "sip:example-dental@sip.vapi.ai")
+    monkeypatch.setenv("VAPI_ID_ROULETTE_DIAL_TARGET", "sip:example-dental@sip.vapi.ai")
     monkeypatch.setattr(platform_assets, "has_private_contract", lambda suite: True)
 
 
@@ -78,13 +113,13 @@ def test_secret_ref_names_what_is_missing(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_spec_for_names_the_known_set() -> None:
-    with pytest.raises(KeyError, match="known: livekit-dental, retell-dental, telnyx-dental, vapi"):
-        spec_for("synthflow-dental")
+    with pytest.raises(KeyError, match="known: livekit/pinned, retell/pinned, telnyx/pinned, vapi"):
+        spec_for("synthflow/pinned")
     assert {s.key for s in AGENTS} == {
-        "vapi-dental",
-        "telnyx-dental",
-        "retell-dental",
-        "livekit-dental",
+        "vapi/pinned",
+        "telnyx/pinned",
+        "retell/pinned",
+        "livekit/pinned",
     }
 
 
@@ -92,7 +127,7 @@ def test_spec_for_names_the_known_set() -> None:
 
 
 def test_code_managed_platform_refuses_plan_and_apply(env: None) -> None:
-    spec = spec_for("livekit-dental")
+    spec = spec_for("livekit/pinned")
     assert spec.api_key is None
     with pytest.raises(SyncError, match="code-managed"):
         platform_for(spec)
@@ -101,28 +136,30 @@ def test_code_managed_platform_refuses_plan_and_apply(env: None) -> None:
 
 
 def test_code_managed_platform_has_no_vendor_drift_to_block_launch(env: None) -> None:
-    assert vendor_drift(spec_for("livekit-dental"), BASE, None) == []
+    assert vendor_drift(spec_for("livekit/pinned"), BASE, None) == []
 
 
 def test_code_managed_agent_still_registers_with_coval(
     env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = "sip:+15550100001@example.sip.livekit.cloud;transport=tcp"
-    monkeypatch.setenv("LIVEKIT_DENTAL_DIAL_TARGET", target)
-    body = coval_agent_body(spec_for("livekit-dental"))
+    monkeypatch.setenv("LIVEKIT_ID_ROULETTE_DIAL_TARGET", target)
+    body = coval_agent_body(
+        spec_for("livekit/pinned").model_copy(update={"suite": "dental", "scenario": None})
+    )
     assert body["phone_number"] == target
     assert body["attributes"]["platform"] == "livekit"
     assert body["tags"] == ["orchestration", "dental", "livekit"]
 
 
 def test_mock_base_url_is_optional_only_where_a_code_managed_arm_never_reads_it() -> None:
-    livekit = spec_for("livekit-dental")
+    livekit = spec_for("livekit/pinned")
     assert mock_base_url_for(livekit, None, needed_for_code_managed=False) == ""
     assert mock_base_url_for(livekit, BASE, needed_for_code_managed=False) == BASE
-    with pytest.raises(click.UsageError, match="livekit-dental"):
+    with pytest.raises(click.UsageError, match="livekit/pinned"):
         mock_base_url_for(livekit, None, needed_for_code_managed=True)
-    with pytest.raises(click.UsageError, match="vapi-dental"):
-        mock_base_url_for(DENTAL, None, needed_for_code_managed=False)
+    with pytest.raises(click.UsageError, match="vapi/pinned"):
+        mock_base_url_for(VAPI, None, needed_for_code_managed=False)
 
 
 def test_launch_cli_demands_the_mock_url_for_vendor_arms_only(
@@ -132,12 +169,12 @@ def test_launch_cli_demands_the_mock_url_for_vendor_arms_only(
     monkeypatch.delenv("COVAL_API_KEY", raising=False)
     common = ["launch", "--persona-id", "p", "--test-set-id", "t"]
     vendor = CliRunner().invoke(
-        platform_assets.platform_assets, [*common, "--agent", "vapi-dental"]
+        platform_assets.platform_assets, [*common, "--agent", "vapi/pinned"]
     )
     assert vendor.exit_code == 2
     assert "--mock-base-url" in vendor.output
     code_managed = CliRunner().invoke(
-        platform_assets.platform_assets, [*common, "--agent", "livekit-dental"]
+        platform_assets.platform_assets, [*common, "--agent", "livekit/pinned"]
     )
     assert "--mock-base-url" not in code_managed.output
     assert isinstance(code_managed.exception, RuntimeError)
@@ -148,13 +185,13 @@ def test_launch_cli_demands_the_mock_url_for_vendor_arms_only(
 
 
 def test_desired_resolves_the_secret_and_targets_model_tools(env: None) -> None:
-    wanted = desired(DENTAL, BASE)
-    assert list(wanted) == ["model.tools"]
+    wanted = desired(VAPI, BASE)
+    assert list(wanted) == ["model.tools", "model.messages", "firstMessageMode"]
     assert wanted["model.tools"][0]["server"]["headers"]["X-Mock-Tools-Key"] == SECRET
 
 
 def test_desired_refuses_an_unknown_platform(env: None) -> None:
-    stranger = DENTAL.model_copy(update={"platform": "synthflow"})
+    stranger = VAPI.model_copy(update={"platform": "synthflow"})
     with pytest.raises(
         SyncError, match="unknown platform 'synthflow'; known: retell, telnyx, vapi"
     ):
@@ -180,32 +217,32 @@ def test_apply_accepts_any_client_with_the_two_methods(env: None) -> None:
             return body
 
     fake = Fake()
-    apply(fake, DENTAL, desired(DENTAL, BASE))
-    assert fake.patched is not None and len(fake.patched["model"]["tools"]) == 5
+    apply(fake, VAPI, desired(VAPI, BASE))
+    assert fake.patched is not None and len(fake.patched["model"]["tools"]) == len(CONTRACT)
 
 
 # --- plan ------------------------------------------------------------------
 
 
 def test_plan_reports_tools_as_the_one_update(env: None) -> None:
-    result = plan(LIVE, desired(DENTAL, BASE))
+    result = plan(LIVE, desired(VAPI, BASE))
     assert list(result.update) == ["model.tools"]
-    assert result.unchanged == []
+    assert sorted(result.unchanged) == ["firstMessageMode", "model.messages"]
     before, after = result.update["model.tools"]
     assert before == []
-    assert len(after) == 5
+    assert len(after) == len(CONTRACT)
 
 
 def test_plan_is_unchanged_when_live_already_matches(env: None) -> None:
-    wanted = desired(DENTAL, BASE)
+    wanted = desired(VAPI, BASE)
     live = {**LIVE, "model": {**LIVE["model"], "tools": wanted["model.tools"]}}
     result = plan(live, wanted)
     assert result.update == {}
-    assert result.unchanged == ["model.tools"]
+    assert sorted(result.unchanged) == ["firstMessageMode", "model.messages", "model.tools"]
 
 
 def test_plan_output_is_safe_to_print(env: None) -> None:
-    (_, after) = plan(LIVE, desired(DENTAL, BASE)).update["model.tools"]
+    (_, after) = plan(LIVE, desired(VAPI, BASE)).update["model.tools"]
     found: list[str] = []
     printed = json.dumps(redact(after, found))
     assert SECRET not in printed
@@ -217,12 +254,12 @@ def test_plan_output_is_safe_to_print(env: None) -> None:
 
 
 def test_patch_body_carries_the_whole_live_model_with_tools_replaced(env: None) -> None:
-    body = patch_body(LIVE, desired(DENTAL, BASE))
-    assert list(body) == ["model"]
+    body = patch_body(LIVE, desired(VAPI, BASE))
+    assert list(body) == ["model", "firstMessageMode"]
     assert body["model"]["messages"] == LIVE["model"]["messages"]
     assert body["model"]["provider"] == "openai"
     assert body["model"]["temperature"] == 0
-    assert len(body["model"]["tools"]) == 5
+    assert len(body["model"]["tools"]) == len(CONTRACT)
     assert LIVE["model"]["tools"] == []
 
 
@@ -235,7 +272,7 @@ def test_apply_gets_then_patches_only_the_model(env: None) -> None:
         return httpx.Response(200, json=LIVE)
 
     with _client(handler) as client:
-        result = apply(client, DENTAL, desired(DENTAL, BASE))
+        result = apply(client, VAPI, desired(VAPI, BASE))
 
     assert [(m, p) for m, p, _ in calls] == [
         ("GET", "/assistant/asst_1"),
@@ -245,12 +282,12 @@ def test_apply_gets_then_patches_only_the_model(env: None) -> None:
     assert set(patched) == {"model"}
     assert "id" not in patched and "orgId" not in patched
     assert patched["model"]["messages"] == LIVE["model"]["messages"]
-    assert len(patched["model"]["tools"]) == 5
+    assert len(patched["model"]["tools"]) == len(CONTRACT)
     assert list(result.update) == ["model.tools"]
 
 
 def test_apply_skips_the_patch_when_nothing_changed(env: None) -> None:
-    wanted = desired(DENTAL, BASE)
+    wanted = desired(VAPI, BASE)
     live = {**LIVE, "model": {**LIVE["model"], "tools": wanted["model.tools"]}}
     methods: list[str] = []
 
@@ -259,7 +296,7 @@ def test_apply_skips_the_patch_when_nothing_changed(env: None) -> None:
         return httpx.Response(200, json=live)
 
     with _client(handler) as client:
-        result = apply(client, DENTAL, wanted)
+        result = apply(client, VAPI, wanted)
     assert methods == ["GET"]
     assert result.update == {}
 
@@ -274,7 +311,7 @@ def test_apply_surfaces_vendor_errors(env: None) -> None:
         _client(handler) as client,
         pytest.raises(SyncError, match="PATCH /assistant/asst_1 -> 400"),
     ):
-        apply(client, DENTAL, desired(DENTAL, BASE))
+        apply(client, VAPI, desired(VAPI, BASE))
 
 
 # --- dry run ---------------------------------------------------------------
@@ -288,21 +325,21 @@ def test_apply_dry_run_plans_but_never_patches(env: None) -> None:
         return httpx.Response(200, json=LIVE)
 
     with _client(handler) as client:
-        result = apply(client, DENTAL, desired(DENTAL, BASE), dry_run=True)
+        result = apply(client, VAPI, desired(VAPI, BASE), dry_run=True)
     assert list(result.update) == ["model.tools"]
     assert result.prepared == []
     assert seen == ["GET"]
 
 
 def test_platform_without_prepare_reports_nothing_prepared(env: None) -> None:
-    assert platform_for(DENTAL).prepare is None
+    assert platform_for(VAPI).prepare is None
     with _client(lambda r: httpx.Response(200, json=LIVE)) as client:
-        assert apply(client, DENTAL, desired(DENTAL, BASE)).prepared == []
+        assert apply(client, VAPI, desired(VAPI, BASE)).prepared == []
 
 
 def test_plan_summary_names_all_three_buckets() -> None:
     result = Plan(update={"a": (1, 2)}, unchanged=["b"], prepared=["secret:x"])
-    assert result.summary() == "prepare=['secret:x'] update=['a'] unchanged=['b']"
+    assert result.summary() == "prepare=['secret:[REDACTED]'] update=['a'] unchanged=['b']"
 
 
 # --- probe -----------------------------------------------------------------
@@ -312,20 +349,20 @@ def test_plan_summary_names_all_three_buckets() -> None:
 
 
 def test_coval_agent_body_dials_the_target_with_the_pinned_codec(env: None) -> None:
-    body = coval_agent_body(DENTAL)
+    body = coval_agent_body(UNMAPPED)
     assert body["model_type"] == "MODEL_TYPE_VOICE"
     assert body["phone_number"] == "sip:example-dental@sip.vapi.ai"
     assert body["metadata"] == {"audio_codec": "PCMU"}
-    assert body["customer_agent_id"] == "vapi-dental"
+    assert body["customer_agent_id"] == "vapi/pinned"
     assert body["attributes"]["platform"] == "vapi"
     assert body["tags"] == ["orchestration", "dental", "vapi"]
     assert body["prompt"].startswith("BrightSmile Dental")
 
 
 def test_dial_target_is_required_and_named_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("VAPI_DENTAL_DIAL_TARGET", raising=False)
-    with pytest.raises(RuntimeError, match="VAPI_DENTAL_DIAL_TARGET is unset"):
-        coval_agent_body(DENTAL)
+    monkeypatch.delenv("VAPI_ID_ROULETTE_DIAL_TARGET", raising=False)
+    with pytest.raises(RuntimeError, match="VAPI_ID_ROULETTE_DIAL_TARGET is unset"):
+        coval_agent_body(UNMAPPED)
 
 
 def _coval_client(state: dict[str, Any]) -> CovalClient:
@@ -339,6 +376,10 @@ def _coval_client(state: dict[str, Any]) -> CovalClient:
             created = {**json.loads(request.content), "id": "A" * 22}
             state["agents"].append(created)
             return httpx.Response(200, json={"agent": created})
+        if request.url.path.startswith("/v1/agents/") and request.method == "GET":
+            wanted = request.url.path.rsplit("/", 1)[-1]
+            agent = next(a for a in state["agents"] if a.get("id") == wanted)
+            return httpx.Response(200, json={"agent": agent})
         if request.url.path.startswith("/v1/agents/"):
             state["patched"] = json.loads(request.content)
             return httpx.Response(200, json={"agent": state["agents"][0]})
@@ -355,27 +396,27 @@ def _coval_client(state: dict[str, Any]) -> CovalClient:
 def test_register_creates_the_coval_agent_when_absent(env: None) -> None:
     state: dict[str, Any] = {"agents": []}
     with _coval_client(state) as client:
-        agent_id, result = register(client, DENTAL)
+        agent_id, result = register(client, UNMAPPED)
     assert agent_id == "A" * 22
     assert set(result.update) == set(platform_assets.COVAL_MANAGED)
     assert state["agents"][0]["phone_number"] == "sip:example-dental@sip.vapi.ai"
 
 
 def test_register_patches_only_the_drifted_fields(env: None) -> None:
-    live = {**coval_agent_body(DENTAL), "id": "A", "phone_number": "sip:old@sip.vapi.ai"}
+    live = {**coval_agent_body(UNMAPPED), "id": "A", "phone_number": "sip:old@sip.vapi.ai"}
     state: dict[str, Any] = {"agents": [live]}
     with _coval_client(state) as client:
-        agent_id, result = register(client, DENTAL)
+        agent_id, result = register(client, UNMAPPED)
     assert agent_id == "A"
     assert list(result.update) == ["phone_number"]
     assert state["patched"] == {"phone_number": "sip:example-dental@sip.vapi.ai"}
 
 
 def test_register_matches_on_customer_agent_id_not_display_name(env: None) -> None:
-    other = {**coval_agent_body(DENTAL), "id": "B", "customer_agent_id": "someone-else"}
+    other = {**coval_agent_body(UNMAPPED), "id": "B", "customer_agent_id": "someone-else"}
     state: dict[str, Any] = {"agents": [other]}
     with _coval_client(state) as client:
-        agent_id, _ = register(client, DENTAL)
+        agent_id, _ = register(client, UNMAPPED)
     assert agent_id == "A" * 22
     assert len(state["agents"]) == 2
 
@@ -383,14 +424,14 @@ def test_register_matches_on_customer_agent_id_not_display_name(env: None) -> No
 def test_register_dry_run_writes_nothing(env: None) -> None:
     state: dict[str, Any] = {"agents": []}
     with _coval_client(state) as client:
-        agent_id, result = register(client, DENTAL, dry_run=True)
+        agent_id, result = register(client, UNMAPPED, dry_run=True)
     assert agent_id == ""
     assert len(result.update) == len(platform_assets.COVAL_MANAGED) == 6
     assert all(method == "GET" for method, _ in state["calls"])
 
 
 def test_launch_body_is_reproducible_and_tagged_with_the_arm(env: None) -> None:
-    body = launch_body("A" * 22, DENTAL, "P" * 22, "T" * 8, ("M" * 22,), 3, 42)
+    body = launch_body("A" * 22, VAPI, "P" * 22, "T" * 8, ("M" * 22,), 3, 42)
     assert body["agent_id"] == "A" * 22
     assert body["options"] == {
         "iteration_count": 1,
@@ -399,14 +440,14 @@ def test_launch_body_is_reproducible_and_tagged_with_the_arm(env: None) -> None:
         "sub_sample_seed": 42,
     }
     assert body["metric_ids"] == ["M" * 22]
-    assert body["metadata"]["customer_metadata"]["arm"] == "vapi-dental"
-    assert body["metadata"]["display_name"].startswith("vapi-dental e2e ")
+    assert body["metadata"]["customer_metadata"]["arm"] == "vapi/pinned"
+    assert body["metadata"]["display_name"].startswith("vapi/pinned e2e ")
 
 
 def test_launch_run_unwraps_the_run(env: None) -> None:
     state: dict[str, Any] = {"agents": []}
     with _coval_client(state) as client:
-        run = client.launch_run(launch_body("A" * 22, DENTAL, "P" * 22, "T" * 8, (), 1, 1))
+        run = client.launch_run(launch_body("A" * 22, VAPI, "P" * 22, "T" * 8, (), 1, 1))
     assert run == {"run_id": "R" * 22, "status": "PENDING"}
     assert state["launched"]["options"]["sub_sample_size"] == 1
 
@@ -419,35 +460,35 @@ def test_drift_lists_what_apply_would_still_change_without_writing(env: None) ->
         return httpx.Response(200, json=LIVE)
 
     with _client(handler) as client:
-        assert drift(client, DENTAL, BASE) == ["model.tools"]
+        assert drift(client, VAPI, BASE) == ["model.tools"]
     assert seen == ["GET"]
 
 
 def test_drift_is_empty_once_the_platform_matches(env: None) -> None:
-    synced = {**LIVE, "model": {**LIVE["model"], "tools": desired(DENTAL, BASE)["model.tools"]}}
+    synced = {**LIVE, "model": {**LIVE["model"], "tools": desired(VAPI, BASE)["model.tools"]}}
     with _client(lambda r: httpx.Response(200, json=synced)) as client:
-        assert drift(client, DENTAL, BASE) == []
+        assert drift(client, VAPI, BASE) == []
 
 
 def test_register_reconciles_display_name_and_tags_too(env: None) -> None:
-    live = {**coval_agent_body(DENTAL), "id": "A", "display_name": "old name", "tags": []}
+    live = {**coval_agent_body(UNMAPPED), "id": "A", "display_name": "old name", "tags": []}
     state: dict[str, Any] = {"agents": [live]}
     with _coval_client(state) as client:
-        _, result = register(client, DENTAL)
+        _, result = register(client, UNMAPPED)
     assert sorted(result.update) == ["display_name", "tags"]
     assert state["patched"] == {
-        "display_name": "vapi-dental",
+        "display_name": "vapi/pinned",
         "tags": ["orchestration", "dental", "vapi"],
     }
 
 
 def test_register_refuses_a_non_voice_agent_with_our_customer_id(env: None) -> None:
-    live = {**coval_agent_body(DENTAL), "id": "A", "model_type": "MODEL_TYPE_SMS"}
+    live = {**coval_agent_body(UNMAPPED), "id": "A", "model_type": "MODEL_TYPE_SMS"}
     with (
         _coval_client({"agents": [live]}) as client,
         pytest.raises(SyncError, match="MODEL_TYPE_SMS"),
     ):
-        register(client, DENTAL)
+        register(client, UNMAPPED)
 
 
 def test_contract_hash_refuses_to_label_without_the_fixtures(
@@ -455,9 +496,9 @@ def test_contract_hash_refuses_to_label_without_the_fixtures(
 ) -> None:
     monkeypatch.setattr(platform_assets, "has_private_contract", lambda suite: False)
     with pytest.raises(SyncError, match="seeded world"):
-        coval_agent_body(DENTAL)
+        coval_agent_body(UNMAPPED)
     with pytest.raises(SyncError, match="seeded world"):
-        launch_body("A" * 22, DENTAL, "P" * 22, "T" * 8, (), 1, 1)
+        launch_body("A" * 22, VAPI, "P" * 22, "T" * 8, (), 1, 1)
 
 
 # --- every platform, one case each ------------------------------------------
@@ -514,8 +555,8 @@ RETELL_LLM: dict[str, Any] = {
     "version": 2,
     "model": "gpt-4.1",
     "model_temperature": 0,
-    "general_prompt": "You are the front desk.",
-    "begin_message": "Thanks for calling BrightSmile.",
+    "general_prompt": PROMPT,
+    "begin_message": None,
     "general_tools": [{"type": "end_call", "name": "end_call", "description": "End the call."}],
 }
 
@@ -546,8 +587,8 @@ class Case:
 
 CASES = [
     Case(
-        key="vapi-dental",
-        env={"VAPI_DENTAL_ASSISTANT_ID": "asst_1", "VAPI_API_KEY": "vapi-key"},
+        key="vapi/pinned",
+        env={"VAPI_ID_ROULETTE_ASSISTANT_ID": "asst_1", "VAPI_API_KEY": "vapi-key"},
         live=LIVE,
         agent_path="/assistant/asst_1",
         update_method="PATCH",
@@ -559,11 +600,11 @@ CASES = [
         wraps_in_data=False,
     ),
     Case(
-        key="telnyx-dental",
+        key="telnyx/pinned",
         env={
-            "TELNYX_DENTAL_ASSISTANT_ID": "assistant-1",
+            "TELNYX_ID_ROULETTE_ASSISTANT_ID": "assistant-1",
             "TELNYX_API_KEY": "telnyx-key",
-            "TELNYX_DENTAL_DIAL_TARGET": "sip:dental@example-dental.sip.telnyx.com",
+            "TELNYX_ID_ROULETTE_DIAL_TARGET": "sip:dental@example-dental.sip.telnyx.com",
             "OPENAI_API_KEY": "openai-key",
             "ELEVENLABS_API_KEY": "eleven-key",
         },
@@ -607,11 +648,11 @@ CASES = [
         },
     ),
     Case(
-        key="retell-dental",
+        key="retell/pinned",
         env={
-            "RETELL_DENTAL_AGENT_ID": "agent_1",
+            "RETELL_ID_ROULETTE_AGENT_ID": "agent_1",
             "RETELL_API_KEY": "retell-key",
-            "RETELL_DENTAL_DIAL_TARGET": RETELL_DIAL,
+            "RETELL_ID_ROULETTE_DIAL_TARGET": RETELL_DIAL,
         },
         live=RETELL_AGENT,
         agent_path="/get-agent/agent_1",
@@ -712,7 +753,7 @@ def test_every_platform_renders_one_tool_per_contract_entry_in_order(case: Case)
     spec = spec_for(case.key)
     tools = desired(spec, BASE)[platform_for(spec).tools_path]
     assert [case.tool_name(t) for t in tools] == [d["name"] for d in CONTRACT]
-    assert len(tools) == 5
+    assert len(tools) == len(CONTRACT)
 
 
 def test_every_platform_targets_the_route_its_codec_expects(case: Case) -> None:
@@ -783,7 +824,7 @@ def test_smoke_request_round_trips_through_the_codec(case: Case) -> None:
 
 @pytest.fixture
 def telnyx_env(monkeypatch: pytest.MonkeyPatch) -> Case:
-    chosen = next(c for c in CASES if c.key == "telnyx-dental")
+    chosen = next(c for c in CASES if c.key == "telnyx/pinned")
     for name, value in chosen.env.items():
         monkeypatch.setenv(name, value)
     monkeypatch.setenv("MOCK_TOOLS_SECRET", SECRET)
@@ -791,7 +832,7 @@ def telnyx_env(monkeypatch: pytest.MonkeyPatch) -> Case:
 
 
 def test_telnyx_correlation_rides_in_preset_fields_the_model_cannot_see(telnyx_env: Case) -> None:
-    (tool, *_) = desired(spec_for("telnyx-dental"), BASE)["tools"]
+    (tool, *_) = desired(spec_for("telnyx/pinned"), BASE)["tools"]
     assert tool["webhook"]["preset_body_fields"] == {
         PRESET_SIMULATION: "{{coval_simulation_id}}",
         PRESET_CALLER: "{{telnyx_end_user_target}}",
@@ -826,7 +867,7 @@ def test_sip_subdomain_refuses_anything_else(target: str) -> None:
 def test_telnyx_prepare_lists_missing_secrets_and_subdomain_then_creates_only_those(
     telnyx_env: Case,
 ) -> None:
-    spec = spec_for("telnyx-dental")
+    spec = spec_for("telnyx/pinned")
     state: dict[str, Any] = {"secrets": ["coval", "coval-bench-openai"], "sub": None}
     with _platform_client(telnyx_env, state) as client:
         pending = prepare_telnyx(client, spec, True)
@@ -844,7 +885,7 @@ def test_telnyx_prepare_lists_missing_secrets_and_subdomain_then_creates_only_th
 
 def test_telnyx_prepare_refuses_a_foreign_client(telnyx_env: Case) -> None:
     with pytest.raises(SyncError), _client(lambda r: httpx.Response(200, json={})) as vapi:
-        prepare_telnyx(vapi, spec_for("telnyx-dental"), True)
+        prepare_telnyx(vapi, spec_for("telnyx/pinned"), True)
 
 
 def test_telnyx_client_updates_with_post_as_the_reference_documents() -> None:
@@ -862,7 +903,7 @@ def test_telnyx_client_updates_with_post_as_the_reference_documents() -> None:
 
 
 def test_telnyx_prepare_reopens_a_subdomain_locked_to_own_connections(telnyx_env: Case) -> None:
-    spec = spec_for("telnyx-dental")
+    spec = spec_for("telnyx/pinned")
     state: dict[str, Any] = {"sub": "example-dental", "recv": "only_my_connections"}
     with _platform_client(telnyx_env, state) as client:
         assert prepare_telnyx(client, spec, True) == [
@@ -876,7 +917,7 @@ def test_telnyx_prepare_reopens_a_subdomain_locked_to_own_connections(telnyx_env
 def test_telnyx_canon_ignores_what_the_server_adds_to_tools(telnyx_env: Case) -> None:
     from coval_bench.platform_assets import TELNYX_CANON
 
-    (tool, *_) = desired(spec_for("telnyx-dental"), BASE)["tools"]
+    (tool, *_) = desired(spec_for("telnyx/pinned"), BASE)["tools"]
     echoed = [{**tool, "tool_id": "tool-1", "shared": False, "timeout_ms": 5000}]
     assert TELNYX_CANON["tools"](echoed) == [tool]
     assert TELNYX_CANON["tool_ids"](None) == []
@@ -888,7 +929,7 @@ def test_telnyx_canon_ignores_what_the_server_adds_to_tools(telnyx_env: Case) ->
 
 @pytest.fixture
 def retell_env(monkeypatch: pytest.MonkeyPatch) -> Case:
-    chosen = next(c for c in CASES if c.key == "retell-dental")
+    chosen = next(c for c in CASES if c.key == "retell/pinned")
     for name, value in chosen.env.items():
         monkeypatch.setenv(name, value)
     monkeypatch.setenv("MOCK_TOOLS_SECRET", SECRET)
@@ -903,13 +944,13 @@ def test_retell_get_agent_merges_the_llm_fields_the_agent_only_points_at(
         live = client.get_agent("agent_1")
     assert state["calls"] == [("GET", "/get-agent/agent_1"), ("GET", "/get-retell-llm/llm_1")]
     assert live["voice_id"] == "11labs-Cimo"
-    assert live["general_prompt"] == "You are the front desk."
+    assert live["general_prompt"] == PROMPT
     assert live["general_tools"] == RETELL_LLM["general_tools"]
     assert live["version"] == RETELL_AGENT["version"]
 
 
 def test_retell_apply_patches_only_the_llm_when_only_tools_drift(retell_env: Case) -> None:
-    spec = spec_for("retell-dental")
+    spec = spec_for("retell/pinned")
     state: dict[str, Any] = {}
     with _platform_client(retell_env, state) as client:
         apply(client, spec, desired(spec, BASE))
@@ -920,7 +961,7 @@ def test_retell_apply_patches_only_the_llm_when_only_tools_drift(retell_env: Cas
         "/update-retell-llm/llm_1",
     ]
     assert set(state["patched"]) == {"general_tools"}
-    assert len(state["patched"]["general_tools"]) == 5
+    assert len(state["patched"]["general_tools"]) == len(CONTRACT)
     assert "agent_patched" not in state
 
 
@@ -962,7 +1003,7 @@ def test_retell_follows_the_llm_version_the_agent_pins(retell_env: Case) -> None
 
 
 def test_retell_tools_speak_no_filler_and_never_retry(retell_env: Case) -> None:
-    (tool, *_) = desired(spec_for("retell-dental"), BASE)["general_tools"]
+    (tool, *_) = desired(spec_for("retell/pinned"), BASE)["general_tools"]
     assert tool["type"] == "custom" and tool["method"] == "POST"
     assert tool["args_at_root"] is True
     assert tool["speak_during_execution"] is False
@@ -975,7 +1016,7 @@ def test_retell_tools_speak_no_filler_and_never_retry(retell_env: Case) -> None:
 
 
 def test_retell_apply_sends_each_owner_only_what_drifted(retell_env: Case) -> None:
-    spec = spec_for("retell-dental")
+    spec = spec_for("retell/pinned")
     state: dict[str, Any] = {"live": {**RETELL_AGENT, "voice_model": "eleven_turbo_v2"}}
     with _platform_client(retell_env, state) as client:
         result = apply(client, spec, desired(spec, BASE))
@@ -997,7 +1038,7 @@ def test_retell_refuses_a_multi_state_llm(retell_env: Case) -> None:
 def test_retell_prepare_reports_then_binds_the_number_to_the_newest_draft(
     retell_env: Case,
 ) -> None:
-    spec = spec_for("retell-dental")
+    spec = spec_for("retell/pinned")
     state: dict[str, Any] = {"route": []}
     with _platform_client(retell_env, state) as client:
         pending = prepare_retell(client, spec, True)
@@ -1011,7 +1052,7 @@ def test_retell_prepare_reports_then_binds_the_number_to_the_newest_draft(
 def test_retell_prepare_flags_a_number_pinned_to_a_published_version(retell_env: Case) -> None:
     pinned = [{"agent_id": "agent_1", "agent_version": 3, "weight": 1}]
     with _platform_client(retell_env, {"route": pinned}) as client:
-        assert prepare_retell(client, spec_for("retell-dental"), True) == [
+        assert prepare_retell(client, spec_for("retell/pinned"), True) == [
             f"route:{RETELL_NUMBER}=agent_1@latest"
         ]
 
@@ -1022,7 +1063,7 @@ def test_retell_prepare_never_repoints_someone_elses_number(retell_env: Case) ->
         _platform_client(retell_env, {"route": theirs}) as client,
         pytest.raises(SyncError, match="agent_9.*not ours to repoint"),
     ):
-        prepare_retell(client, spec_for("retell-dental"), True)
+        prepare_retell(client, spec_for("retell/pinned"), True)
 
 
 @pytest.mark.parametrize(
@@ -1047,7 +1088,7 @@ def test_retell_number_refuses_anything_else(target: str) -> None:
 
 
 def test_launch_body_selects_exact_cases_instead_of_a_sample(env: None) -> None:
-    body = launch_body("A" * 22, DENTAL, "P" * 22, "T" * 8, (), 1, 42, ("C" * 22,))
+    body = launch_body("A" * 22, VAPI, "P" * 22, "T" * 8, (), 1, 42, ("C" * 22,))
     assert body["options"] == {
         "iteration_count": 1,
         "concurrency": 1,
@@ -1056,7 +1097,7 @@ def test_launch_body_selects_exact_cases_instead_of_a_sample(env: None) -> None:
 
 
 def test_retell_apply_writes_nothing_when_the_agent_is_rejected(retell_env: Case) -> None:
-    spec = spec_for("retell-dental")
+    spec = spec_for("retell/pinned")
     llm = {**RETELL_LLM, "states": [{"name": "book", "state_prompt": "Book.", "tools": []}]}
     state: dict[str, Any] = {"llm": llm, "route": []}
     with (
@@ -1067,3 +1108,68 @@ def test_retell_apply_writes_nothing_when_the_agent_is_rejected(retell_env: Case
     assert state["route"] == []
     assert "patched" not in state and "agent_patched" not in state
     assert all(method == "GET" for method, _ in state["calls"])
+
+
+# --- asset-owned Coval agents ----------------------------------------------
+
+
+def test_register_leaves_an_asset_owned_agent_to_terraform(env: None) -> None:
+    with (
+        _coval_client({"agents": []}) as client,
+        pytest.raises(SyncError, match="only its dial target"),
+    ):
+        register(client, VAPI)
+
+
+def test_only_the_dial_target_is_set_on_an_asset_owned_agent(env: None) -> None:
+    live = {"id": "AGENT2", "phone_number": "+15550100000", "display_name": "from terraform"}
+    state: dict[str, Any] = {"agents": [live]}
+    with _coval_client(state) as client:
+        assert sorted(register_dial_target(client, VAPI, "AGENT2", dry_run=True).update) == [
+            "phone_number"
+        ]
+        assert "patched" not in state
+        register_dial_target(client, VAPI, "AGENT2")
+    assert state["patched"] == {"phone_number": "sip:example-dental@sip.vapi.ai"}
+
+
+# --- the prompt ------------------------------------------------------------
+
+
+def test_vapi_gets_the_suite_prompt_and_generates_its_greeting_from_it(env: None) -> None:
+    dental = {
+        **LIVE,
+        "model": {**LIVE["model"], "messages": [{"role": "system", "content": "Front desk."}]},
+        "firstMessageMode": "assistant-speaks-first",
+        "firstMessage": "Thanks for calling BrightSmile.",
+    }
+    result = plan(dental, desired(VAPI, BASE))
+    assert sorted(result.update) == ["firstMessageMode", "model.messages", "model.tools"]
+    body = patch_body(dental, desired(VAPI, BASE))
+    assert body["model"]["messages"] == [{"role": "system", "content": PROMPT}]
+    assert body["model"]["provider"] == "openai"
+
+
+def test_retell_gets_the_suite_prompt_and_no_fixed_opening_line(retell_env: Case) -> None:
+    wanted = desired(spec_for("retell/pinned"), BASE)
+    assert wanted["general_prompt"] == PROMPT
+    assert wanted["begin_message"] is None
+
+
+def test_a_plan_never_prints_the_dial_target(capsys: pytest.CaptureFixture[str]) -> None:
+    platform_assets._echo_plan(
+        Plan(update={"phone_number": ("+15550100000", "sip:secret-target@sip.vapi.ai")})
+    )
+    printed = capsys.readouterr().out
+    assert "secret-target" not in printed
+    assert "+15550100000" not in printed
+    assert "[REDACTED]" in printed
+
+
+def test_prepare_steps_are_printed_by_kind_without_the_dial_target(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    platform_assets._echo_plan(Plan(prepared=["route:+15550100042=agent_1@latest"]))
+    printed = capsys.readouterr().out
+    assert "+15550100042" not in printed
+    assert "route:[REDACTED]" in printed

@@ -228,6 +228,23 @@ def test_the_published_hash_is_the_same_whichever_source_supplied_the_bytes(
     assert contract_sha256("dental") != public_contract_sha256("dental")
 
 
+def test_the_published_prompt_is_read_and_covered_by_the_contract_hash(
+    no_providers: None, checkout_without_fixtures: None
+) -> None:
+    register_fixture_provider(_serving(b"Ask for the detail.\n", "system-prompt.txt"))
+    assert contracts_module.read_system_prompt("id_roulette") == "Ask for the detail."
+    before = contract_sha256("id_roulette")
+    contracts_module._FIXTURE_PROVIDERS[:] = [_serving(b"Something else.", "system-prompt.txt")]
+    assert contract_sha256("id_roulette") != before
+
+
+def test_a_published_prompt_alone_is_not_the_evaluator(
+    no_providers: None, checkout_without_fixtures: None
+) -> None:
+    register_fixture_provider(_serving(b"Ask for the detail.", "system-prompt.txt"))
+    assert not has_private_contract("id_roulette")
+
+
 def test_redact_catches_the_mock_tools_header_but_not_the_correlation_one() -> None:
     from coval_bench.variants.platforms import redact
 

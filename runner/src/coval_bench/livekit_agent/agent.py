@@ -30,8 +30,8 @@ from coval_bench.mocktools.codecs import Correlation
 
 logger = logging.getLogger("coval_bench.livekit_agent")
 
-AGENT_NAME = os.environ.get("AGENT_NAME", "coval-bench-dental")
-SUITE = os.environ.get("SUITE", "dental")
+AGENT_NAME = os.environ.get("AGENT_NAME", "coval-bench-id-roulette")
+SUITE = os.environ.get("SUITE", "id_roulette")
 
 
 def build_session(
@@ -91,6 +91,8 @@ async def answer(ctx: JobContext) -> None:
     )
     if CONTRACT.first_message:
         await session.say(CONTRACT.first_message, allow_interruptions=True)
+    else:
+        session.generate_reply(allow_interruptions=True)
 
 
 if __name__ == "__main__":

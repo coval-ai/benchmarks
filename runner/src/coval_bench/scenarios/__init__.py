@@ -84,7 +84,9 @@ __all__ = [
     "has_private_contract",
     "read_private_fixture",
     "read_private_file",
+    "read_system_prompt",
     "CORRAL_TOOLS_FILE",
+    "SYSTEM_PROMPT_FILE",
     "FixtureProvider",
     "register_fixture_provider",
     "AnnotatedModel",
@@ -113,7 +115,8 @@ PUBLIC_CONTRACT_FILES: tuple[str, ...] = (
 # Corral suite's tools and answer key, published from the assets in benchmark-infra.
 FIXTURE_FILE = "mock-tools.json"
 CORRAL_TOOLS_FILE = "tools.json"
-PRIVATE_CONTRACT_FILES: tuple[str, ...] = (FIXTURE_FILE, CORRAL_TOOLS_FILE)
+SYSTEM_PROMPT_FILE = "system-prompt.txt"
+PRIVATE_CONTRACT_FILES: tuple[str, ...] = (FIXTURE_FILE, CORRAL_TOOLS_FILE, SYSTEM_PROMPT_FILE)
 
 
 class LlmPin(AnnotatedModel):
@@ -227,10 +230,10 @@ def contract_sha256(suite: str) -> str:
     return _digest(suite, PUBLIC_CONTRACT_FILES, extra=_private_bytes(suite))
 
 
-def _private_bytes(suite: str) -> bytes | None:
-    """The suite's private files that exist, in ``PRIVATE_CONTRACT_FILES`` order."""
+def _private_bytes(suite: str, names: tuple[str, ...] = PRIVATE_CONTRACT_FILES) -> bytes | None:
+    """The suite's private files that exist, in ``names`` order."""
     parts: list[bytes] = []
-    for name in PRIVATE_CONTRACT_FILES:
+    for name in names:
         with contextlib.suppress(FileNotFoundError, NotADirectoryError):
             parts.append(read_private_file(suite, name))
     return b"".join(parts) if parts else None
@@ -242,7 +245,7 @@ def has_private_contract(suite: str) -> bool:
     False in a fresh checkout and in CI, since ``_private/`` is never committed.
     Callers that need the fixtures should skip rather than fail.
     """
-    return _private_bytes(suite) is not None
+    return _private_bytes(suite, (FIXTURE_FILE, CORRAL_TOOLS_FILE)) is not None
 
 
 # A source of fixtures that is not the local checkout. The deployed image cannot
@@ -294,6 +297,11 @@ def read_private_file(suite: str, name: str) -> bytes:
         except (FileNotFoundError, NotADirectoryError):
             continue
     raise FileNotFoundError(f"no {name} for suite {suite!r}, locally or from a provider")
+
+
+def read_system_prompt(suite: str) -> str:
+    """The suite's agent prompt, published from the assets like its tools."""
+    return read_private_file(suite, SYSTEM_PROMPT_FILE).decode().strip()
 
 
 def stack_as_dict(stack: Stack) -> dict[str, Any]:
