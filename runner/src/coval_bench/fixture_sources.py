@@ -10,8 +10,11 @@ different store later without touching the contract or the published hash.
 The object path mirrors the layout on disk, so it is a mechanical function of
 the suite name and nothing has to be remembered:
 
-    disk  scenarios/<suite>/_private/mock-tools.json
-    gcs   gs://<bucket>/scenarios/<suite>/mock-tools.json
+    disk  scenarios/<suite>/_private/<name>
+    gcs   gs://<bucket>/scenarios/<suite>/<name>
+
+``<name>`` is ``mock-tools.json`` (seeded fixtures) or ``tools.json`` (a Corral
+suite's tools and answer key, which the assets in benchmark-infra publish).
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger("coval_bench.fixtures")
 
-FIXTURE_OBJECT = "scenarios/{suite}/mock-tools.json"
+FIXTURE_OBJECT = "scenarios/{suite}/{name}"
 
 
 def gcs_fixture_provider(
@@ -49,13 +52,13 @@ def gcs_fixture_provider(
     """
 
     @functools.cache
-    def provider(suite: str) -> bytes:
-        key = FIXTURE_OBJECT.format(suite=suite)
+    def provider(suite: str, name: str) -> bytes:
+        key = FIXTURE_OBJECT.format(suite=suite, name=name)
         data = gcs.read_bytes(bucket, key, storage_client=storage_client)
         if data is None:
             # Not an error: the chain moves on to the next provider.
             raise FileNotFoundError(f"gs://{bucket}/{key}")
-        logger.info("mock_fixtures_loaded", suite=suite, bucket=bucket, bytes=len(data))
+        logger.info("mock_fixtures_loaded", suite=suite, file=name, bucket=bucket, bytes=len(data))
         return data
 
     return provider

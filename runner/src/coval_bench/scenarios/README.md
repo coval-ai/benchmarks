@@ -29,8 +29,8 @@ scenarios/
     system-prompt.txt      the Ultra Bank agent, authored here and served by the
     tool-definitions.json  LLM proxy; the test set and judge stay in Coval
   id_roulette/
-    tools.json             Corral's tools and answers, copied until the scenario is an asset
-    _private/              the right values the mock service scores against, never committed
+    _private/              tools.json: Corral's tools and answers, published from the
+                           assets in benchmark-infra, never committed
   platforms/
     <platform>-agent.json  the only permitted difference, published for audit
 ```

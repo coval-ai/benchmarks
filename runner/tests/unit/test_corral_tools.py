@@ -9,12 +9,13 @@ import json
 
 import pytest
 
-from coval_bench.mocktools import dispatch
+from coval_bench import scenarios
 from coval_bench.mocktools.dispatch import SUITES, build_suite, parse_corral_tools
 from coval_bench.scenarios import (
-    PUBLIC_CONTRACT_FILES,
+    contract_sha256,
     public_contract_sha256,
     read_contract_file,
+    register_fixture_provider,
 )
 
 
@@ -33,64 +34,53 @@ def _tools(**overrides: object) -> str:
     return json.dumps({**document, **overrides})
 
 
-def test_every_suite_loads_from_its_committed_file() -> None:
+@pytest.fixture
+def nothing_private(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No local ``_private/`` and no providers, as in CI before anything is registered."""
+    monkeypatch.setattr(scenarios, "_FIXTURE_PROVIDERS", [])
+    real = scenarios._read_bytes
+
+    def no_local_private(*parts: str) -> bytes:
+        if "_private" in parts:
+            raise FileNotFoundError("/".join(parts))
+        return real(*parts)
+
+    monkeypatch.setattr(scenarios, "_read_bytes", no_local_private)
+
+
+@pytest.fixture
+def published(nothing_private: None) -> None:
+    """The bucket carries each suite's tools.json, as the assets publish it."""
+
+    def bucket(suite: str, name: str) -> bytes:
+        if name != "tools.json":
+            raise FileNotFoundError(f"{suite}/{name}")
+        return _tools().encode()
+
+    register_fixture_provider(bucket)
+
+
+def test_no_suite_keeps_its_own_copy_of_the_tools() -> None:
+    """The assets in benchmark-infra are the one place a suite's tools are written."""
     for suite in SUITES:
-        assert build_suite(suite).dispatcher.tools
+        with pytest.raises(FileNotFoundError):
+            read_contract_file(suite, "tools.json")
 
 
-def test_the_tools_file_is_part_of_the_contract_hash() -> None:
-    assert "tools.json" in PUBLIC_CONTRACT_FILES
-    assert public_contract_sha256("id_roulette") != public_contract_sha256("no_such_suite")
-
-
-def _answer_key(monkeypatch: pytest.MonkeyPatch, answers: object) -> None:
-    def private(suite: str) -> bytes:
-        if answers is None:
-            raise FileNotFoundError(suite)
-        return json.dumps(answers).encode()
-
-    monkeypatch.setattr(dispatch, "read_private_fixture", private)
-
-
-def test_the_committed_tools_file_holds_no_right_values() -> None:
-    document = json.loads(read_contract_file("id_roulette", "tools.json"))
-    assert all("character_error_rate" not in tool for tool in document["tools"])
-
-
-def test_id_roulette_answers_lookup_and_checks_its_private_value(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _answer_key(monkeypatch, {"lookup": {"value": {"account-1": "KD7BO0RWNLMX0O4BYD"}}})
+def test_a_suite_is_built_from_the_published_file(published: None) -> None:
     suite = build_suite("id_roulette")
-    outcome = suite.dispatcher.call("lookup", {"value": "KD7BO0RWNLMX0O4BYD"})
+    outcome = suite.dispatcher.call("lookup", {"value": "KD7B"})
     assert (outcome.http_status, outcome.response) == (200, {"received": True})
-    assert suite.checks == {"lookup": {"value": {"account-1": "KD7BO0RWNLMX0O4BYD"}}}
+    assert suite.checks == {"lookup": {"value": {"account-1": "KD7B"}}}
 
 
-def test_without_an_answer_key_the_suite_answers_and_checks_nothing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _answer_key(monkeypatch, None)
-    suite = build_suite("id_roulette")
-    assert suite.dispatcher.call("lookup", {"value": "x"}).http_status == 200
-    assert suite.checks == {}
-
-
-@pytest.mark.parametrize(
-    ("answers", "match"),
-    [
-        ({"ghost": {"value": "x"}}, "answers for tools that do not exist"),
-        ({"lookup": {"other": "x"}}, "checks arguments it does not take"),
-        ({"lookup": ["x"]}, "validation error"),
-    ],
-    ids=["unknown-tool", "unknown-argument", "malformed"],
-)
-def test_a_bad_answer_key_is_refused(
-    monkeypatch: pytest.MonkeyPatch, answers: object, match: str
-) -> None:
-    _answer_key(monkeypatch, answers)
-    with pytest.raises(ValueError, match=match):
+def test_without_the_published_file_the_suite_is_not_built(nothing_private: None) -> None:
+    with pytest.raises(FileNotFoundError):
         build_suite("id_roulette")
+
+
+def test_the_published_file_is_part_of_the_contract_hash(published: None) -> None:
+    assert contract_sha256("id_roulette") != public_contract_sha256("id_roulette")
 
 
 def test_a_missing_or_mistyped_argument_is_rejected_like_any_other_suite() -> None:
