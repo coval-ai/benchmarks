@@ -617,6 +617,8 @@ CASES = [
         expected_drift=frozenset(
             {
                 "tools",
+                "instructions",
+                "greeting",
                 "llm_api_key_ref",
                 "transcription.model",
                 "voice_settings.voice",
@@ -1148,6 +1150,14 @@ def test_vapi_gets_the_suite_prompt_and_generates_its_greeting_from_it(env: None
     body = patch_body(dental, desired(VAPI, BASE))
     assert body["model"]["messages"] == [{"role": "system", "content": PROMPT}]
     assert body["model"]["provider"] == "openai"
+
+
+def test_telnyx_gets_the_suite_prompt_and_generates_its_greeting_from_it(
+    telnyx_env: Case,
+) -> None:
+    wanted = desired(spec_for("telnyx/pinned"), BASE)
+    assert wanted["instructions"] == PROMPT
+    assert wanted["greeting"] == "<assistant-speaks-first-with-model-generated-message>"
 
 
 def test_retell_gets_the_suite_prompt_and_no_fixed_opening_line(retell_env: Case) -> None:

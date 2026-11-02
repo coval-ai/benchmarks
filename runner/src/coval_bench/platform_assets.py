@@ -250,6 +250,14 @@ def render_telnyx_tools(
     ]
 
 
+def telnyx_prompt(prompt: str) -> dict[str, Any]:
+    """The system prompt, with the greeting generated from it rather than kept separately."""
+    return {
+        "instructions": prompt,
+        "greeting": "<assistant-speaks-first-with-model-generated-message>",
+    }
+
+
 TELNYX_PINS: dict[str, Pin] = {
     "model": lambda stack: f"{stack.llm.provider}/{stack.llm.model}",
     "llm_api_key_ref": lambda _stack: TELNYX_LLM_REF,
@@ -551,6 +559,7 @@ PLATFORMS: dict[str, Platform] = {
         pins=TELNYX_PINS,
         canon=TELNYX_CANON,
         prepare=prepare_telnyx,
+        prompt=telnyx_prompt,
     ),
     "retell": Platform(
         name="retell",
