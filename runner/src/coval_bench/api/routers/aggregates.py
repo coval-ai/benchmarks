@@ -80,10 +80,8 @@ router = APIRouter(tags=["results"])
 
 _STATS_SQL = """
 SELECT provider, model, m.code AS metric_type,
-       mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,
-       pooled_substitutions_pct, avg_value, stddev_value, p25, p50, p75, p90, p95,
-       min_value, max_value, sample_count,
-       wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct
+       avg_value, stddev_value, p25, p50, p75, p90, p95, min_value, max_value,
+       sample_count, wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct
 FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id
 WHERE benchmark = %(benchmark)s
   AND dataset_id = %(dataset)s
@@ -92,10 +90,8 @@ ORDER BY provider, model, metric_type
 
 _STATS_BY_DATASET_SQL = """
 SELECT v.dataset_id, v.provider, v.model, m.code AS metric_type,
-       mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,
-       pooled_substitutions_pct, avg_value, stddev_value, p25, p50, p75, p90, p95,
-       min_value, max_value, sample_count,
-       wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct
+       avg_value, stddev_value, p25, p50, p75, p90, p95, min_value, max_value,
+       sample_count, wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct
 FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id
 WHERE benchmark = %(benchmark)s
   AND dataset_id <> %(sentinel)s
@@ -115,10 +111,8 @@ _RUN_SLOT_SQL = """
 SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS scheduled_at,
        b.min_value, b.p25, b.p50, b.p75, b.max_value, b.value_sum, b.sample_count,
        b.wer_error_words AS error_sum, b.wer_reference_words AS reference_word_sum,
-       100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0) AS pooled_value,
        CASE WHEN m.code = 'WER'
-            THEN COALESCE(100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0),
-                          b.value_sum / NULLIF(b.sample_count, 0))
+            THEN 100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0)
             ELSE b.p50 END AS value
 FROM benchmarks_v2.dashboard_rollups b
 JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
@@ -127,6 +121,7 @@ WHERE b.grain = 'run' AND b.value_key = 'primary'
   AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
   AND b.bucket_at >= %(since)s
   AND (%(metric_type)s::text IS NULL OR m.code = %(metric_type)s)
+  AND (m.code <> 'WER' OR b.wer_reference_words > 0)
 ORDER BY scheduled_at, provider, model, metric_type
 """
 
@@ -138,10 +133,8 @@ WITH base AS (
   SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS scheduled_at,
          b.min_value, b.p25, b.p50, b.p75, b.max_value, b.value_sum, b.sample_count,
          b.wer_error_words AS error_sum, b.wer_reference_words AS reference_word_sum,
-         100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0) AS pooled_value,
          CASE WHEN m.code = 'WER'
-              THEN COALESCE(100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0),
-                            b.value_sum / NULLIF(b.sample_count, 0))
+              THEN 100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0)
               ELSE b.p50 END AS value
   FROM benchmarks_v2.dashboard_rollups b
   JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
@@ -149,6 +142,7 @@ WITH base AS (
     AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
     AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
     AND b.bucket_at >= %(since)s
+    AND (m.code <> 'WER' OR b.wer_reference_words > 0)
 ), ranked AS (
   SELECT *, row_number() OVER grp AS ordinal,
          count(*) OVER (PARTITION BY provider, model, metric_type) AS group_count
@@ -166,7 +160,7 @@ WITH base AS (
   FROM binned
 )
 SELECT provider, model, metric_type, scheduled_at, min_value, p25, p50, p75,
-       max_value, value_sum, sample_count, value, error_sum, reference_word_sum, pooled_value
+       max_value, value_sum, sample_count, value, error_sum, reference_word_sum
 FROM selected
 WHERE min_rank = 1 OR max_rank = 1 OR ordinal = 1 OR ordinal = group_count
 ORDER BY scheduled_at, provider, model, metric_type
@@ -175,25 +169,22 @@ ORDER BY scheduled_at, provider, model, metric_type
 # Rules are data bound through psycopg, including metric and component names.
 # Source buckets retain sums/counts, so larger intervals never average averages.
 _ROLLUP_AVERAGE_SQL = """
-SELECT provider, model, metric_type, scheduled_at, sample_count, latest_source_at,
-       COALESCE(pooled_value, value_sum / NULLIF(sample_count, 0)) AS value,
-       pooled_value,
-       CASE WHEN metric_type <> 'WER' THEN 'mean'
-            WHEN pooled_value IS NOT NULL THEN 'ratio'
-            ELSE 'mean_fallback' END AS aggregation_method
-FROM (
- SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS scheduled_at,
-        b.value_sum, b.sample_count, b.latest_run_at AS latest_source_at,
-        100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0) AS pooled_value
- FROM benchmarks_v2.dashboard_rollups b
- JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
- WHERE b.value_key = 'primary'
-   AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
-   AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
-   AND b.grain = %(grain)s
-   AND b.bucket_at >= %(since)s AND b.bucket_at + %(step)s <= %(until)s
-   AND (%(metric_type)s::text IS NULL OR m.code = %(metric_type)s)
-) buckets ORDER BY scheduled_at, provider, model, metric_type
+SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS scheduled_at,
+       b.sample_count, b.latest_run_at AS latest_source_at,
+       CASE WHEN m.code = 'WER'
+            THEN 100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0)
+            ELSE b.value_sum / NULLIF(b.sample_count, 0) END AS value,
+       CASE WHEN m.code = 'WER' THEN 'ratio' ELSE 'mean' END AS aggregation_method
+FROM benchmarks_v2.dashboard_rollups b
+JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
+WHERE b.value_key = 'primary'
+  AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
+  AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
+  AND b.grain = %(grain)s
+  AND b.bucket_at >= %(since)s AND b.bucket_at + %(step)s <= %(until)s
+  AND (%(metric_type)s::text IS NULL OR m.code = %(metric_type)s)
+  AND (m.code <> 'WER' OR b.wer_reference_words > 0)
+ORDER BY scheduled_at, provider, model, metric_type
 """
 
 _PERCENTILE_METRICS = frozenset(

@@ -49,6 +49,14 @@ async def _seed_two_runs(pool: Any) -> int:
     return run_id
 
 
+def _counts(evaluation_id: Any, counts: tuple[float, float, float, float]) -> list[MetricValue]:
+    keys = ("substitution_count", "deletion_count", "insertion_count", "reference_words")
+    return [
+        MetricValue(metric_evaluation_id=evaluation_id, value_key=key, unit="count", value=v)
+        for key, v in zip(keys, counts, strict=True)
+    ]
+
+
 async def _rows(pool: Any, sql: str, *params: Any) -> list[dict[str, Any]]:
     async with pool.connection() as conn:
         return list(await (await conn.execute(sql, params)).fetchall())
@@ -85,7 +93,7 @@ async def test_finished_run_queues_its_slot_even_when_the_inline_rebuild_fails(
         primary = rows[0]
         assert (primary["value_sum"], primary["sample_count"]) == (40.0, 2)
         assert (primary["p50"], primary["p95"], primary["max_value"]) == (20.0, 29.0, 30.0)
-        assert primary["wer_error_words"] is None
+        assert primary["wer_error_words"] == 40.0
         assert primary["latest_run_at"] == storage._NOW
         buckets = await _rows(
             pool, "SELECT count(*) AS n FROM benchmarks_v2.dashboard_rollups WHERE grain <> 'run'"
@@ -96,7 +104,7 @@ async def test_finished_run_queues_its_slot_even_when_the_inline_rebuild_fails(
 
 
 @pytest.mark.asyncio
-async def test_fill_sums_wer_word_counts_only_when_every_clip_has_them(
+async def test_fill_sums_wer_word_counts_and_leaves_uncounted_clips_out(
     pg_conn: psycopg.Connection[Any],
 ) -> None:
     apply_migrations(pg_conn)
@@ -105,34 +113,34 @@ async def test_fill_sums_wer_word_counts_only_when_every_clip_has_them(
         writer = RunWriter(pool)
         run_id, first = await storage._observation(writer, sample="a")
         _, second = await storage._observation(writer, sample="b")
-        counts = {"a": (1, 1, 1, 20), "b": (0, 0, 2, 30)}
-        for observation in (first, second):
+        _, third = await storage._observation(writer, sample="c")
+        counts = {"a": (1, 1, 1, 20), "b": (0, 0, 2, 30), "c": None}
+        for observation in (first, second, third):
             evaluation = await storage._evaluation(writer, observation)
             evaluation_id = storage._required(evaluation.id)
-            subs, dels, ins, refs = counts[observation.sample_id]
-            values = storage._wer_values(evaluation_id) + [
-                MetricValue(
-                    metric_evaluation_id=evaluation_id, value_key=key, unit="count", value=v
-                )
-                for key, v in (
-                    ("substitution_count", subs),
-                    ("deletion_count", dels),
-                    ("insertion_count", ins),
-                    ("reference_words", refs),
-                )
-            ]
+            clip = counts[observation.sample_id]
+            percents = [v for v in storage._wer_values(evaluation_id) if v.unit == "percent"]
+            values = percents + (_counts(evaluation_id, clip) if clip else [])
             await writer.complete_metric_evaluation(
                 evaluation_id, values=values, finished_at=storage._NOW
             )
         await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
-        await writer.finish_run(storage._required(second.run_id), status=RunStatus.SUCCEEDED)
+        for observation in (second, third):
+            await writer.finish_run(
+                storage._required(observation.run_id), status=RunStatus.SUCCEEDED
+            )
         await writer.rebuild_run_rollup(run_id)
         [row] = await _rows(
             pool,
-            """SELECT wer_error_words, wer_reference_words FROM benchmarks_v2.dashboard_rollups
+            """SELECT sample_count, wer_error_words, wer_reference_words
+               FROM benchmarks_v2.dashboard_rollups
                WHERE grain = 'run' AND dataset_id = '__all__'""",
         )
-        assert (row["wer_error_words"], row["wer_reference_words"]) == (5.0, 50.0)
+        assert (row["sample_count"], row["wer_error_words"], row["wer_reference_words"]) == (
+            2,
+            5.0,
+            50.0,
+        )
     finally:
         await pool.close()
 

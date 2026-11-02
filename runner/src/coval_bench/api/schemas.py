@@ -181,9 +181,8 @@ class ModelStatEntry(BaseModel):
     provider: str
     model: str
     metric_type: str
-    # WER: corpus-level (pooled) when every clip carries counts, else the per-clip mean.
+    # WER: corpus-level, summed errors over summed reference words.
     avg_value: float
-    mean_value: float | None = None
     stddev_value: float
     p25: float
     p50: float
@@ -198,23 +197,17 @@ class ModelStatEntry(BaseModel):
     # alongside the numbers rather than in place of them, so a caller that wants
     # the raw measurement still has it.
     insufficient_samples: bool = False
-    # WER only, percentage points summing to avg_value; null pre-0014 rows —
-    # clients fall back to the total alone.
+    # WER only: percentage points of avg_value from the same summed counts.
     wer_insertions_pct: float | None = None
     wer_deletions_pct: float | None = None
     wer_substitutions_pct: float | None = None
-    # WER only; null unless every clip in the group carries counts.
-    pooled_value: float | None = None
-    pooled_insertions_pct: float | None = None
-    pooled_deletions_pct: float | None = None
-    pooled_substitutions_pct: float | None = None
 
 
 class SeriesPoint(BaseModel):
     """Per-(provider, model, metric_type) distribution for one scheduled_at bucket.
 
-    Latency timelines render p50. WER renders error_sum / wer_reference_words when
-    present, else value_sum / sample_count; both pairs sum across buckets.
+    Latency timelines render p50. WER renders error_sum / reference_word_sum;
+    both sums add across buckets.
     """
 
     provider: str
@@ -230,7 +223,6 @@ class SeriesPoint(BaseModel):
     sample_count: int
     error_sum: float | None = None
     reference_word_sum: float | None = None
-    pooled_value: float | None = None
 
 
 class DashboardSnapshot(BaseModel):
@@ -269,10 +261,7 @@ class TimelinePoint(BaseModel):
     metric_type: str
     scheduled_at: datetime
     value: float | None
-    pooled_value: float | None = None
-    aggregation_method: (
-        Literal["mean", "ratio", "mean_fallback", "unavailable", "percentile"] | None
-    ) = None
+    aggregation_method: Literal["mean", "ratio", "unavailable", "percentile"] | None = None
     sample_count: int | None = None
     insufficient_samples: bool = False
 

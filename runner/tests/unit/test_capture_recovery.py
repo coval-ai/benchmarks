@@ -491,9 +491,6 @@ def test_capture_groups_components_and_freezes_input_lineage() -> None:
                 Metric.WER,
                 10,
                 "percent",
-                wer_insertions_pct=2,
-                wer_deletions_pct=3,
-                wer_substitutions_pct=5,
                 wer_substitutions=5,
                 wer_deletions=3,
                 wer_insertions=2,
@@ -513,9 +510,6 @@ def test_capture_groups_components_and_freezes_input_lineage() -> None:
     assert [v["value_key"] for v in ttfa["values"]] == ["primary", "roundtrip", "leading_silence"]
     assert [v["value_key"] for v in wer["values"]] == [
         "primary",
-        "insertions",
-        "deletions",
-        "substitutions",
         "substitution_count",
         "deletion_count",
         "insertion_count",

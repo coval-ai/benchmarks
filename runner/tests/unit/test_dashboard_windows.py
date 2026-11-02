@@ -168,7 +168,7 @@ def test_refresh_materializes_wer_percentiles_and_pooled_values(
                 assert row["p75"] == pytest.approx(25) and row["p90"] == pytest.approx(28)
                 assert row["p95"] == pytest.approx(29) and row["p99"] == pytest.approx(29.8)
                 assert row["avg_value"] == pytest.approx(500 / 30)
-                assert row["pooled_insertions_pct"] == pytest.approx(200 / 30)
+                assert row["wer_insertions_pct"] == pytest.approx(200 / 30)
         finally:
             await pool.close()
 

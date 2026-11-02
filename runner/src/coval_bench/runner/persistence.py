@@ -177,15 +177,6 @@ def _frozen_values(metric: str, rows: Sequence[Result], primary: Result) -> list
         )
     ]
     if metric == str(Metric.WER):
-        for key, value in (
-            ("insertions", primary.wer_insertions_pct),
-            ("deletions", primary.wer_deletions_pct),
-            ("substitutions", primary.wer_substitutions_pct),
-        ):
-            if value is not None:
-                values.append(
-                    FrozenValue(value_key=key, unit="percent", value=value, value_role="component")
-                )
         raw_counts = (
             ("substitution_count", primary.wer_substitutions),
             ("deletion_count", primary.wer_deletions),

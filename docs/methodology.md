@@ -132,12 +132,25 @@ of per-clip ratios lets one miss on a 4-word clip weigh the same as a perfect
 reference into a raw insertion count. Pooling weights every word equally and
 absorbs both.
 
+The substitution / insertion / deletion split shown beside the headline is
+derived from the same alignment counts: each type's summed count over summed
+reference words, so the three reconcile to the total exactly.
+
+**Methodology change (2026-11).** Until this point each clip also stored the
+split as percentage points from a separate hand-rolled alignment, and windows
+averaged those points. When several alignments tie on edit distance the two
+alignments can attribute the same total to different error types, so the
+per-type numbers before and after are not strictly comparable even though
+the totals are. See [ADR-025](#adr-references).
+
 **Methodology change (2026-09).** WER was previously the mean of per-clip
-ratios. Counts are recorded from this point forward and were not backfilled,
-so a window reports the pooled figure only once every clip in it carries
-counts; until then it falls back to the mean and says so (`pooled_value` is
-null, `mean_value` is always present). Headline numbers before and after are
-**not comparable**. See [ADR-024](#adr-references).
+ratios. Counts are recorded from this point forward and were not backfilled;
+until every clip in the 30-day window carried counts (2026-10-09) a window
+fell back to the mean. Since then the pooled ratio is the only computation:
+a WER row without counts is excluded from every window, bucket, and timeline
+point, so no WER aggregate or custom timeline range reaches back before
+2026-09-09. Headline numbers before and after are **not comparable**. See
+[ADR-024](#adr-references).
 
 ## 4. Latency metrics (TTFA)
 
@@ -292,8 +305,12 @@ exact source reproduction for those rows is unsupported.
   aggregates pool across datasets.
 - ADR-024 — Corpus-level WER as the headline: per-clip S/I/D and reference-word
   counts persisted as WER components; aggregates report sum(errors) /
-  sum(reference words), falling back to the per-clip mean until a window is
-  fully counted; no backfill.
+  sum(reference words); no backfill, and the interim per-clip mean fallback
+  was removed once every window was counted (2026-11).
+- ADR-025 — One alignment for WER: jiwer's S/I/D counts are the only stored
+  split; the percent-point components from the hand-rolled backtrace are no
+  longer written (the v1 contract keeps them optional so stored rows validate),
+  and the displayed split is derived from the counts.
 
 ADR rationale is referenced inline in the relevant source files and READMEs
 where the decision context is load-bearing.
