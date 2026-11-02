@@ -30,9 +30,9 @@ from coval_bench.scenarios import read_contract_file, read_private_fixture
 TOOL_DEFINITIONS_FILE = "tool-definitions.json"
 # A Corral scenario's tools: one fixed answer per tool, plus the checks on its arguments.
 CORRAL_TOOLS_FILE = "tools.json"
-# Suites answered from a Corral ``tools.json`` instead of private fixtures. A copy until the
-# scenario is published as an asset; then it is read from there.
-CORRAL_SUITES: tuple[str, ...] = ("id_roulette",)
+# Every suite the service loads, each answered from its Corral ``tools.json``. A copy until
+# the scenario is published as an asset; then it is read from there.
+SUITES: tuple[str, ...] = ("id_roulette",)
 
 # An argument's right value: one string for every test case, or one per test case.
 Check = dict[str, str | dict[str, str]]
@@ -126,27 +126,16 @@ def load_tool_specs(suite: str) -> dict[str, ToolSpec]:
 class Dispatcher:
     """Answers tool calls for one suite from one set of fixtures."""
 
-    def __init__(
-        self,
-        specs: dict[str, ToolSpec],
-        fixtures: MockFixtures,
-        checks: dict[str, Check] | None = None,
-    ) -> None:
+    def __init__(self, specs: dict[str, ToolSpec], fixtures: MockFixtures) -> None:
         """Bind fixtures to specs, refusing any disagreement between them."""
         _assert_fixtures_cover_contract(specs, fixtures)
         self._specs = specs
         self._fixtures = fixtures
-        self._checks = checks or {}
 
     @property
     def tools(self) -> frozenset[str]:
         """The tool names this dispatcher answers."""
         return frozenset(self._specs)
-
-    @property
-    def checks(self) -> dict[str, Check]:
-        """Each checked tool's right argument values; empty when nothing is checked."""
-        return self._checks
 
     def call(self, tool: str, args: dict[str, Any]) -> Outcome:
         """Answer one tool call. Never raises; every outcome is a recordable response."""
@@ -215,6 +204,14 @@ def build_dispatcher(suite: str) -> Dispatcher:
     return Dispatcher(load_tool_specs(suite), parse_fixtures(read_private_fixture(suite)))
 
 
+@dataclass(frozen=True)
+class Suite:
+    """A loaded suite: the dispatcher that answers its calls and the checks that grade them."""
+
+    dispatcher: Dispatcher
+    checks: dict[str, Check] = field(default_factory=dict)
+
+
 class CorralTool(BaseModel, extra="forbid"):
     """One tool in a Corral ``tools.json``; ``parameters`` maps each argument to its JSON type."""
 
@@ -232,8 +229,8 @@ class CorralToolsFile(BaseModel, extra="forbid"):
     test_cases: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
-def parse_corral_tools(raw: str | bytes) -> Dispatcher:
-    """A dispatcher for a Corral ``tools.json``: every tool answers its one fixed response.
+def parse_corral_tools(raw: str | bytes) -> Suite:
+    """A suite for a Corral ``tools.json``: every tool answers its one fixed response.
 
     Every argument is required, as Corral declares them. Per-test-case answers are refused,
     because the service answers before it knows which test case is on the line. Any
@@ -265,13 +262,13 @@ def parse_corral_tools(raw: str | bytes) -> Dispatcher:
             checks[tool.name] = tool.character_error_rate
     if extra := sorted(set(document.responses) - set(specs)):
         raise ValueError(f"responses for tools that do not exist: {', '.join(extra)}")
-    return Dispatcher(specs, MockFixtures(tools=fixtures), checks)
+    return Suite(Dispatcher(specs, MockFixtures(tools=fixtures)), checks)
 
 
 _ANSWER_KEY = TypeAdapter(dict[str, Check])
 
 
-def build_corral_dispatcher(suite: str) -> Dispatcher:
+def build_suite(suite: str) -> Suite:
     """Build a Corral suite from its committed ``tools.json`` and its private answer key.
 
     The right values are the evaluator, so they sit in the suite's private fixture as

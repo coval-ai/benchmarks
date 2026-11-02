@@ -66,12 +66,7 @@ from coval_bench.db.registry_store import fetch_models
 from coval_bench.fixture_sources import install_fixture_providers
 from coval_bench.llm.benchmark import llm_models, make_clients
 from coval_bench.logging import configure_logging
-from coval_bench.mocktools.dispatch import (
-    CORRAL_SUITES,
-    Dispatcher,
-    build_corral_dispatcher,
-    build_dispatcher,
-)
+from coval_bench.mocktools.dispatch import SUITES, Suite, build_suite
 from coval_bench.mocktools.traces import SERVICE_NAME as TRACE_SERVICE_NAME
 from coval_bench.mocktools.traces import drain as drain_mock_tool_exports
 from coval_bench.mocktools.traces import new_tracer_provider
@@ -139,25 +134,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Absent fixtures are normal in CI and a fresh checkout, so the route
         # answers 503 rather than the service refusing to start.
         install_fixture_providers(resolved)
-        try:
-            app.state.mock_dispatcher = build_dispatcher(resolved.mock_tools_suite)
-        except (FileNotFoundError, NotADirectoryError):
-            app.state.mock_dispatcher = None
-            logger.info("mock_tools_fixtures_absent", suite=resolved.mock_tools_suite)
-        except ValueError:
-            app.state.mock_dispatcher = None
-            logger.warning("mock_tools_fixtures_unusable", exc_info=True)
-        suites: dict[str, Dispatcher] = {}
-        if app.state.mock_dispatcher is not None:
-            suites[resolved.mock_tools_suite] = app.state.mock_dispatcher
-        for suite in CORRAL_SUITES:
+        suites: dict[str, Suite] = {}
+        for suite in SUITES:
             try:
-                suites[suite] = build_corral_dispatcher(suite)
+                suites[suite] = build_suite(suite)
             except (FileNotFoundError, NotADirectoryError, ValueError):
-                logger.warning("mock_tools_corral_suite_unusable", suite=suite, exc_info=True)
+                logger.warning("mock_tools_suite_unusable", suite=suite, exc_info=True)
                 continue
             if not suites[suite].checks:
-                logger.warning("mock_tools_corral_answers_absent", suite=suite)
+                logger.warning("mock_tools_answers_absent", suite=suite)
+        if resolved.mock_tools_suite not in suites:
+            logger.warning("mock_tools_default_suite_absent", suite=resolved.mock_tools_suite)
         app.state.mock_suites = suites
         tracer_provider = new_tracer_provider(build_resource(resolved, TRACE_SERVICE_NAME))
         app.state.tracer_provider = tracer_provider

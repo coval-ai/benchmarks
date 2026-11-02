@@ -10,11 +10,7 @@ import json
 import pytest
 
 from coval_bench.mocktools import dispatch
-from coval_bench.mocktools.dispatch import (
-    CORRAL_SUITES,
-    build_corral_dispatcher,
-    parse_corral_tools,
-)
+from coval_bench.mocktools.dispatch import SUITES, build_suite, parse_corral_tools
 from coval_bench.scenarios import (
     PUBLIC_CONTRACT_FILES,
     public_contract_sha256,
@@ -37,9 +33,9 @@ def _tools(**overrides: object) -> str:
     return json.dumps({**document, **overrides})
 
 
-def test_every_corral_suite_loads_from_its_committed_file() -> None:
-    for suite in CORRAL_SUITES:
-        assert build_corral_dispatcher(suite).tools
+def test_every_suite_loads_from_its_committed_file() -> None:
+    for suite in SUITES:
+        assert build_suite(suite).dispatcher.tools
 
 
 def test_the_tools_file_is_part_of_the_contract_hash() -> None:
@@ -65,19 +61,19 @@ def test_id_roulette_answers_lookup_and_checks_its_private_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _answer_key(monkeypatch, {"lookup": {"value": {"account-1": "KD7BO0RWNLMX0O4BYD"}}})
-    dispatcher = build_corral_dispatcher("id_roulette")
-    outcome = dispatcher.call("lookup", {"value": "KD7BO0RWNLMX0O4BYD"})
+    suite = build_suite("id_roulette")
+    outcome = suite.dispatcher.call("lookup", {"value": "KD7BO0RWNLMX0O4BYD"})
     assert (outcome.http_status, outcome.response) == (200, {"received": True})
-    assert dispatcher.checks == {"lookup": {"value": {"account-1": "KD7BO0RWNLMX0O4BYD"}}}
+    assert suite.checks == {"lookup": {"value": {"account-1": "KD7BO0RWNLMX0O4BYD"}}}
 
 
 def test_without_an_answer_key_the_suite_answers_and_checks_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _answer_key(monkeypatch, None)
-    dispatcher = build_corral_dispatcher("id_roulette")
-    assert dispatcher.call("lookup", {"value": "x"}).http_status == 200
-    assert dispatcher.checks == {}
+    suite = build_suite("id_roulette")
+    assert suite.dispatcher.call("lookup", {"value": "x"}).http_status == 200
+    assert suite.checks == {}
 
 
 @pytest.mark.parametrize(
@@ -94,11 +90,11 @@ def test_a_bad_answer_key_is_refused(
 ) -> None:
     _answer_key(monkeypatch, answers)
     with pytest.raises(ValueError, match=match):
-        build_corral_dispatcher("id_roulette")
+        build_suite("id_roulette")
 
 
 def test_a_missing_or_mistyped_argument_is_rejected_like_any_other_suite() -> None:
-    dispatcher = parse_corral_tools(_tools())
+    dispatcher = parse_corral_tools(_tools()).dispatcher
     assert dispatcher.call("lookup", {}).http_status == 422
     assert dispatcher.call("lookup", {"value": 42}).http_status == 422
     assert dispatcher.call("other", {"value": "x"}).http_status == 404
