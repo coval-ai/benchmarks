@@ -170,3 +170,48 @@ def test_livekit_renderer_is_the_contract_verbatim() -> None:
         {"name": d["name"], "description": d["description"], "parameters": d["parameters"]}
         for d in definitions
     ]
+
+
+ID_ROULETTE_TOOLS = json.dumps(
+    {
+        "tools": [
+            {
+                "name": "lookup",
+                "description": "Look it up.",
+                "parameters": {"value": "string"},
+                "character_error_rate": {"value": {"card-1": "4111111111111111"}},
+            }
+        ],
+        "responses": {"lookup": {"received": True}},
+    }
+).encode()
+
+
+def test_a_corral_suite_registers_its_tools_without_the_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import coval_bench.scenarios as scenarios
+
+    def published(suite: str, name: str) -> bytes:
+        if (suite, name) != ("id_roulette", "tools.json"):
+            raise FileNotFoundError(name)
+        return ID_ROULETTE_TOOLS
+
+    monkeypatch.delenv("TOOL_DEFINITIONS_B64", raising=False)
+    monkeypatch.setattr(scenarios, "_FIXTURE_PROVIDERS", [published])
+    (tool,) = read_tool_definitions("id_roulette")
+    assert tool["name"] == "lookup"
+    assert tool["parameters"]["required"] == ["value"]
+    assert "4111111111111111" not in json.dumps(tool)
+
+
+def test_the_deploy_can_hand_the_tools_over_in_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import base64
+
+    rendered = [{"name": "lookup", "description": "d", "parameters": {"type": "object"}}]
+    monkeypatch.setenv(
+        "TOOL_DEFINITIONS_B64", base64.b64encode(json.dumps(rendered).encode()).decode()
+    )
+    assert read_tool_definitions("id_roulette") == rendered

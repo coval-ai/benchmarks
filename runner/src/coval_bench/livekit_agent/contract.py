@@ -8,12 +8,20 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from coval_bench.scenarios import Stack, load_stack, public_contract_sha256, read_contract_file
+from coval_bench.mocktools.dispatch import load_vendor_tools
+from coval_bench.scenarios import (
+    Stack,
+    load_stack,
+    public_contract_sha256,
+    read_contract_file,
+    read_system_prompt,
+)
 
 TOOLS_FILE = "tool-definitions.json"
 PROMPT_FILE = "system-prompt.txt"
 FIRST_MESSAGE_FILE = "first-message.txt"
 KEYTERMS_ENV = "DEEPGRAM_KEYTERMS"
+TOOLS_ENV = "TOOL_DEFINITIONS"
 VAD_MIN_SILENCE_SECONDS = 0.3
 
 
@@ -37,6 +45,8 @@ def _text(suite: str, filename: str, env: str) -> str:
     if override:
         return override
     try:
+        if filename == PROMPT_FILE:
+            return read_system_prompt(suite)
         return read_contract_file(suite, filename).strip()
     except FileNotFoundError:
         return ""
@@ -80,9 +90,21 @@ def prompt_sha256(system_prompt: str, first_message: str) -> str:
 
 
 def read_tool_definitions(suite: str) -> list[dict[str, Any]]:
+    """The tools the agent registers: the deploy's override, the suite file, or its tools.json.
+
+    The deployed agent cannot read the private bucket, so a Corral suite's tools reach it
+    through ``TOOL_DEFINITIONS_B64``, rendered by ``load_vendor_tools`` at deploy time.
+    """
     import json
 
-    tools = json.loads(read_contract_file(suite, TOOLS_FILE))
+    encoded = os.environ.get(f"{TOOLS_ENV}_B64")
+    if encoded:
+        tools = json.loads(base64.b64decode(encoded))
+    else:
+        try:
+            tools = json.loads(read_contract_file(suite, TOOLS_FILE))
+        except FileNotFoundError:
+            tools = load_vendor_tools(suite)
     if not isinstance(tools, list):
         raise TypeError(f"{TOOLS_FILE} must be a list")
     return tools

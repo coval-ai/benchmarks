@@ -18,12 +18,14 @@ from coval_bench.assets import SecretRef
 from coval_bench.config import Settings
 from coval_bench.fixture_sources import install_fixture_providers
 from coval_bench.mocktools.codecs import PRESET_CALLER, PRESET_SIMULATION, Correlation, codec_for
+from coval_bench.mocktools.dispatch import load_vendor_tools
 from coval_bench.scenarios import (
     Stack,
     contract_sha256,
     has_private_contract,
     load_stack,
     read_contract_file,
+    read_system_prompt,
 )
 from coval_bench.variants.platforms import read_retell, redact, retell_engine
 
@@ -66,6 +68,8 @@ class PlatformAgentSpec(BaseModel, frozen=True, extra="forbid"):
     key: str = Field(min_length=1)
     platform: str
     suite: str
+    # The scenario map entry that owns this arm's Coval agent; ``key`` is its agent key there.
+    scenario: str | None = None
     agent_id: SecretRef
     api_key: SecretRef | None = None
     mock_secret: SecretRef
@@ -84,6 +88,7 @@ Pin = Callable[[Stack], Any]
 Canon = Callable[[Any], Any]
 ClientFactory = Callable[[str, str], AgentClient]
 Prepare = Callable[[AgentClient, PlatformAgentSpec, bool], list[str]]
+PromptFields = Callable[[str], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,12 @@ class Platform:
     pins: Mapping[str, Pin] = field(default_factory=dict)
     canon: Mapping[str, Canon] = field(default_factory=dict)
     prepare: Prepare | None = None
+    prompt: PromptFields | None = None
+
+
+def masked(prepared: list[str]) -> list[str]:
+    """Prepare steps by kind only: their detail names a dial target (a number or SIP subdomain)."""
+    return [f"{step.split(':', 1)[0]}:[REDACTED]" for step in prepared]
 
 
 @dataclass
@@ -108,7 +119,7 @@ class Plan:
 
     def summary(self) -> str:
         return (
-            f"prepare={self.prepared} update={sorted(self.update)} "
+            f"prepare={masked(self.prepared)} update={sorted(self.update)} "
             f"unchanged={sorted(self.unchanged)}"
         )
 
@@ -178,6 +189,14 @@ def render_vapi_tools(
         }
         for definition in definitions
     ]
+
+
+def vapi_prompt(prompt: str) -> dict[str, Any]:
+    """The system prompt, with the greeting generated from it rather than kept separately."""
+    return {
+        "model.messages": [{"role": "system", "content": prompt}],
+        "firstMessageMode": "assistant-speaks-first-with-model-generated-message",
+    }
 
 
 class VapiClient(_JsonClient):
@@ -368,6 +387,11 @@ RETELL_PINS: dict[str, Pin] = {
 }
 
 
+def retell_prompt(prompt: str) -> dict[str, Any]:
+    """The system prompt; no begin message, so the LLM opens the call from the prompt."""
+    return {"general_prompt": prompt, "begin_message": None}
+
+
 def render_retell_tools(
     definitions: list[dict[str, Any]], mock_base_url: str, secret: str
 ) -> list[dict[str, Any]]:
@@ -516,6 +540,7 @@ PLATFORMS: dict[str, Platform] = {
         client=VapiClient,
         tools_path=TOOLS_PATH,
         render_tools=render_vapi_tools,
+        prompt=vapi_prompt,
     ),
     "telnyx": Platform(
         name="telnyx",
@@ -535,82 +560,80 @@ PLATFORMS: dict[str, Platform] = {
         render_tools=render_retell_tools,
         pins=RETELL_PINS,
         prepare=prepare_retell,
+        prompt=retell_prompt,
     ),
 }
 
+_MOCK_SECRET = SecretRef(
+    name="MOCK_TOOLS_SECRET",
+    purpose="the shared secret the mock tool endpoint requires on X-Mock-Tools-Key",
+)
+
 AGENTS: tuple[PlatformAgentSpec, ...] = (
     PlatformAgentSpec(
-        key="vapi-dental",
+        key="vapi/pinned",
         platform="vapi",
-        suite="dental",
+        suite="id_roulette",
+        scenario="id-roulette",
         agent_id=SecretRef(
-            name="VAPI_DENTAL_ASSISTANT_ID",
-            purpose="the Vapi assistant id for the dental suite",
+            name="VAPI_ID_ROULETTE_ASSISTANT_ID",
+            purpose="the Vapi assistant that runs ID Roulette",
         ),
-        api_key=SecretRef(name="VAPI_API_KEY", purpose="the Vapi API key for the dental org"),
-        mock_secret=SecretRef(
-            name="MOCK_TOOLS_SECRET",
-            purpose="the shared secret the mock tool endpoint requires on X-Mock-Tools-Key",
-        ),
+        api_key=SecretRef(name="VAPI_API_KEY", purpose="the Vapi API key for the benchmark org"),
+        mock_secret=_MOCK_SECRET,
         dial_target=SecretRef(
-            name="VAPI_DENTAL_DIAL_TARGET",
-            purpose="the sip: URI Coval dials to reach the Vapi dental assistant",
+            name="VAPI_ID_ROULETTE_DIAL_TARGET",
+            purpose="the sip: URI Coval dials to reach the Vapi assistant",
         ),
     ),
     PlatformAgentSpec(
-        key="telnyx-dental",
+        key="telnyx/pinned",
         platform="telnyx",
-        suite="dental",
+        suite="id_roulette",
+        scenario="id-roulette",
         agent_id=SecretRef(
-            name="TELNYX_DENTAL_ASSISTANT_ID",
-            purpose="the Telnyx assistant id for the dental suite",
+            name="TELNYX_ID_ROULETTE_ASSISTANT_ID",
+            purpose="the Telnyx assistant that runs ID Roulette",
         ),
         api_key=SecretRef(
             name="TELNYX_API_KEY", purpose="the Telnyx v2 API key for the benchmark account"
         ),
-        mock_secret=SecretRef(
-            name="MOCK_TOOLS_SECRET",
-            purpose="the shared secret the mock tool endpoint requires on X-Mock-Tools-Key",
-        ),
+        mock_secret=_MOCK_SECRET,
         dial_target=SecretRef(
-            name="TELNYX_DENTAL_DIAL_TARGET",
+            name="TELNYX_ID_ROULETTE_DIAL_TARGET",
             purpose="the sip:...@<sub>.sip.telnyx.com URI Coval dials; names the subdomain",
         ),
     ),
     PlatformAgentSpec(
-        key="retell-dental",
+        key="retell/pinned",
         platform="retell",
-        suite="dental",
+        suite="id_roulette",
+        scenario="id-roulette",
         agent_id=SecretRef(
-            name="RETELL_DENTAL_AGENT_ID",
-            purpose="the Retell agent id for the dental suite; its LLM is found from the agent",
+            name="RETELL_ID_ROULETTE_AGENT_ID",
+            purpose="the Retell agent that runs ID Roulette; its LLM is found from the agent",
         ),
         api_key=SecretRef(
             name="RETELL_API_KEY", purpose="the Retell API key for the benchmark workspace"
         ),
-        mock_secret=SecretRef(
-            name="MOCK_TOOLS_SECRET",
-            purpose="the shared secret the mock tool endpoint requires on X-Mock-Tools-Key",
-        ),
+        mock_secret=_MOCK_SECRET,
         dial_target=SecretRef(
-            name="RETELL_DENTAL_DIAL_TARGET",
+            name="RETELL_ID_ROULETTE_DIAL_TARGET",
             purpose="the sip:+E164@sip.retellai.com URI Coval dials; names the imported number",
         ),
     ),
     PlatformAgentSpec(
-        key="livekit-dental",
+        key="livekit/pinned",
         platform="livekit",
-        suite="dental",
+        suite="id_roulette",
+        scenario="id-roulette",
         agent_id=SecretRef(
-            name="LIVEKIT_DENTAL_AGENT_NAME",
-            purpose="the dispatch name the LiveKit dental agent registers under",
+            name="LIVEKIT_ID_ROULETTE_AGENT_NAME",
+            purpose="the dispatch name the LiveKit agent registers under",
         ),
-        mock_secret=SecretRef(
-            name="MOCK_TOOLS_SECRET",
-            purpose="the shared secret the mock tool endpoint requires on X-Mock-Tools-Key",
-        ),
+        mock_secret=_MOCK_SECRET,
         dial_target=SecretRef(
-            name="LIVEKIT_DENTAL_DIAL_TARGET",
+            name="LIVEKIT_ID_ROULETTE_DIAL_TARGET",
             purpose="the sip:+E164@<sub>.sip.livekit.cloud URI Coval dials; names the trunk",
         ),
     ),
@@ -669,11 +692,13 @@ def desired(spec: PlatformAgentSpec, mock_base_url: str) -> dict[str, Any]:
     """Every managed path and the value the contract says it should hold."""
     platform = platform_for(spec)
     stack = load_stack()
-    definitions = json.loads(read_contract_file(spec.suite, "tool-definitions.json"))
+    definitions = load_vendor_tools(spec.suite)
     wanted: dict[str, Any] = {path: pin(stack) for path, pin in platform.pins.items()}
     wanted[platform.tools_path] = platform.render_tools(
         definitions, mock_base_url, spec.mock_secret.resolve()
     )
+    if platform.prompt is not None:
+        wanted.update(platform.prompt(read_system_prompt(spec.suite)))
     return wanted
 
 
@@ -757,6 +782,11 @@ class CovalClient(_JsonClient):
                 return agent
         return None
 
+    def get_agent(self, agent_id: str) -> dict[str, Any]:
+        payload = self._request("GET", f"/agents/{agent_id}")
+        agent = payload.get("agent")
+        return agent if isinstance(agent, dict) else payload
+
     def create_agent(self, body: dict[str, Any]) -> dict[str, Any]:
         payload = self._request("POST", "/agents", body)
         agent = payload.get("agent")
@@ -815,10 +845,25 @@ def coval_agent_body(spec: PlatformAgentSpec) -> dict[str, Any]:
     }
 
 
+def register_dial_target(
+    client: CovalClient, spec: PlatformAgentSpec, agent_id: str, *, dry_run: bool = False
+) -> Plan:
+    """Set the dial target on a Coval agent the assets own; Terraform ignores only that field."""
+    live = client.get_agent(agent_id)
+    result = plan(live, {"phone_number": spec.dial_target.resolve()})
+    if result.update and not dry_run:
+        client.update_agent(agent_id, {"phone_number": spec.dial_target.resolve()})
+    return result
+
+
 def register(
     client: CovalClient, spec: PlatformAgentSpec, *, dry_run: bool = False
 ) -> tuple[str, Plan]:
     """Create or reconcile the Coval agent that dials this variant; returns its id."""
+    if spec.scenario:
+        raise SyncError(
+            f"the assets own {spec.key}'s Coval agent; only its dial target is set here"
+        )
     wanted = coval_agent_body(spec)
     live = client.find_agent(spec.key)
     if live is None:
@@ -840,7 +885,7 @@ def register(
 def drift(client: AgentClient, spec: PlatformAgentSpec, mock_base_url: str) -> list[str]:
     """What the live platform agent still differs from the contract by; empty means in sync."""
     result = apply(client, spec, desired(spec, mock_base_url), dry_run=True)
-    return sorted(result.update) + result.prepared
+    return sorted(result.update) + masked(result.prepared)
 
 
 def vendor_drift(spec: PlatformAgentSpec, mock_base_url: str, api_base: str | None) -> list[str]:
@@ -920,15 +965,28 @@ _api_base_option = click.option(
 _coval_base_option = click.option(
     "--coval-api-base", envvar="COVAL_API_BASE", default=COVAL_API_BASE, show_default=True
 )
+_coval_agent_option = click.option(
+    "--coval-agent-id",
+    default=None,
+    help="The Coval agent the assets created for this arm (scenario map, agents.<key>.id).",
+)
+
+
+MASKED_PATHS = frozenset({"phone_number"})
+
+
+def _shown(path: str, value: Any) -> Any:  # noqa: ANN401
+    if path in MASKED_PATHS and value:
+        return "[REDACTED]"
+    return redact(value, [])
 
 
 def _echo_plan(result: Plan) -> None:
     click.echo(result.summary())
     for path, (current, value) in result.update.items():
-        found: list[str] = []
         click.echo(f"\n{path}:")
-        click.echo(f"  live:    {json.dumps(redact(current, found), sort_keys=True)[:400]}")
-        click.echo(f"  desired: {json.dumps(redact(value, found), sort_keys=True)[:400]}")
+        click.echo(f"  live:    {json.dumps(_shown(path, current), sort_keys=True)[:400]}")
+        click.echo(f"  desired: {json.dumps(_shown(path, value), sort_keys=True)[:400]}")
 
 
 @click.group()
@@ -943,6 +1001,7 @@ def platform_assets() -> None:
 def assets_plan(agent_key: str, mock_base_url: str | None, api_base: str | None) -> None:
     """Show what apply would change on the platform; writes nothing."""
     spec = spec_for(agent_key)
+    install_fixture_providers(Settings())
     platform = platform_for(spec)
     wanted = desired(spec, mock_base_url_for(spec, mock_base_url, needed_for_code_managed=True))
     with platform.client(_vendor_key(spec), api_base or platform.api_base) as client:
@@ -959,6 +1018,7 @@ def assets_apply(
 ) -> None:
     """Prepare the platform's prerequisites, then patch the managed fields on the live agent."""
     spec = spec_for(agent_key)
+    install_fixture_providers(Settings())
     platform = platform_for(spec)
     wanted = desired(spec, mock_base_url_for(spec, mock_base_url, needed_for_code_managed=True))
     with platform.client(_vendor_key(spec), api_base or platform.api_base) as client:
@@ -966,11 +1026,11 @@ def assets_apply(
         click.echo(preview.summary())
         if not preview.update and not preview.prepared:
             return
-        pending = sorted(preview.update) + preview.prepared
+        pending = sorted(preview.update) + masked(preview.prepared)
         if not yes and not click.confirm(f"Apply {pending} on {agent_key}?"):
             raise click.ClickException("aborted")
         result = apply(client, spec, wanted)
-    click.echo(f"prepared {result.prepared}")
+    click.echo(f"prepared {masked(result.prepared)}")
     click.echo(f"patched {sorted(result.update)}")
     click.echo(f"contract sha256 ({spec.suite}): {contract_sha256(spec.suite)}")
 
@@ -978,7 +1038,7 @@ def assets_apply(
 @platform_assets.command(name="smoke")
 @_agent_option
 @_mock_base_url_option
-@click.option("--tool", default="lookup_patient", show_default=True)
+@click.option("--tool", default="lookup", show_default=True)
 @click.option("--arg", "args", multiple=True, help="key=value, repeatable.")
 def assets_smoke(
     agent_key: str, mock_base_url: str | None, tool: str, args: tuple[str, ...]
@@ -992,8 +1052,8 @@ def assets_smoke(
         raise click.ClickException(
             f"no tool codec is registered for {spec.platform}; smoke needs the image that ships it"
         ) from exc
-    definitions = json.loads(read_contract_file(spec.suite, "tool-definitions.json"))
-    if tool not in {d["name"] for d in definitions}:
+    install_fixture_providers(Settings())
+    if tool not in {d["name"] for d in load_vendor_tools(spec.suite)}:
         raise click.ClickException(f"{tool!r} is not in the {spec.suite} contract")
     call_args = dict(item.split("=", 1) for item in args)
     simulation_id = f"smoke-{spec.key}-{int(time.time())}"
@@ -1011,12 +1071,31 @@ def assets_smoke(
 @platform_assets.command(name="register")
 @_agent_option
 @_coval_base_option
+@_coval_agent_option
 @click.option("--yes", is_flag=True, default=False, help="Skip the confirmation prompt.")
-def assets_register(agent_key: str, coval_api_base: str, yes: bool) -> None:
-    """Create or reconcile the Coval agent that dials this variant."""
+def assets_register(
+    agent_key: str, coval_api_base: str, coval_agent_id: str | None, yes: bool
+) -> None:
+    """Create or reconcile the Coval agent that dials this variant.
+
+    For an agent the assets own, only its dial target is set.
+    """
     spec = spec_for(agent_key)
     install_fixture_providers(Settings())
     with CovalClient(COVAL_API_KEY.resolve(), coval_api_base) as client:
+        if spec.scenario:
+            if not coval_agent_id:
+                raise click.UsageError(f"--coval-agent-id is required for {agent_key}")
+            preview = register_dial_target(client, spec, coval_agent_id, dry_run=True)
+            _echo_plan(preview)
+            if not preview.update:
+                click.echo(f"coval agent {coval_agent_id} already dials its target")
+                return
+            if not yes and not click.confirm(f"Set the dial target on {coval_agent_id}?"):
+                raise click.ClickException("aborted")
+            register_dial_target(client, spec, coval_agent_id)
+            click.echo(f"coval agent id: {coval_agent_id}")
+            return
         agent_id, preview = register(client, spec, dry_run=True)
         _echo_plan(preview)
         if not preview.update:
@@ -1035,9 +1114,10 @@ def assets_register(agent_key: str, coval_api_base: str, yes: bool) -> None:
 @_mock_base_url_option
 @_api_base_option
 @_coval_base_option
-@click.option("--persona-id", envvar="COVAL_DENTAL_PERSONA_ID", required=True)
-@click.option("--test-set-id", envvar="COVAL_DENTAL_TEST_SET_ID", required=True)
-@click.option("--metric-id", "metric_ids", multiple=True, envvar="COVAL_DENTAL_METRIC_IDS")
+@_coval_agent_option
+@click.option("--persona-id", required=True)
+@click.option("--test-set-id", required=True)
+@click.option("--metric-id", "metric_ids", multiple=True)
 @click.option("--sample", default=1, show_default=True, help="Test cases to run; 0 = all.")
 @click.option("--seed", default=847293, show_default=True)
 @click.option(
@@ -1055,6 +1135,7 @@ def assets_launch(
     mock_base_url: str | None,
     api_base: str | None,
     coval_api_base: str,
+    coval_agent_id: str | None,
     persona_id: str,
     test_set_id: str,
     metric_ids: tuple[str, ...],
@@ -1070,9 +1151,15 @@ def assets_launch(
     install_fixture_providers(Settings())
     pending = vendor_drift(spec, mock_base_url, api_base)
     with CovalClient(COVAL_API_KEY.resolve(), coval_api_base) as coval:
-        agent_id, coval_plan = register(coval, spec, dry_run=True)
-        if not agent_id:
-            raise click.ClickException(f"no Coval agent for {agent_key}; run register first")
+        if spec.scenario:
+            if not coval_agent_id:
+                raise click.UsageError(f"--coval-agent-id is required for {agent_key}")
+            agent_id = coval_agent_id
+            coval_plan = register_dial_target(coval, spec, agent_id, dry_run=True)
+        else:
+            agent_id, coval_plan = register(coval, spec, dry_run=True)
+            if not agent_id:
+                raise click.ClickException(f"no Coval agent for {agent_key}; run register first")
         pending += [f"coval:{path}" for path in sorted(coval_plan.update)]
         if pending:
             message = (
