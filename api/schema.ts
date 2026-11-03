@@ -1058,8 +1058,6 @@ export interface components {
             metric_type: string;
             /** Avg Value */
             avg_value: number;
-            /** Mean Value */
-            mean_value?: number | null;
             /** Stddev Value */
             stddev_value: number;
             /** P25 */
@@ -1089,14 +1087,6 @@ export interface components {
             wer_deletions_pct?: number | null;
             /** Wer Substitutions Pct */
             wer_substitutions_pct?: number | null;
-            /** Pooled Value */
-            pooled_value?: number | null;
-            /** Pooled Insertions Pct */
-            pooled_insertions_pct?: number | null;
-            /** Pooled Deletions Pct */
-            pooled_deletions_pct?: number | null;
-            /** Pooled Substitutions Pct */
-            pooled_substitutions_pct?: number | null;
         };
         /**
          * ModelTagOut
@@ -1387,8 +1377,8 @@ export interface components {
          * SeriesPoint
          * @description Per-(provider, model, metric_type) distribution for one scheduled_at bucket.
          *
-         *     Latency timelines render p50. WER renders error_sum / wer_reference_words when
-         *     present, else value_sum / sample_count; both pairs sum across buckets.
+         *     Latency timelines render p50. WER renders error_sum / reference_word_sum;
+         *     both sums add across buckets.
          */
         SeriesPoint: {
             /** Provider */
@@ -1420,8 +1410,6 @@ export interface components {
             error_sum?: number | null;
             /** Reference Word Sum */
             reference_word_sum?: number | null;
-            /** Pooled Value */
-            pooled_value?: number | null;
         };
         /**
          * Source
@@ -1495,10 +1483,8 @@ export interface components {
             scheduled_at: string;
             /** Value */
             value: number | null;
-            /** Pooled Value */
-            pooled_value?: number | null;
             /** Aggregation Method */
-            aggregation_method?: ("mean" | "ratio" | "mean_fallback" | "unavailable" | "percentile") | null;
+            aggregation_method?: ("mean" | "ratio" | "unavailable" | "percentile") | null;
             /** Sample Count */
             sample_count?: number | null;
             /**
