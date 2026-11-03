@@ -81,6 +81,10 @@ LIVE: dict[str, Any] = {
     "transcriber": {"provider": "deepgram", "model": "nova-3", "language": "en"},
     "voice": {"provider": "11labs", "voiceId": "EXAVITQu4vr4xnSDxMaL", "model": "eleven_flash_v2"},
     "startSpeakingPlan": {"waitSeconds": 0.8},
+    "analysisPlan": {
+        "summaryPlan": {"enabled": False},
+        "successEvaluationPlan": {"enabled": False},
+    },
     "firstMessageMode": "assistant-speaks-first-with-model-generated-message",
 }
 
@@ -266,7 +270,14 @@ def test_plan_output_is_safe_to_print(env: None) -> None:
 
 def test_patch_body_carries_the_whole_live_model_with_tools_replaced(env: None) -> None:
     body = patch_body(LIVE, desired(VAPI, BASE))
-    assert list(body) == ["model", "transcriber", "voice", "startSpeakingPlan", "firstMessageMode"]
+    assert list(body) == [
+        "model",
+        "transcriber",
+        "voice",
+        "startSpeakingPlan",
+        "analysisPlan",
+        "firstMessageMode",
+    ]
     assert body["model"]["messages"] == LIVE["model"]["messages"]
     assert body["model"]["provider"] == "openai"
     assert body["model"]["temperature"] == 0
@@ -618,6 +629,8 @@ CASES = [
                 "model": "eleven_flash_v2",
             },
             "startSpeakingPlan.waitSeconds": 0.8,
+            "analysisPlan.summaryPlan.enabled": False,
+            "analysisPlan.successEvaluationPlan.enabled": False,
         },
         wraps_in_data=False,
     ),

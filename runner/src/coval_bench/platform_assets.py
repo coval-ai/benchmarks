@@ -217,6 +217,12 @@ VAPI_PINS: dict[str, Pin] = {
         "model": stack.tts.model,
     },
     "startSpeakingPlan.waitSeconds": lambda stack: stack.turn_taking.end_of_turn_target_ms / 1000,
+    "analysisPlan.summaryPlan.enabled": (
+        lambda stack: stack.platform_behaviour.vendor_post_call_analysis
+    ),
+    "analysisPlan.successEvaluationPlan.enabled": (
+        lambda stack: stack.platform_behaviour.vendor_post_call_analysis
+    ),
 }
 
 
