@@ -78,7 +78,13 @@ LIVE: dict[str, Any] = {
         "messages": [{"role": "system", "content": PROMPT}],
         "tools": [],
     },
-    "voice": {"provider": "vapi", "voiceId": "Elliot"},
+    "transcriber": {"provider": "deepgram", "model": "nova-3", "language": "en"},
+    "voice": {"provider": "11labs", "voiceId": "EXAVITQu4vr4xnSDxMaL", "model": "eleven_flash_v2"},
+    "startSpeakingPlan": {"waitSeconds": 0.8},
+    "analysisPlan": {
+        "summaryPlan": {"enabled": False},
+        "successEvaluationPlan": {"enabled": False},
+    },
     "firstMessageMode": "assistant-speaks-first-with-model-generated-message",
 }
 
@@ -186,7 +192,12 @@ def test_launch_cli_demands_the_mock_url_for_vendor_arms_only(
 
 def test_desired_resolves_the_secret_and_targets_model_tools(env: None) -> None:
     wanted = desired(VAPI, BASE)
-    assert list(wanted) == ["model.tools", "model.messages", "firstMessageMode"]
+    assert list(wanted) == [
+        *platform_assets.VAPI_PINS,
+        "model.tools",
+        "model.messages",
+        "firstMessageMode",
+    ]
     assert wanted["model.tools"][0]["server"]["headers"]["X-Mock-Tools-Key"] == SECRET
 
 
@@ -227,7 +238,9 @@ def test_apply_accepts_any_client_with_the_two_methods(env: None) -> None:
 def test_plan_reports_tools_as_the_one_update(env: None) -> None:
     result = plan(LIVE, desired(VAPI, BASE))
     assert list(result.update) == ["model.tools"]
-    assert sorted(result.unchanged) == ["firstMessageMode", "model.messages"]
+    assert sorted(result.unchanged) == sorted(
+        [*platform_assets.VAPI_PINS, "firstMessageMode", "model.messages"]
+    )
     before, after = result.update["model.tools"]
     assert before == []
     assert len(after) == len(CONTRACT)
@@ -238,7 +251,9 @@ def test_plan_is_unchanged_when_live_already_matches(env: None) -> None:
     live = {**LIVE, "model": {**LIVE["model"], "tools": wanted["model.tools"]}}
     result = plan(live, wanted)
     assert result.update == {}
-    assert sorted(result.unchanged) == ["firstMessageMode", "model.messages", "model.tools"]
+    assert sorted(result.unchanged) == sorted(
+        [*platform_assets.VAPI_PINS, "firstMessageMode", "model.messages", "model.tools"]
+    )
 
 
 def test_plan_output_is_safe_to_print(env: None) -> None:
@@ -255,7 +270,14 @@ def test_plan_output_is_safe_to_print(env: None) -> None:
 
 def test_patch_body_carries_the_whole_live_model_with_tools_replaced(env: None) -> None:
     body = patch_body(LIVE, desired(VAPI, BASE))
-    assert list(body) == ["model", "firstMessageMode"]
+    assert list(body) == [
+        "model",
+        "transcriber",
+        "voice",
+        "startSpeakingPlan",
+        "analysisPlan",
+        "firstMessageMode",
+    ]
     assert body["model"]["messages"] == LIVE["model"]["messages"]
     assert body["model"]["provider"] == "openai"
     assert body["model"]["temperature"] == 0
@@ -596,7 +618,20 @@ CASES = [
         tool_url=lambda t: t["server"]["url"],
         secret_in_config=True,
         expected_drift=frozenset({"model.tools"}),
-        pins={},
+        pins={
+            "model.provider": "openai",
+            "model.model": "gpt-4.1",
+            "model.temperature": 0,
+            "transcriber": {"provider": "deepgram", "model": "nova-3", "language": "en"},
+            "voice": {
+                "provider": "11labs",
+                "voiceId": "EXAVITQu4vr4xnSDxMaL",
+                "model": "eleven_flash_v2",
+            },
+            "startSpeakingPlan.waitSeconds": 0.8,
+            "analysisPlan.summaryPlan.enabled": False,
+            "analysisPlan.successEvaluationPlan.enabled": False,
+        },
         wraps_in_data=False,
     ),
     Case(
@@ -617,6 +652,8 @@ CASES = [
         expected_drift=frozenset(
             {
                 "tools",
+                "instructions",
+                "greeting",
                 "llm_api_key_ref",
                 "transcription.model",
                 "voice_settings.voice",
@@ -1150,6 +1187,14 @@ def test_vapi_gets_the_suite_prompt_and_generates_its_greeting_from_it(env: None
     assert body["model"]["provider"] == "openai"
 
 
+def test_telnyx_gets_the_suite_prompt_and_generates_its_greeting_from_it(
+    telnyx_env: Case,
+) -> None:
+    wanted = desired(spec_for("telnyx/pinned"), BASE)
+    assert wanted["instructions"] == PROMPT
+    assert wanted["greeting"] == "<assistant-speaks-first-with-model-generated-message>"
+
+
 def test_retell_gets_the_suite_prompt_and_no_fixed_opening_line(retell_env: Case) -> None:
     wanted = desired(spec_for("retell/pinned"), BASE)
     assert wanted["general_prompt"] == PROMPT
@@ -1173,3 +1218,36 @@ def test_prepare_steps_are_printed_by_kind_without_the_dial_target(
     printed = capsys.readouterr().out
     assert "+15550100042" not in printed
     assert "route:[REDACTED]" in printed
+
+
+def test_vapi_moves_off_its_own_stack_onto_the_pin(env: None) -> None:
+    soniox = {
+        **LIVE,
+        "transcriber": {
+            "provider": "soniox",
+            "model": "stt-rt-v5",
+            "language": "en",
+            "languages": ["en"],
+        },
+        "voice": {"provider": "vapi", "voiceId": "Elliot", "version": "2"},
+        "startSpeakingPlan": None,
+    }
+    result = plan(soniox, desired(VAPI, BASE), platform_for(VAPI).canon)
+    assert sorted(result.update) == [
+        "model.tools",
+        "startSpeakingPlan.waitSeconds",
+        "transcriber",
+        "voice",
+    ]
+    body = patch_body(soniox, desired(VAPI, BASE))
+    assert body["transcriber"] == {"provider": "deepgram", "model": "nova-3", "language": "en"}
+
+
+def test_vapi_does_not_drift_on_fields_it_fills_in_itself(env: None) -> None:
+    filled = {
+        **LIVE,
+        "transcriber": {**LIVE["transcriber"], "fallbackPlan": {"autoFallback": {"enabled": True}}},
+        "voice": {**LIVE["voice"], "version": "2"},
+    }
+    result = plan(filled, desired(VAPI, BASE), platform_for(VAPI).canon)
+    assert set(result.update) == {"model.tools"}

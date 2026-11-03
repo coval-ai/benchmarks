@@ -199,6 +199,44 @@ def vapi_prompt(prompt: str) -> dict[str, Any]:
     }
 
 
+VAPI_TRANSCRIBER_KEYS = ("provider", "model", "language")
+VAPI_VOICE_KEYS = ("provider", "voiceId", "model")
+
+VAPI_PINS: dict[str, Pin] = {
+    "model.provider": lambda stack: stack.llm.provider,
+    "model.model": lambda stack: stack.llm.model,
+    "model.temperature": lambda stack: stack.llm.temperature,
+    "transcriber": lambda stack: {
+        "provider": stack.stt.provider,
+        "model": stack.stt.model,
+        "language": "en",
+    },
+    "voice": lambda stack: {
+        "provider": "11labs",
+        "voiceId": stack.tts.voice_id,
+        "model": stack.tts.model,
+    },
+    "startSpeakingPlan.waitSeconds": lambda stack: stack.turn_taking.end_of_turn_target_ms / 1000,
+    "analysisPlan.summaryPlan.enabled": (
+        lambda stack: stack.platform_behaviour.vendor_post_call_analysis
+    ),
+    "analysisPlan.successEvaluationPlan.enabled": (
+        lambda stack: stack.platform_behaviour.vendor_post_call_analysis
+    ),
+}
+
+
+def _only(keys: tuple[str, ...]) -> Canon:
+    """Compare a vendor object on the keys we pin, not on what the vendor fills in."""
+    return lambda live: {k: live.get(k) for k in keys} if isinstance(live, dict) else live
+
+
+VAPI_CANON: dict[str, Canon] = {
+    "transcriber": _only(VAPI_TRANSCRIBER_KEYS),
+    "voice": _only(VAPI_VOICE_KEYS),
+}
+
+
 class VapiClient(_JsonClient):
     def __init__(
         self, api_key: str, base_url: str, transport: httpx.BaseTransport | None = None
@@ -248,6 +286,14 @@ def render_telnyx_tools(
         }
         for definition in definitions
     ]
+
+
+def telnyx_prompt(prompt: str) -> dict[str, Any]:
+    """The system prompt, with the greeting generated from it rather than kept separately."""
+    return {
+        "instructions": prompt,
+        "greeting": "<assistant-speaks-first-with-model-generated-message>",
+    }
 
 
 TELNYX_PINS: dict[str, Pin] = {
@@ -540,6 +586,8 @@ PLATFORMS: dict[str, Platform] = {
         client=VapiClient,
         tools_path=TOOLS_PATH,
         render_tools=render_vapi_tools,
+        pins=VAPI_PINS,
+        canon=VAPI_CANON,
         prompt=vapi_prompt,
     ),
     "telnyx": Platform(
@@ -551,6 +599,7 @@ PLATFORMS: dict[str, Platform] = {
         pins=TELNYX_PINS,
         canon=TELNYX_CANON,
         prepare=prepare_telnyx,
+        prompt=telnyx_prompt,
     ),
     "retell": Platform(
         name="retell",
