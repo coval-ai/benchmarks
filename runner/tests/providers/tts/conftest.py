@@ -49,6 +49,7 @@ def fake_settings(tmp_path: Path) -> Settings:
         inworld_api_key=SecretStr("test-inworld-key"),
         soniox_api_key=SecretStr("test-soniox-key"),
         assemblyai_api_key=SecretStr("test-assemblyai-key"),
+        telnyx_api_key=SecretStr("test-telnyx-key"),
         azure_api_key=SecretStr("test-azure-key"),
         azure_region="eastus",
     )
