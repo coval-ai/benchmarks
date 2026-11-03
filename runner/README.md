@@ -114,40 +114,15 @@ The token lasts an hour and needs only a normal `gcloud auth login`. Model histo
 
 Apache-2.0.
 
-### Legacy results drop runbook (migration 0045)
+### Applying migrations in prod
 
-Migration `20261010_0045` drops the legacy `results` storage and renames the
-dashboard window views to `results_24h/7d/30d`. The default boot migration stops
-at `20261005_0043`, so 0045 runs by hand. Run it as soon as the release that
-contains it lands: until it does, `/v1/results/aggregates`, `/by-dataset` and
-`/v1/leaderboard` return the `dashboard_snapshot_not_ready` 503.
+Nothing applies Alembic migrations automatically. After the release that
+contains a new revision lands, run the runner job by hand; it upgrades to head:
 
 ```bash
-gcloud run jobs execute benchmarks-runner --project=coval-benchmarks-prod --region=us-east1 --wait --args='db,migrate,--revision,20261010_0045'
+gcloud run jobs execute benchmarks-runner --project=coval-benchmarks-prod --region=us-east1 --wait --args='db,migrate'
 ```
 
-If it fails on the 10s lock timeout, an hourly window refresh was holding the
-views; rerun it. Legacy rows exist only in Cloud SQL backups afterwards, and a
-downgrade recreates the legacy objects empty.
-
-### Metric catalog cutover runbook
-
-The application rollout precedes the destructive schema cleanup. Deploy the
-ID-only writer and catalog-join readers, then verify deployed consumers for the
-agreed rollback period.
-
-The default database boot migration is capped at revision `20261005_0043`.
-The cleanup revision is applied separately after the deployed-consumer and
-rollback-period gates pass:
-
-```bash
-uv run coval-bench db migrate --revision 20261007_0044
-uv run alembic -x allow_metric_code_cleanup=true upgrade 20261007_0044
-```
-
-Deploy the artifact containing revision `20261007_0044` to every consumer
-before applying it, so later restarts recognize the installed Alembic revision.
-Never use an implicit head upgrade for this cutover. To roll back the
-application, restore the previous interface first, then run
-`uv run alembic downgrade 20261005_0043` before deploying an older application
-binary. Record the deployed runner, API, dashboard, and maintenance-job versions.
+Pass `--revision <id>` to stop at an earlier target. A migration that swaps the
+dashboard window views can fail on its 10s lock timeout when an hourly window
+refresh is holding them; rerun it.
