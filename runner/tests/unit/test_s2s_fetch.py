@@ -1107,6 +1107,7 @@ def test_platform_specs_come_from_platform_registry_rows() -> None:
         family="s2s-id-roulette",
         publish_samples=False,
         metric_ids={Metric.V2V: "LAT", Metric.CALL_LENGTH: "LEN"},
+        uses_shared_metrics=False,
         variant_id="vapi/pinned",
     )
     # A registry row the map has no agent for is skipped by the fetch, like any
@@ -1121,6 +1122,7 @@ async def test_fetch_and_write_fetches_the_platform_agents(
 ) -> None:
     settings = _settings(
         coval_s2s_latency_metric_id="MID",
+        coval_s2s_interruption_metric_id="BANK_INT",
         coval_s2s_scenarios={"id-roulette": ID_ROULETTE},
     )
     client = _fake_client({}, {})
@@ -3074,6 +3076,11 @@ def test_a_blank_scenario_test_set_id_is_rejected(blank: str) -> None:
         ScenarioCovalIds(test_set_id=blank)
     with pytest.raises(ValueError, match="blank Coval id"):
         ScenarioCovalIds(test_set_id="TS", agents={"gpt-realtime": blank})
+
+
+def test_an_unknown_scenario_metric_is_rejected() -> None:
+    with pytest.raises(ValueError, match=r"unknown metric\(s\) \['latency'\]"):
+        ScenarioCovalIds(test_set_id="TS", metric_ids={"latency": "LAT"})
 
 
 def test_scenario_ids_are_stripped() -> None:

@@ -572,7 +572,11 @@ async def fetch_and_write_v2v(
                     **metric_ids,
                     Metric.INSTRUCTION_FOLLOWING: spec_instruction_metric_id,
                 }
-            spec_metric_ids = {**spec_metric_ids, **spec.metric_ids}
+            spec_metric_ids = (
+                {**spec_metric_ids, **spec.metric_ids}
+                if spec.uses_shared_metrics
+                else dict(spec.metric_ids)
+            )
             status_key = f"{spec.family}:{spec.provider}:{spec.model}"
             statuses[status_key], ingested = await _fetch_one_provider(
                 client,

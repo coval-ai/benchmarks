@@ -56,6 +56,8 @@ class AgentSpec:
     # global one.
     instruction_metric_id_attr: str | None = None
     metric_ids: Mapping[Metric, str] = field(default_factory=dict)
+    # False when ``metric_ids`` is the full set, so the shared bank ids never fill a gap.
+    uses_shared_metrics: bool = True
     # The platform variant the agent runs, stored with each conversation.
     variant_id: str | None = None
 
@@ -219,6 +221,7 @@ def platform_specs(settings: Settings, models: Iterable[RegisteredModel]) -> tup
                     family=scenario_family(slug),
                     publish_samples=False,
                     metric_ids=metric_ids,
+                    uses_shared_metrics=False,
                     variant_id=ids.variant_ids.get(key),
                 )
             )

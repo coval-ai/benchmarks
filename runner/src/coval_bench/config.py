@@ -59,6 +59,16 @@ class ScenarioCovalIds(BaseModel, frozen=True, extra="forbid"):
             raise ValueError(f"blank Coval id for {blank}")
         return value
 
+    @field_validator("metric_ids")
+    @classmethod
+    def _known_metrics(cls, value: dict[str, str]) -> dict[str, str]:
+        from coval_bench.registries import Metric
+
+        unknown = sorted(set(value) - {m.value for m in Metric})
+        if unknown:
+            raise ValueError(f"unknown metric(s) {unknown}")
+        return value
+
     @field_validator("personas")
     @classmethod
     def _known_conditions(cls, value: dict[str, str]) -> dict[str, str]:

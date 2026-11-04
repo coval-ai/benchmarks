@@ -17,6 +17,7 @@ from google.auth.exceptions import GoogleAuthError
 
 from coval_bench.config import Settings
 from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.s2s.conditions import PLATFORM_SLUGS
 from coval_bench.s2s.coval_runs import coval_client, recent_completed_runs
 from coval_bench.s2s.fetch_v2v import validate_fetch_settings
 from coval_bench.s2s.identity import (
@@ -26,7 +27,7 @@ from coval_bench.s2s.identity import (
     parse_persona_conditions,
 )
 from coval_bench.s2s.scenario_map import with_scenario_map
-from coval_bench.s2s.specs import s2s_specs, scenario_specs
+from coval_bench.s2s.specs import AgentSpec, s2s_specs, scenario_specs
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,18 @@ async def check_scenarios(
     unmapped: dict[str, set[str]] = {}
     for slug, ids in settings.coval_s2s_scenarios.items():
         only_this = settings.model_copy(update={"coval_s2s_scenarios": {slug: ids}})
-        specs = [s for s in scenario_specs(only_this) if s.agent_id]
+        if slug in PLATFORM_SLUGS:
+            specs = [
+                AgentSpec(
+                    provider=key.partition("/")[0],
+                    model=key,
+                    agent_id=agent_id,
+                    test_set_id=ids.test_set_id,
+                )
+                for key, agent_id in ids.agents.items()
+            ]
+        else:
+            specs = [s for s in scenario_specs(only_this) if s.agent_id]
         if not specs:
             flags.append(f"{slug}: the fetch skips this scenario (no agents or no judge)")
             continue

@@ -308,18 +308,45 @@ def test_unscheduled_platform_scenario_is_skipped_not_rejected() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "break_it",
+    [
+        lambda v: v["agents"]["vapi/pinned"].update(provider=""),
+        lambda v: v["personas"].update({"clean-ish": {"id": "PX", "version": "v1"}}),
+        lambda v: v.update(personas={}),
+        lambda v: v.update(agents={}),
+    ],
+)
+def test_broken_platform_scenario_is_skipped_and_bank_still_loads(
+    break_it: Any,
+) -> None:
+    id_roulette = _id_roulette()
+    break_it(id_roulette["v1"])
+
+    with capture_logs() as logs:
+        fields = scenario_map_fields(_map(**{"id-roulette": id_roulette}))
+
+    assert set(fields["coval_s2s_scenarios"]) == {"bank", "workflow-bank"}
+    assert any(
+        log["event"] == "platform_scenario_invalid" and log["log_level"] == "error" for log in logs
+    )
+
+
 def test_map_without_a_platform_scenario_still_loads() -> None:
     fields = scenario_map_fields(_map())
 
     assert "id-roulette" not in fields["coval_s2s_scenarios"]
 
 
-def test_repeated_platform_agent_is_rejected() -> None:
+def test_repeated_platform_agent_is_skipped() -> None:
     id_roulette = _id_roulette()
     id_roulette["v1"]["agents"]["retell/pinned"]["provider"] = "vapi"
 
-    with pytest.raises(ValueError, match="repeats agent 'vapi/pinned'"):
-        scenario_map_fields(_map(**{"id-roulette": id_roulette}))
+    with capture_logs() as logs:
+        fields = scenario_map_fields(_map(**{"id-roulette": id_roulette}))
+
+    assert "id-roulette" not in fields["coval_s2s_scenarios"]
+    assert any("repeats agent 'vapi/pinned'" in log.get("error", "") for log in logs)
 
 
 def test_bank_still_needs_its_judge() -> None:

@@ -116,6 +116,10 @@ def _scenario_ids(name: str, assets: _ScenarioVersion) -> ScenarioCovalIds:
 
 def _platform_ids(name: str, assets: _ScenarioVersion) -> ScenarioCovalIds:
     """A platform scenario's ids, its agents keyed "provider/model" like registry rows."""
+    if not assets.agents:
+        raise ValueError(f"scenario map {name!r} has no agents")
+    if not assets.personas:
+        raise ValueError(f"scenario map {name!r} has no personas")
     agents: dict[str, str] = {}
     variant_ids: dict[str, str] = {}
     for agent in assets.agents.values():
@@ -148,11 +152,14 @@ def scenario_map_fields(raw: object) -> dict[str, Any]:
     scenarios = {name: _scenario_ids(name, assets) for name, assets in live.items()}
     for name in PLATFORM_SLUGS:
         versions = raw.get(name)
-        assets = _newest_live(versions) if isinstance(versions, dict) else None
-        if assets is None:
-            logger.info("platform_scenario_not_scheduled", scenario=name)
-            continue
-        scenarios[name] = _platform_ids(name, assets)
+        try:
+            assets = _newest_live(versions) if isinstance(versions, dict) else None
+            if assets is None:
+                logger.info("platform_scenario_not_scheduled", scenario=name)
+                continue
+            scenarios[name] = _platform_ids(name, assets)
+        except ValueError as exc:
+            logger.error("platform_scenario_invalid", scenario=name, error=str(exc))
     bank = live["bank"]
     if bank.judge is None:
         raise ValueError("scenario map 'bank' has no judge")
