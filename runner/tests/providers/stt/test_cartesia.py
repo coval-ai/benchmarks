@@ -182,7 +182,7 @@ async def test_connect_url_and_auth(stt_settings: Settings, audio_pcm_bytes: byt
     headers = connect_mock.call_args.kwargs["additional_headers"]
     assert stt_settings.cartesia_api_key is not None
     assert headers["Authorization"] == f"Bearer {stt_settings.cartesia_api_key.get_secret_value()}"
-    assert headers["cartesia-version"] == "2025-11-04"
+    assert headers["cartesia-version"] == "2026-08-14"
 
 
 # ---------------------------------------------------------------------------
