@@ -133,3 +133,29 @@ def test_adherence_scenarios_fetch_their_judge() -> None:
             assert dataset_id is not None
             assert conditions.condition_for(dataset_id).required is metric
             assert conditions.condition_for(dataset_id).fetched == {metric, *extra}
+
+
+def test_each_platform_room_is_its_own_latency_anchored_dataset() -> None:
+    family = conditions.scenario_family("id-roulette")
+    ids = {room: conditions.dataset_id_for(family, room) for room in conditions.ROOMS}
+
+    assert ids == {
+        conditions.Condition.QUIET_ROOM: "s2s-id-roulette-quiet-room-v1",
+        conditions.Condition.OFFICE_DESK: "s2s-id-roulette-office-desk-v1",
+        conditions.Condition.LANDLINE_WITH_AIR_CONDITIONER: (
+            "s2s-id-roulette-landline-with-air-conditioner-v1"
+        ),
+    }
+    for dataset_id in ids.values():
+        assert dataset_id is not None
+        contract = conditions.condition_for(dataset_id)
+        assert contract.required is Metric.V2V
+        assert contract.optional == frozenset({Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH})
+    # No clean caller and no tiers: those personas would not be ingested.
+    assert conditions.dataset_id_for(family, conditions.Condition.CLEAN) is None
+    assert conditions.dataset_id_for(family, conditions.Condition.HARD) is None
+
+
+def test_rooms_never_land_in_a_bank_dataset() -> None:
+    for room in conditions.ROOMS:
+        assert conditions.dataset_id_for(conditions.FAMILY_BANK, room) is None

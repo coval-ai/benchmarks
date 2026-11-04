@@ -44,12 +44,15 @@ __all__ = [
     "FAMILY_LLM_BANK",
     "FAMILY_LLM_DENTAL",
     "FAMILY_MULTITURN",
+    "PLATFORM_SLUGS",
+    "ROOMS",
     "SCENARIO_SLUGS",
     "TIERS",
     "Condition",
     "DatasetMetrics",
     "condition_for",
     "dataset_id_for",
+    "room_dataset_id",
     "scenario_dataset_id",
     "scenario_family",
 ]
@@ -70,6 +73,9 @@ class Condition(StrEnum):
     MEDIUM = "medium"
     HARD = "hard"
     EXTRA_HARD = "extra_hard"
+    QUIET_ROOM = "quiet-room"
+    OFFICE_DESK = "office-desk"
+    LANDLINE_WITH_AIR_CONDITIONER = "landline-with-air-conditioner"
     SKIP = "skip"
 
 
@@ -104,6 +110,14 @@ TIERS: tuple[Condition, ...] = (
     Condition.HARD,
     Condition.EXTRA_HARD,
 )
+# The voice orchestration platforms' scenarios. They have no clean caller: each room
+# the caller rings from is its own condition, quiet-room the baseline.
+PLATFORM_SLUGS: tuple[str, ...] = ("id-roulette",)
+ROOMS: tuple[Condition, ...] = (
+    Condition.QUIET_ROOM,
+    Condition.OFFICE_DESK,
+    Condition.LANDLINE_WITH_AIR_CONDITIONER,
+)
 
 
 def scenario_family(slug: str) -> str:
@@ -118,6 +132,11 @@ def scenario_dataset_id(slug: str, condition: Condition) -> str | None:
     if condition in TIERS:
         return f"{scenario_family(slug)}-{condition.value.replace('_', '-')}-v1"
     return None
+
+
+def room_dataset_id(slug: str, room: Condition) -> str:
+    """Where the platform scenario *slug*'s runs from *room* land."""
+    return f"{scenario_family(slug)}-{room.value}-v1"
 
 
 FAMILY_BANK = scenario_family("bank")
@@ -169,6 +188,14 @@ DATASET_IDS: dict[tuple[str, Condition], str | None] = {
     **{
         (scenario_family(slug), condition): scenario_dataset_id(slug, condition)
         for slug in SCENARIO_SLUGS
+        for condition in Condition
+        if condition is not Condition.SKIP
+    },
+    **{
+        (scenario_family(slug), condition): (
+            room_dataset_id(slug, condition) if condition in ROOMS else None
+        )
+        for slug in PLATFORM_SLUGS
         for condition in Condition
         if condition is not Condition.SKIP
     },
@@ -295,6 +322,16 @@ CONDITIONS: dict[str, DatasetMetrics] = {
         )
         for slug, metric in ADHERENCE_SLUGS.items()
         for condition in (Condition.CLEAN, *TIERS)
+    },
+    # The platforms have no judge, so latency anchors every room; Coval measures it
+    # on all three.
+    **{
+        room_dataset_id(slug, room): DatasetMetrics(
+            required=Metric.V2V,
+            optional=frozenset({Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH}),
+        )
+        for slug in PLATFORM_SLUGS
+        for room in ROOMS
     },
     DATASET_ID_LLM_BANK: DatasetMetrics(
         benchmark=Benchmark.LLM,

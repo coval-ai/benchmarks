@@ -22,7 +22,7 @@ from coval_bench.config import ScenarioCovalIds, Settings
 from coval_bench.db.models import Result, ResultStatus, Run, RunStatus
 from coval_bench.logging import log_run_failed, log_run_partial, log_run_unmapped_persona
 from coval_bench.registries import Benchmark, Metric
-from coval_bench.registries.models import RegisteredModel
+from coval_bench.registries.models import Architecture, Orchestration, RegisteredModel
 from coval_bench.runner import persistence
 from coval_bench.runner.capture import (
     ImportRunClaim,
@@ -1064,6 +1064,127 @@ async def test_fetch_and_write_skips_an_arm_with_no_registry_row(
 
     assert statuses == {}
     fetch_one.assert_not_awaited()
+
+
+ID_ROULETTE = ScenarioCovalIds(
+    test_set_id="TSR",
+    agents={"vapi/pinned": "AV", "livekit/pinned": "AL"},
+    personas={"quiet-room": "PQ", "office-desk": "PO"},
+    variant_ids={"vapi/pinned": "vapi/pinned", "livekit/pinned": "livekit/pinned"},
+    metric_ids={"V2V": "LAT", "CallLength": "LEN"},
+)
+
+
+def _platform_row(
+    provider: str, orchestration: Orchestration = Orchestration.PLATFORM
+) -> RegisteredModel:
+    return RegisteredModel(
+        benchmark=Benchmark.S2S,
+        provider=provider,
+        model="pinned",
+        collected=True,
+        published=False,
+        architecture=Architecture.CASCADED,
+        orchestration=orchestration,
+    )
+
+
+def test_platform_specs_come_from_platform_registry_rows() -> None:
+    settings = _settings(coval_s2s_scenarios={"id-roulette": ID_ROULETTE})
+    rows = [
+        _platform_row("vapi"),
+        _platform_row("retell"),
+        _platform_row("harnessed", Orchestration.HARNESS),
+    ]
+
+    vapi, retell = specs.platform_specs(settings, rows)
+
+    assert vapi == AgentSpec(
+        agent_id="AV",
+        provider="vapi",
+        model="pinned",
+        test_set_id="TSR",
+        family="s2s-id-roulette",
+        publish_samples=False,
+        metric_ids={Metric.V2V: "LAT", Metric.CALL_LENGTH: "LEN"},
+        variant_id="vapi/pinned",
+    )
+    # A registry row the map has no agent for is skipped by the fetch, like any
+    # unconfigured agent; livekit has an agent but no row, so it gets no spec at all.
+    assert (retell.provider, retell.agent_id) == ("retell", None)
+    assert specs.platform_specs(_settings(), rows) == ()
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_write_fetches_the_platform_agents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_scenarios={"id-roulette": ID_ROULETTE},
+    )
+    client = _fake_client({}, {})
+    writer = _stub_writer()
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
+    rows = [*_every_s2s_row(), _platform_row("vapi")]
+    monkeypatch.setattr(fetch_v2v, "s2s_specs", lambda _s: ())
+    monkeypatch.setattr(fetch_v2v, "fetch_models", AsyncMock(return_value=rows))
+    monkeypatch.setattr(fetch_v2v, "coval_client", lambda _settings: client)
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: writer)
+    monkeypatch.setattr(fetch_v2v, "_fetch_one_provider", fetch_one)
+
+    statuses = await fetch_v2v.fetch_and_write_v2v(settings)
+
+    assert statuses == {"s2s-id-roulette:vapi:pinned": RunStatus.SUCCEEDED}
+    assert fetch_one.await_args is not None
+    assert fetch_one.await_args.kwargs["agent_id"] == "AV"
+    assert fetch_one.await_args.kwargs["test_set_id"] == "TSR"
+    assert fetch_one.await_args.kwargs["metric_ids"] == {
+        Metric.V2V: "LAT",
+        Metric.CALL_LENGTH: "LEN",
+    }
+
+
+def test_platform_rooms_land_in_their_own_datasets() -> None:
+    rooms = {"PQ": Condition.QUIET_ROOM, "PO": Condition.OFFICE_DESK}
+
+    assert identity.dataset_identity(
+        "TSR", "PQ", family="s2s-id-roulette", persona_conditions=rooms
+    ) == ("s2s-id-roulette-quiet-room-v1", "TSR:PQ")
+    assert identity.dataset_identity(
+        "TSR", "PO", family="s2s-id-roulette", persona_conditions=rooms
+    ) == ("s2s-id-roulette-office-desk-v1", "TSR:PO")
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_stores_the_platform_variant(monkeypatch: pytest.MonkeyPatch) -> None:
+    extras: list[Any] = []
+
+    def _keep_extras(**kwargs: Any) -> Any:
+        extras.append(kwargs["provider_extras"])
+        return _prepare_and_keep_results(**kwargs)
+
+    monkeypatch.setattr("coval_bench.runner.persistence.prepare_capture_envelope", _keep_extras)
+    writer = _stub_writer()
+    values = [{"simulation_output_id": "s0", "value": 0.5}]
+    async with _fake_client({}, _run_json(values)) as client:
+        status = await ingest_run(
+            client,
+            writer,
+            spec=replace(SPEC, variant_id="vapi/pinned"),
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=LATENCY_IDS,
+            period_seconds=10_800,
+        )
+
+    assert status is RunStatus.SUCCEEDED
+    assert extras == [{"coval_run_id": "R1", "variant_id": "vapi/pinned"}]
 
 
 @pytest.mark.asyncio

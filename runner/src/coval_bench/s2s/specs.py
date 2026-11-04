@@ -14,11 +14,13 @@ import structlog
 from coval_bench import scenarios
 from coval_bench.registries import Metric
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import RegisteredModel
+from coval_bench.registries.models import Orchestration, RegisteredModel
 from coval_bench.s2s.conditions import (
     ADHERENCE_SLUGS,
     FAMILY_DENTAL,
     FAMILY_MULTITURN,
+    PLATFORM_SLUGS,
+    scenario_family,
 )
 
 if TYPE_CHECKING:
@@ -54,6 +56,8 @@ class AgentSpec:
     # global one.
     instruction_metric_id_attr: str | None = None
     metric_ids: Mapping[Metric, str] = field(default_factory=dict)
+    # The platform variant the agent runs, stored with each conversation.
+    variant_id: str | None = None
 
 
 # Model strings are display labels. Every agent runs the dental test set: the
@@ -183,6 +187,39 @@ def scenario_specs(settings: Settings) -> tuple[AgentSpec, ...]:
                         else scenarios.ACTIVE.instruction_metric_id_attr
                     ),
                     metric_ids=metric_ids,
+                )
+            )
+    return tuple(specs)
+
+
+def platform_specs(settings: Settings, models: Iterable[RegisteredModel]) -> tuple[AgentSpec, ...]:
+    """One spec per (platform scenario, platform registry row), its agent from the map.
+
+    A map agent with no registry row is never fetched; a row with no agent is skipped.
+    """
+    platforms = [
+        model
+        for model in models
+        if model.benchmark is Benchmark.S2S and model.orchestration is Orchestration.PLATFORM
+    ]
+    specs: list[AgentSpec] = []
+    for slug in PLATFORM_SLUGS:
+        ids = settings.coval_s2s_scenarios.get(slug)
+        if ids is None:
+            continue
+        metric_ids = {Metric(metric): ident for metric, ident in ids.metric_ids.items()}
+        for model in platforms:
+            key = f"{model.provider}/{model.model}"
+            specs.append(
+                AgentSpec(
+                    agent_id=ids.agents.get(key),
+                    provider=model.provider,
+                    model=model.model,
+                    test_set_id=ids.test_set_id,
+                    family=scenario_family(slug),
+                    publish_samples=False,
+                    metric_ids=metric_ids,
+                    variant_id=ids.variant_ids.get(key),
                 )
             )
     return tuple(specs)
