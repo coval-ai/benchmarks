@@ -36,6 +36,8 @@ class Metric(StrEnum):
     CALL_LENGTH = "CallLength"
     EXPECTED_BEHAVIOR_ADHERENCE = "ExpectedBehaviorAdherence"
     WORKFLOW_ADHERENCE = "WorkflowAdherence"
+    CHARACTER_ERROR_RATE = "CharacterErrorRate"
+    TOOL_CALL_COUNT = "ToolCallCount"
 
 
 class MetricDirection(StrEnum):
@@ -57,7 +59,7 @@ class MetricSpec(BaseModel, frozen=True):
 
     display_name: str
     units: str
-    direction: MetricDirection
+    direction: MetricDirection | None
     decimals: int
     benchmarks: frozenset[Benchmark]
 
@@ -197,6 +199,23 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         decimals=1,
         benchmarks=frozenset({Benchmark.S2S}),
     ),
+    Metric.CHARACTER_ERROR_RATE: MetricSpec(
+        display_name="Character Error Rate",
+        # Coval reports edits over the right value's length as a 0-1 fraction;
+        # stored as a percentage like WER, and like WER it can exceed 100%.
+        units="percent",
+        direction=MetricDirection.LOWER_IS_BETTER,
+        decimals=1,
+        benchmarks=frozenset({Benchmark.S2S}),
+    ),
+    Metric.TOOL_CALL_COUNT: MetricSpec(
+        display_name="Tool Call Count",
+        # The right count is whatever the test case expects, so neither way ranks better.
+        units="count",
+        direction=None,
+        decimals=0,
+        benchmarks=frozenset({Benchmark.S2S}),
+    ),
 }
 
 if METRIC_SPECS.keys() != set(Metric):
@@ -241,6 +260,8 @@ METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
         Metric.CALL_LENGTH,
         Metric.EXPECTED_BEHAVIOR_ADHERENCE,
         Metric.WORKFLOW_ADHERENCE,
+        Metric.CHARACTER_ERROR_RATE,
+        Metric.TOOL_CALL_COUNT,
     )
 }
 METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(

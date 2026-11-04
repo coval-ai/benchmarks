@@ -150,7 +150,14 @@ def test_each_platform_room_is_its_own_latency_anchored_dataset() -> None:
         assert dataset_id is not None
         contract = conditions.condition_for(dataset_id)
         assert contract.required is Metric.V2V
-        assert contract.optional == frozenset({Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH})
+        assert contract.optional == frozenset(
+            {
+                Metric.INTERRUPTION_RATE,
+                Metric.CALL_LENGTH,
+                Metric.CHARACTER_ERROR_RATE,
+                Metric.TOOL_CALL_COUNT,
+            }
+        )
     # No clean caller and no tiers: those personas would not be ingested.
     assert conditions.dataset_id_for(family, conditions.Condition.CLEAN) is None
     assert conditions.dataset_id_for(family, conditions.Condition.HARD) is None

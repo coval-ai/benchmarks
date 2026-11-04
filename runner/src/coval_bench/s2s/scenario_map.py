@@ -35,6 +35,8 @@ _PLATFORM_METRICS = {
     "latency": Metric.V2V,
     "interruption_rate": Metric.INTERRUPTION_RATE,
     "call_length": Metric.CALL_LENGTH,
+    "character_error_rate": Metric.CHARACTER_ERROR_RATE,
+    "tool_call_count": Metric.TOOL_CALL_COUNT,
 }
 
 # Coval ids go into run filters as agent_id="…", so quotes or spaces must never pass.

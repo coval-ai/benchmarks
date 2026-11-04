@@ -104,6 +104,20 @@ def call_length_value(raw: object) -> tuple[float | None, ResultStatus] | None:
     return None, ResultStatus.FAILED
 
 
+def character_error_rate_value(raw: object) -> tuple[float | None, ResultStatus] | None:
+    """Coval's 0-1 fraction as a percentage; a clip with no numeric value becomes a FAILED row."""
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return float(raw) * 100.0, ResultStatus.SUCCESS
+    return None, ResultStatus.FAILED
+
+
+def tool_call_count_value(raw: object) -> tuple[float | None, ResultStatus] | None:
+    """Tool calls in the conversation; a clip with no numeric value becomes a FAILED row."""
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return float(raw), ResultStatus.SUCCESS
+    return None, ResultStatus.FAILED
+
+
 # The only per-metric part: one raw Coval value -> (row value, status), or None to
 # write no row. A metric is ingestable once it appears here.
 VALUE_MAPPERS: dict[Metric, Callable[[object], tuple[float | None, ResultStatus] | None]] = {
@@ -112,6 +126,8 @@ VALUE_MAPPERS: dict[Metric, Callable[[object], tuple[float | None, ResultStatus]
     Metric.INTERRUPTION_RATE: interruption_value,
     Metric.CALL_LENGTH: call_length_value,
     Metric.WORKFLOW_ADHERENCE: instruction_value,
+    Metric.CHARACTER_ERROR_RATE: character_error_rate_value,
+    Metric.TOOL_CALL_COUNT: tool_call_count_value,
 }
 
 

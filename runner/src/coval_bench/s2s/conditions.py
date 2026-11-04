@@ -328,7 +328,14 @@ CONDITIONS: dict[str, DatasetMetrics] = {
     **{
         room_dataset_id(slug, room): DatasetMetrics(
             required=Metric.V2V,
-            optional=frozenset({Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH}),
+            optional=frozenset(
+                {
+                    Metric.INTERRUPTION_RATE,
+                    Metric.CALL_LENGTH,
+                    Metric.CHARACTER_ERROR_RATE,
+                    Metric.TOOL_CALL_COUNT,
+                }
+            ),
         )
         for slug in PLATFORM_SLUGS
         for room in ROOMS

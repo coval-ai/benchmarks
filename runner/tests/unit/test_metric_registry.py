@@ -30,6 +30,8 @@ def test_metric_values_match_stored_strings() -> None:
         "CallLength",
         "ExpectedBehaviorAdherence",
         "WorkflowAdherence",
+        "CharacterErrorRate",
+        "ToolCallCount",
     }
 
 
@@ -50,6 +52,8 @@ def test_units_match_stored_strings() -> None:
         Metric.CALL_LENGTH: "seconds",
         Metric.EXPECTED_BEHAVIOR_ADHERENCE: "percent",
         Metric.WORKFLOW_ADHERENCE: "percent",
+        Metric.CHARACTER_ERROR_RATE: "percent",
+        Metric.TOOL_CALL_COUNT: "count",
     }
     assert {m: spec.units for m, spec in METRIC_SPECS.items()} == expected
 
@@ -65,11 +69,15 @@ def test_benchmark_coverage() -> None:
     assert METRIC_SPECS[Metric.INSTRUCTION_FOLLOWING].benchmarks == {Benchmark.S2S, Benchmark.LLM}
     assert METRIC_SPECS[Metric.EXPECTED_BEHAVIOR_ADHERENCE].benchmarks == {Benchmark.S2S}
     assert METRIC_SPECS[Metric.WORKFLOW_ADHERENCE].benchmarks == {Benchmark.S2S}
+    assert METRIC_SPECS[Metric.CHARACTER_ERROR_RATE].benchmarks == {Benchmark.S2S}
+    assert METRIC_SPECS[Metric.TOOL_CALL_COUNT].benchmarks == {Benchmark.S2S}
 
 
 def test_metric_directions() -> None:
-    # The adherence metrics are pass rates: higher is better. Every other metric
-    # is a latency/error measure: lower is better.
+    # The adherence metrics are pass rates: higher is better. Tool Call Count has a
+    # right answer per test case, so no direction. Every other metric is a
+    # latency/error measure: lower is better.
+    assert METRIC_SPECS[Metric.TOOL_CALL_COUNT].direction is None
     higher_is_better = {
         Metric.INSTRUCTION_FOLLOWING,
         Metric.EXPECTED_BEHAVIOR_ADHERENCE,
@@ -81,7 +89,7 @@ def test_metric_directions() -> None:
     assert all(
         spec.direction is MetricDirection.LOWER_IS_BETTER
         for m, spec in METRIC_SPECS.items()
-        if m not in higher_is_better
+        if m not in higher_is_better and m is not Metric.TOOL_CALL_COUNT
     )
 
 

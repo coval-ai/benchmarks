@@ -272,20 +272,28 @@ def test_platform_agents_are_keyed_by_provider_and_model() -> None:
             "telnyx/pinned": "telnyx/pinned",
             "livekit/pinned": "livekit/pinned",
         },
-        metric_ids={"V2V": "LAT", "InterruptionRate": "INT", "CallLength": "LEN"},
+        metric_ids={
+            "V2V": "LAT",
+            "InterruptionRate": "INT",
+            "CallLength": "LEN",
+            "CharacterErrorRate": "CER",
+            "ToolCallCount": "TCC",
+        },
     )
     assert fields["coval_s2s_bank_test_set_id"] == "TS"
 
 
 def test_platform_metrics_absent_from_the_map_are_left_out() -> None:
     id_roulette = _id_roulette()
-    del id_roulette["v1"]["metric_ids"]["call_length"]
+    del id_roulette["v1"]["metric_ids"]["character_error_rate"]
+    del id_roulette["v1"]["metric_ids"]["tool_call_count"]
 
     fields = scenario_map_fields(_map(**{"id-roulette": id_roulette}))
 
     assert fields["coval_s2s_scenarios"]["id-roulette"].metric_ids == {
         "V2V": "LAT",
         "InterruptionRate": "INT",
+        "CallLength": "LEN",
     }
 
 
