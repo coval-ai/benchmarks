@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "repository": "benchmarks",
+  "contracts": [
+    {
+      "id": "runtime",
+      "changedFiles": [
+        "runner/pyproject.toml"
+      ],
+      "surfaces": [
+        "benchmarks.runner",
+        "benchmarks.api_typegen"
+      ]
+    },
+    {
+      "id": "methodology",
+      "changedFiles": [
+        "docs/methodology.md"
+      ],
+      "surfaces": [
+        "benchmarks.runner"
+      ]
+    },
+    {
+      "id": "ci-workflow",
+      "changedFiles": [
+        ".github/workflows/ci.yml"
+      ],
+      "surfaces": [
+        "benchmarks.runner"
+      ]
+    },
+    {
+      "id": "type-generator",
+      "changedFiles": [
+        "scripts/generate_types.sh"
+      ],
+      "surfaces": [
+        "benchmarks.api_typegen"
+      ]
+    },
+    {
+      "id": "artifact-manifest",
+      "changedFiles": [
+        ".switchboard/generated-artifacts.yaml"
+      ],
+      "surfaces": [
+        "benchmarks.api_typegen"
+      ]
+    },
+    {
+      "id": "metadata",
+      "changedFiles": [
+        ".switchboard/impact.json",
+        ".switchboard/service-selection-contracts.json"
+      ],
+      "surfaces": [
+        "benchmarks.runner"
+      ]
+    },
+    {
+      "id": "passive-documentation",
+      "changedFiles": [
+        "README.md"
+      ],
+      "surfaces": []
+    },
+    {
+      "id": "local-harness",
+      "changedFiles": [
+        "scripts/arena-local.sh"
+      ],
+      "surfaces": []
+    },
+    {
+      "id": "mixed-inputs",
+      "changedFiles": [
+        "docs/methodology.md",
+        "scripts/generate_types.sh"
+      ],
+      "surfaces": [
+        "benchmarks.runner",
+        "benchmarks.api_typegen"
+      ]
+    }
+  ]
+}
