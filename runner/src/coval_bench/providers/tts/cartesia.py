@@ -46,7 +46,7 @@ class CartesiaTTSProvider(TTSProvider):
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via Cartesia WebSocket and return a TTSResult."""
         synthesis = Synthesis("cartesia", self._model, self._voice, SAMPLE_RATE)
-        voice_spec: VoiceSpecifierParam = {"id": self._voice, "mode": "id"}
+        voice_spec: VoiceSpecifierParam = {"id": self._voice}
 
         try:
             client = AsyncCartesia(api_key=self._api_key)
