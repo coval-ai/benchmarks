@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "repository": "benchmarks",
+  "inputs": {
+    "runner": {
+      "include": [
+        "runner/**",
+        "docs/**",
+        "docker-compose.yml",
+        ".github/workflows/ci.yml",
+        ".github/workflows/runner-release.yml",
+        ".github/workflows/trivy.yml",
+        ".github/workflows/codeql.yml",
+        ".github/workflows/switchboard.yml",
+        ".switchboard/impact.json",
+        ".switchboard/service-selection-contracts.json"
+      ]
+    },
+    "api_types": {
+      "include": [
+        "runner/**",
+        "scripts/generate_types.sh",
+        ".switchboard/generated-artifacts.yaml",
+        ".github/workflows/push-benchmarks-types.yml"
+      ]
+    },
+    "repository_metadata": {
+      "include": [
+        ".env.example",
+        ".gitignore",
+        ".github/CODEOWNERS",
+        ".github/dependabot.yml",
+        "CONTRIBUTING.md",
+        "LICENSE",
+        "README.md",
+        "SECURITY.md",
+        "scripts/arena-local.sh",
+        ".switchboard/README.md"
+      ]
+    }
+  },
+  "selectionContracts": ".switchboard/service-selection-contracts.json",
+  "surfaces": {
+    "benchmarks.runner": {
+      "inputs": [
+        "runner"
+      ]
+    },
+    "benchmarks.api_typegen": {
+      "inputs": [
+        "api_types"
+      ]
+    }
+  }
+}
