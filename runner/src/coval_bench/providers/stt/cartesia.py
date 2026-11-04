@@ -17,7 +17,7 @@ from coval_bench.providers.base import TranscriptionResult
 from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 _WS_BASE_URL = "wss://api.cartesia.ai/stt/websocket"
-_CARTESIA_VERSION = "2025-11-04"
+_CARTESIA_VERSION = "2026-08-14"
 
 
 class CartesiaSTTProvider(WebSocketSTTProvider):
