@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from structlog.testing import capture_logs
 
 from coval_bench.config import ScenarioCovalIds, Settings
 from coval_bench.s2s.scenario_map import scenario_map_fields, with_scenario_map
@@ -200,3 +201,165 @@ def test_ids_outside_coval_format_are_rejected(bad: str) -> None:
 
     with pytest.raises(ValueError, match="pattern"):
         scenario_map_fields(_map(bank=bank))
+
+
+def _platform_agent(provider: str, ident: str) -> dict[str, Any]:
+    return {
+        "id": ident,
+        "model": "pinned",
+        "provider": provider,
+        "registry_model": "pinned",
+        "transport": "sip",
+        "variant_id": f"{provider}/pinned",
+        "version": "v1",
+    }
+
+
+def _id_roulette(*, enabled: bool = True) -> dict[str, Any]:
+    """The published ID Roulette entry's shape, with made-up ids."""
+    rooms = ("quiet-room", "office-desk", "landline-with-air-conditioner")
+    return {
+        "v1": {
+            "workspace_id": "WS",
+            "test_set_id": "TSR",
+            "agents": {
+                f"{provider}/pinned": _platform_agent(provider, f"AG{index}")
+                for index, provider in enumerate(("vapi", "retell", "telnyx", "livekit"))
+            },
+            "personas": {
+                room: {"id": f"PR{index}", "version": "v1"} for index, room in enumerate(rooms)
+            },
+            "judge": None,
+            "metric_ids": {
+                "latency": "LAT",
+                "interruption_rate": "INT",
+                "call_length": "LEN",
+                "character_error_rate": "CER",
+                "tool_call_count": "TCC",
+            },
+            "schedules": {
+                room: {
+                    "id": f"S{index}",
+                    "enabled": enabled,
+                    "schedule_expression": "cron(0 9 * * ? *)",
+                    "schedule_timezone": "America/Los_Angeles",
+                }
+                for index, room in enumerate(rooms)
+            },
+        }
+    }
+
+
+def test_platform_agents_are_keyed_by_provider_and_model() -> None:
+    fields = scenario_map_fields(_map(**{"id-roulette": _id_roulette()}))
+
+    assert fields["coval_s2s_scenarios"]["id-roulette"] == ScenarioCovalIds(
+        test_set_id="TSR",
+        agents={
+            "vapi/pinned": "AG0",
+            "retell/pinned": "AG1",
+            "telnyx/pinned": "AG2",
+            "livekit/pinned": "AG3",
+        },
+        personas={
+            "quiet-room": "PR0",
+            "office-desk": "PR1",
+            "landline-with-air-conditioner": "PR2",
+        },
+        variant_ids={
+            "vapi/pinned": "vapi/pinned",
+            "retell/pinned": "retell/pinned",
+            "telnyx/pinned": "telnyx/pinned",
+            "livekit/pinned": "livekit/pinned",
+        },
+        metric_ids={
+            "V2V": "LAT",
+            "InterruptionRate": "INT",
+            "CallLength": "LEN",
+            "CharacterErrorRate": "CER",
+            "ToolCallCount": "TCC",
+        },
+    )
+    assert fields["coval_s2s_bank_test_set_id"] == "TS"
+
+
+def test_platform_metrics_absent_from_the_map_are_left_out() -> None:
+    id_roulette = _id_roulette()
+    del id_roulette["v1"]["metric_ids"]["character_error_rate"]
+    del id_roulette["v1"]["metric_ids"]["tool_call_count"]
+
+    fields = scenario_map_fields(_map(**{"id-roulette": id_roulette}))
+
+    assert fields["coval_s2s_scenarios"]["id-roulette"].metric_ids == {
+        "V2V": "LAT",
+        "InterruptionRate": "INT",
+        "CallLength": "LEN",
+    }
+
+
+def test_unscheduled_platform_scenario_is_skipped_not_rejected() -> None:
+    with capture_logs() as logs:
+        fields = scenario_map_fields(_map(**{"id-roulette": _id_roulette(enabled=False)}))
+
+    assert set(fields["coval_s2s_scenarios"]) == {"bank", "workflow-bank"}
+    assert any(
+        log["event"] == "platform_scenario_not_scheduled" and log["scenario"] == "id-roulette"
+        for log in logs
+    )
+
+
+@pytest.mark.parametrize(
+    "break_it",
+    [
+        lambda v: v["agents"]["vapi/pinned"].update(provider=""),
+        lambda v: v["personas"].update({"clean-ish": {"id": "PX", "version": "v1"}}),
+        lambda v: v.update(personas={}),
+        lambda v: v.update(agents={}),
+    ],
+)
+def test_broken_platform_scenario_is_skipped_and_bank_still_loads(
+    break_it: Any,
+) -> None:
+    id_roulette = _id_roulette()
+    break_it(id_roulette["v1"])
+
+    with capture_logs() as logs:
+        fields = scenario_map_fields(_map(**{"id-roulette": id_roulette}))
+
+    assert set(fields["coval_s2s_scenarios"]) == {"bank", "workflow-bank"}
+    assert any(
+        log["event"] == "platform_scenario_invalid" and log["log_level"] == "error" for log in logs
+    )
+
+
+def test_map_without_a_platform_scenario_still_loads() -> None:
+    fields = scenario_map_fields(_map())
+
+    assert "id-roulette" not in fields["coval_s2s_scenarios"]
+
+
+def test_repeated_platform_agent_is_skipped() -> None:
+    id_roulette = _id_roulette()
+    id_roulette["v1"]["agents"]["retell/pinned"]["provider"] = "vapi"
+
+    with capture_logs() as logs:
+        fields = scenario_map_fields(_map(**{"id-roulette": id_roulette}))
+
+    assert "id-roulette" not in fields["coval_s2s_scenarios"]
+    assert any("repeats agent 'vapi/pinned'" in log.get("error", "") for log in logs)
+
+
+def test_bank_still_needs_its_judge() -> None:
+    version = _version(agents={"gpt-realtime": "A1"})
+    version["judge"] = None
+
+    with pytest.raises(ValueError, match="'bank' has no judge"):
+        scenario_map_fields(_map(bank={"v1": version}))
+
+
+def test_workflow_bank_still_needs_its_judge() -> None:
+    version = _version(agents={"gpt-realtime": "A1"}, test_set_id="TSW")
+    version["judge"] = None
+
+    with pytest.raises(ValueError, match="'workflow-bank' has no judge"):
+        scenario_map_fields(_map(**{"workflow-bank": {"v1": version}}))

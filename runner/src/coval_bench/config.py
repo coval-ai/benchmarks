@@ -41,13 +41,17 @@ class ScenarioCovalIds(BaseModel, frozen=True, extra="forbid"):
     personas: dict[str, str] = Field(default_factory=dict)
     instruction_metric_id: str | None = Field(default=None, min_length=1)
     workflow_metric_id: str | None = Field(default=None, min_length=1)
+    # Platform scenarios only, keyed like ``agents``: the variant each agent runs,
+    # and the scenario's own metric ids by metric type.
+    variant_ids: dict[str, str] = Field(default_factory=dict)
+    metric_ids: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("test_set_id", "instruction_metric_id", "workflow_metric_id", mode="before")
     @classmethod
     def _strip_ids(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
 
-    @field_validator("agents", "personas")
+    @field_validator("agents", "personas", "variant_ids", "metric_ids")
     @classmethod
     def _no_blank_ids(cls, value: dict[str, str]) -> dict[str, str]:
         blank = sorted(key for key, ident in value.items() if not ident.strip())
@@ -55,12 +59,22 @@ class ScenarioCovalIds(BaseModel, frozen=True, extra="forbid"):
             raise ValueError(f"blank Coval id for {blank}")
         return value
 
+    @field_validator("metric_ids")
+    @classmethod
+    def _known_metrics(cls, value: dict[str, str]) -> dict[str, str]:
+        from coval_bench.registries import Metric
+
+        unknown = sorted(set(value) - {m.value for m in Metric})
+        if unknown:
+            raise ValueError(f"unknown metric(s) {unknown}")
+        return value
+
     @field_validator("personas")
     @classmethod
     def _known_conditions(cls, value: dict[str, str]) -> dict[str, str]:
-        from coval_bench.s2s.conditions import TIERS, Condition
+        from coval_bench.s2s.conditions import ROOMS, TIERS, Condition
 
-        allowed = {Condition.CLEAN.value, *(tier.value for tier in TIERS)}
+        allowed = {Condition.CLEAN.value, *(c.value for c in (*TIERS, *ROOMS))}
         unknown = sorted(set(value) - allowed)
         if unknown:
             raise ValueError(f"persona condition(s) {unknown} not in {sorted(allowed)}")
@@ -109,11 +123,12 @@ class Settings(BaseSettings):
     def _known_scenario_slugs(
         cls, value: dict[str, ScenarioCovalIds]
     ) -> dict[str, ScenarioCovalIds]:
-        from coval_bench.s2s.conditions import SCENARIO_SLUGS
+        from coval_bench.s2s.conditions import PLATFORM_SLUGS, SCENARIO_SLUGS
 
-        unknown = sorted(set(value) - set(SCENARIO_SLUGS))
+        known = [*SCENARIO_SLUGS, *PLATFORM_SLUGS]
+        unknown = sorted(set(value) - set(known))
         if unknown:
-            raise ValueError(f"coval_s2s_scenarios slug(s) {unknown} not in {list(SCENARIO_SLUGS)}")
+            raise ValueError(f"coval_s2s_scenarios slug(s) {unknown} not in {known}")
         return value
 
     @model_validator(mode="after")
@@ -304,8 +319,9 @@ class Settings(BaseSettings):
     # Scenario slug -> its Coval test set, the agent id per model and the persona
     # id per condition, e.g. {"bank": {"test_set_id": "…", "agents": {"gpt-realtime":
     # "…"}, "personas": {"clean": "…", "hard": "…"}}}. The slugs are
-    # ``s2s.conditions.SCENARIO_SLUGS``; a slug absent here is skipped, a model
-    # absent from ``agents`` is skipped. The personas join the exhaustive condition
+    # ``s2s.conditions.SCENARIO_SLUGS`` and ``PLATFORM_SLUGS``, whose agents are
+    # keyed "provider/model"; a slug absent here is skipped, a model absent from
+    # ``agents`` is skipped. The personas join the exhaustive condition
     # map above, so a scenario's callers can never be left unmapped. Every domain
     # scenario shares the bank judge above; instruction-bank and workflow-bank each
     # name their own. Opaque ids, not secrets.

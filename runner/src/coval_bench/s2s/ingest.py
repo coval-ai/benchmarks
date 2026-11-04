@@ -392,7 +392,10 @@ async def _capture_rows(
             captured_at=captured_at + timedelta(microseconds=index),
             executor=MetricExecutor.COVAL_API,
             capture_id=f"{coval_run.run_id}:{sample_id}",
-            provider_extras={"coval_run_id": coval_run.run_id},
+            provider_extras={
+                "coval_run_id": coval_run.run_id,
+                **({"variant_id": spec.variant_id} if spec.variant_id else {}),
+            },
         )
         capture_outcomes.append(
             await persist_capture(

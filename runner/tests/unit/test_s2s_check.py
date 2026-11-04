@@ -45,7 +45,7 @@ def coval_client(runs_by_agent: dict[str, list[dict[str, Any]]]) -> httpx.AsyncC
         match = re.search(r'agent_id="([^"]+)"', request.url.params["filter"])
         assert match is not None
         runs = [
-            {**r, "create_time": now.isoformat(), "status": "COMPLETED", "test_set_id": "TSB"}
+            {"create_time": now.isoformat(), "status": "COMPLETED", "test_set_id": "TSB", **r}
             for r in runs_by_agent.get(match.group(1), [])
         ]
         return httpx.Response(200, json={"runs": runs})
@@ -69,6 +69,31 @@ async def test_every_model_and_condition_found_has_no_flags() -> None:
     assert [(r.model, r.runs_by_condition) for r in found] == [
         ("gpt-realtime", {"clean": 1, "low": 1}),
         ("gemini-live", {"clean": 1, "low": 1}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_platform_agents_are_checked_per_room() -> None:
+    id_roulette = ScenarioCovalIds(
+        test_set_id="TSR",
+        agents={"vapi/pinned": "AV"},
+        personas={"quiet-room": "PQ", "office-desk": "PO"},
+        metric_ids={"V2V": "LAT"},
+    )
+    settings = _settings(
+        coval_s2s_scenarios={**_settings().coval_s2s_scenarios, "id-roulette": id_roulette}
+    )
+    runs = {
+        "A1": [{"run_id": "a1c", "persona_id": "P0"}, {"run_id": "a1l", "persona_id": "P1"}],
+        "A2": [{"run_id": "a2c", "persona_id": "P0"}, {"run_id": "a2l", "persona_id": "P1"}],
+        "AV": [{"run_id": "avq", "persona_id": "PQ", "test_set_id": "TSR"}],
+    }
+    async with coval_client(runs) as client:
+        found, flags = await check_scenarios(settings, client, window_seconds=86_400)
+
+    assert flags == ["id-roulette/vapi/pinned: no office-desk runs"]
+    assert ("vapi/pinned", {"quiet-room": 1, "office-desk": 0}) in [
+        (r.model, r.runs_by_condition) for r in found
     ]
 
 

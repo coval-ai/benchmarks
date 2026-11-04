@@ -64,7 +64,7 @@ from coval_bench.s2s.ingest import (
 from coval_bench.s2s.rows import VALUE_MAPPERS, ingestable_metrics
 from coval_bench.s2s.samples import SampleRun, model_labels, publish_tick_sample
 from coval_bench.s2s.scenario_map import with_scenario_map
-from coval_bench.s2s.specs import AgentSpec, llm_specs, s2s_specs
+from coval_bench.s2s.specs import AgentSpec, llm_specs, platform_specs, s2s_specs
 
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 
@@ -507,6 +507,8 @@ async def fetch_and_write_v2v(
         if benchmark is Benchmark.LLM:
             specs = llm_specs(models, llm_agent_ids)
             _require_family_test_sets(settings, specs)
+        elif benchmark is Benchmark.S2S:
+            specs = (*specs, *platform_specs(settings, models))
         registered = frozenset((m.provider, m.model) for m in models)
         writer = RunWriter(pool)
         from coval_bench.runner.capture import preflight_capture_storage
@@ -570,7 +572,11 @@ async def fetch_and_write_v2v(
                     **metric_ids,
                     Metric.INSTRUCTION_FOLLOWING: spec_instruction_metric_id,
                 }
-            spec_metric_ids = {**spec_metric_ids, **spec.metric_ids}
+            spec_metric_ids = (
+                {**spec_metric_ids, **spec.metric_ids}
+                if spec.uses_shared_metrics
+                else dict(spec.metric_ids)
+            )
             status_key = f"{spec.family}:{spec.provider}:{spec.model}"
             statuses[status_key], ingested = await _fetch_one_provider(
                 client,
