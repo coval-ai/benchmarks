@@ -412,12 +412,6 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
             # tracks the pad length, not the engine.
             ("together", "nemotron-3-asr-streaming-0.6b"),
             ("together", "nemotron-3.5-asr-streaming-0.6b"),
-            # Scribe has no force-finalize (session.close drops the pending turn);
-            # the client pads trailing silence, so the final's timing bundles
-            # endpoint detection.
-            ("zoom", "scribe"),
-            ("zoom", "scribe-pro"),
-            ("zoom", "scribe-pro-v2.1"),
         }
     ),
 }

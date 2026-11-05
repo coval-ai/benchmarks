@@ -15,13 +15,11 @@ import websockets.asyncio.client as ws_client
 from websockets.typing import Subprotocol
 
 from coval_bench.config import Settings
-from coval_bench.providers.stt._pacing import paced_chunks
 from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 _WS_URL = "wss://api.zoom.us/v2/aiservices/scribe/live"
 _SUBPROTOCOL = Subprotocol("live-asr")
 _TOKEN_TTL_S = 7200
-_EOT_SILENCE_S = 2.0
 
 
 class ZoomSTTProvider(WebSocketSTTProvider):
@@ -66,19 +64,14 @@ class ZoomSTTProvider(WebSocketSTTProvider):
                     "type": "session.update",
                     "config": {"language": "en-US", "model": self._zoom_model()},
                     "audio": {"format": "pcm16"},
+                    # Scribe's own VAD is off; the commit below ends the turn.
+                    "turn_detection": {"type": "none"},
                 }
             )
         )
 
     async def _end_audio(self, ws: Any, tx: Transcription) -> None:
-        # Scribe has no force-finalize: session.close drops the pending turn, so
-        # feed trailing silence until the endpointer fires (cap; breaks early).
-        tx.final_event.clear()
-        silence = bytes(int(tx.byte_rate * _EOT_SILENCE_S))
-        async for chunk, _ in paced_chunks(silence, tx.chunk_size, tx.byte_rate):
-            if tx.final_event.is_set():
-                break
-            await ws.send(chunk)
+        await self._send_and_wait(ws, json.dumps({"type": "input_audio_buffer.commit"}), tx)
         await ws.send(json.dumps({"type": "session.close"}))
 
     def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
