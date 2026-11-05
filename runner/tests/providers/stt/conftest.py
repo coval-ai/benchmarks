@@ -97,6 +97,7 @@ _STT_KEY_FIELDS = (
     "soniox_api_key",
     "speechmatics_api_key",
     "stepfun_api_key",
+    "telnyx_api_key",
     "together_api_key",
     "xai_api_key",
     "zoom_api_key",
