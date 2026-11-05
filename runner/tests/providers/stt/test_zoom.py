@@ -4,8 +4,9 @@
 """Tests for coval_bench.providers.stt.zoom (ZoomSTTProvider).
 
 All tests use FakeWebSocket — no live network calls are made. Events mirror
-the Scribe live wire protocol: interim ``transcription.delta``, turn-final
-``transcription.completed``, ``session.closed`` after ``session.close``.
+the Scribe live wire protocol with Scribe's VAD off: interim
+``transcription.delta``, turn-final ``transcription.completed`` after
+``input_audio_buffer.commit``, ``session.closed`` after ``session.close``.
 """
 
 from __future__ import annotations
@@ -76,8 +77,10 @@ async def test_zoom_success(stt_settings: Settings, audio_pcm_bytes: bytes) -> N
         "type": "session.update",
         "config": {"language": "en-US", "model": "zoom-scribe-en"},
         "audio": {"format": "pcm16"},
+        "turn_detection": {"type": "none"},
     }
-    assert all(isinstance(frame, bytes) for frame in sent[1:-1])
+    assert all(isinstance(frame, bytes) for frame in sent[1:-2])
+    assert json.loads(sent[-2]) == {"type": "input_audio_buffer.commit"}
     assert json.loads(sent[-1]) == {"type": "session.close"}
 
 
