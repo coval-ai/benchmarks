@@ -644,7 +644,7 @@ async def test_s2s_responses_name_the_headline_dataset(
     await _publish(postgresql)
     response = await client.get(path, params={"benchmark": "S2S"})
     assert response.status_code == 200
-    assert response.json()["primary_dataset"] == "s2s-workflow-bank-v1"
+    assert response.json()["primary_dataset"] == "s2s-workflow-bank-all-callers-v1"
 
 
 async def test_by_dataset_attaches_the_bound_persona(client: AsyncClient, postgresql: Any) -> None:

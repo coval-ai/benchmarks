@@ -15,6 +15,8 @@ from coval_bench.s2s.conditions import (
     CONDITIONS,
     DATASET_ID_BANK,
     DATASET_ID_LLM_BANK,
+    POOLED_DATASET_ID,
+    POOLED_DATASET_MEMBERS,
     SCENARIO_SLUGS,
 )
 
@@ -24,16 +26,18 @@ def test_bank_scenario_names_one_dataset_per_benchmark() -> None:
     assert scenarios.ACTIVE.primary_dataset(Benchmark.LLM) == DATASET_ID_LLM_BANK
 
 
-def test_each_board_headline_reads_its_scenario_clean_dataset() -> None:
-    assert scenarios.headline_dataset(Benchmark.S2S) == "s2s-workflow-bank-v1"
+def test_each_board_headline_reads_its_scenario_dataset() -> None:
+    assert scenarios.headline_dataset(Benchmark.S2S) == "s2s-workflow-bank-all-callers-v1"
     assert scenarios.headline_dataset(Benchmark.LLM) == DATASET_ID_LLM_BANK
     assert scenarios.headline_dataset(Benchmark.TTS) is None
 
 
-def test_the_s2s_headline_dataset_collects_latency() -> None:
-    dataset = scenarios.headline_dataset(Benchmark.S2S)
-    assert dataset is not None
-    assert Metric.V2V in CONDITIONS[dataset].fetched
+def test_every_caller_pooled_into_the_s2s_headline_collects_latency() -> None:
+    assert scenarios.headline_dataset(Benchmark.S2S) == POOLED_DATASET_ID
+    assert POOLED_DATASET_ID not in CONDITIONS
+    assert len(POOLED_DATASET_MEMBERS) == 5
+    for dataset in POOLED_DATASET_MEMBERS:
+        assert Metric.V2V in CONDITIONS[dataset].fetched
 
 
 def test_only_text_runs_need_the_persona_setting() -> None:

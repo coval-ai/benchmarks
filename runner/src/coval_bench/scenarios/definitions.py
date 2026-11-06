@@ -11,6 +11,7 @@ from coval_bench.config import Settings
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.s2s.conditions import (
     FAMILY_LLM_BANK,
+    POOLED_DATASET_ID,
     SCENARIO_SLUGS,
     Condition,
     dataset_id_for,
@@ -118,6 +119,11 @@ HEADLINE: dict[Benchmark, Scenario] = {
 
 
 def headline_dataset(benchmark: Benchmark) -> str | None:
-    """The dataset *benchmark*'s headline reads, or None for boards without one."""
+    """The dataset *benchmark*'s headline reads, or None for boards without one.
+
+    S2S reads every workflow-bank caller pooled; other boards read their clean caller.
+    """
+    if benchmark is Benchmark.S2S:
+        return POOLED_DATASET_ID
     scenario = HEADLINE.get(benchmark)
     return scenario.primary_dataset(benchmark) if scenario else None

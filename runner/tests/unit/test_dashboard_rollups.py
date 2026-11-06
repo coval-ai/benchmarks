@@ -104,6 +104,54 @@ async def test_finished_run_queues_its_slot_even_when_the_inline_rebuild_fails(
 
 
 @pytest.mark.asyncio
+async def test_workflow_callers_also_roll_up_as_one_pooled_dataset(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    apply_migrations(pg_conn)
+    pool = await storage._pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        run_ids = []
+        for sample, dataset, value in (
+            ("a", "s2s-workflow-bank-v1", 10.0),
+            ("b", "s2s-workflow-bank-hard-v1", 30.0),
+            ("c", "s2s-bank-v1", 90.0),
+        ):
+            run_id, observation = await storage._observation(
+                writer, sample=sample, observation_dataset=dataset
+            )
+            evaluation = await storage._evaluation(writer, observation)
+            evaluation_id = storage._required(evaluation.id)
+            values = [
+                item.model_copy(update={"value": item.value * value / 10.0})
+                for item in storage._wer_values(evaluation_id)
+            ]
+            await writer.complete_metric_evaluation(
+                evaluation_id, values=values, finished_at=storage._NOW
+            )
+            await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
+            run_ids.append(run_id)
+        await writer.rebuild_run_rollup(run_ids[0])
+
+        rows = await _rows(
+            pool,
+            """SELECT dataset_id, sample_count, p50 FROM benchmarks_v2.dashboard_rollups
+               WHERE grain = 'run' AND value_key = 'primary' ORDER BY dataset_id""",
+        )
+        assert [(r["dataset_id"], r["sample_count"]) for r in rows] == [
+            ("__all__", 3),
+            ("s2s-bank-v1", 1),
+            ("s2s-workflow-bank-all-callers-v1", 2),
+            ("s2s-workflow-bank-hard-v1", 1),
+            ("s2s-workflow-bank-v1", 1),
+        ]
+        pooled = rows[2]
+        assert pooled["p50"] == pytest.approx((rows[3]["p50"] + rows[4]["p50"]) / 2)
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
 async def test_fill_sums_wer_word_counts_and_leaves_uncounted_clips_out(
     pg_conn: psycopg.Connection[Any],
 ) -> None:

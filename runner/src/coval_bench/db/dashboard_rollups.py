@@ -14,6 +14,8 @@ import psycopg
 import psycopg.rows
 from psycopg_pool import AsyncConnectionPool
 
+from coval_bench.s2s.conditions import POOLED_DATASET_ID, POOLED_DATASET_MEMBERS
+
 type DashboardPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]
 
 RUN_SLOT = "run"
@@ -58,6 +60,7 @@ INSERT INTO benchmarks_v2.dashboard_rollups
  wer_error_words, wer_reference_words, latest_run_at)
 WITH evaluations AS (
   SELECT o.provider, o.model, o.benchmark, o.dataset_id,
+         CASE WHEN o.dataset_id = ANY(%(pool_members)s) THEN %(pool_id)s END AS pool_id,
          e.metric_id, e.metric_version, e.evaluation_variant,
          e.value, e.roundtrip, e.leading_silence,
          e.substitution_count + e.deletion_count + e.insertion_count AS error_words,
@@ -76,7 +79,8 @@ WITH evaluations AS (
   ) AS part(value_key, measured)
   WHERE part.measured IS NOT NULL
 )
-SELECT provider, model, benchmark, COALESCE(dataset_id, '__all__'),
+SELECT provider, model, benchmark,
+       CASE WHEN GROUPING(pool_id) = 0 THEN pool_id ELSE COALESCE(dataset_id, '__all__') END,
        metric_id, metric_version, evaluation_variant, value_key, %(grain)s, %(bucket)s,
        MIN(measured)::float8,
        PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY measured)::float8,
@@ -92,8 +96,11 @@ FROM measurements
 GROUP BY GROUPING SETS (
   (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
    value_key),
-  (provider, model, benchmark, metric_id, metric_version, evaluation_variant, value_key)
+  (provider, model, benchmark, metric_id, metric_version, evaluation_variant, value_key),
+  (provider, model, benchmark, pool_id, metric_id, metric_version, evaluation_variant,
+   value_key)
 )
+HAVING NOT (GROUPING(pool_id) = 0 AND pool_id IS NULL)
 """
 
 CLAIM_SLOTS_SQL = """
@@ -111,7 +118,13 @@ async def fill_rollup(
 ) -> None:
     """Replace one bucket from raw observations inside the caller's transaction."""
     bucket = floor_rollup(bucket_at, grain)
-    params = {"grain": grain, "step": timedelta(seconds=GRAINS.get(grain, 0)), "bucket": bucket}
+    params = {
+        "grain": grain,
+        "step": timedelta(seconds=GRAINS.get(grain, 0)),
+        "bucket": bucket,
+        "pool_id": POOLED_DATASET_ID,
+        "pool_members": list(POOLED_DATASET_MEMBERS),
+    }
     slot_filter = _RUN_SLOT_FILTER if grain == RUN_SLOT else _INTERVAL_FILTER
     await conn.execute(ROLLUP_LOCK_SQL, params)
     await conn.execute(

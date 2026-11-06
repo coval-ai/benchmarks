@@ -45,6 +45,8 @@ __all__ = [
     "FAMILY_LLM_DENTAL",
     "FAMILY_MULTITURN",
     "PLATFORM_SLUGS",
+    "POOLED_DATASET_ID",
+    "POOLED_DATASET_MEMBERS",
     "ROOMS",
     "SCENARIO_SLUGS",
     "TIERS",
@@ -236,6 +238,14 @@ def _ingested_id(slug: str, condition: Condition) -> str:
     if dataset_id is None:
         raise ValueError(f"scenario {slug!r} never runs {condition!r}")
     return dataset_id
+
+
+# Every workflow-bank caller read as one dataset: aggregated by the window views and
+# rollups, never written by the fetch.
+POOLED_DATASET_ID = f"{scenario_family('workflow-bank')}-all-callers-v1"
+POOLED_DATASET_MEMBERS: tuple[str, ...] = tuple(
+    _ingested_id("workflow-bank", condition) for condition in (Condition.CLEAN, *TIERS)
+)
 
 
 # Background noise sits in the lane Silero VAD uses for turn boundaries, so V2V
