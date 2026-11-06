@@ -112,14 +112,22 @@ def test_bank_is_not_fetched_scheduled_or_not() -> None:
     assert set(scenario_map_fields(without_bank)["coval_s2s_scenarios"]) == {"workflow-bank"}
 
 
-def test_missing_interruption_metric_is_left_unset() -> None:
+def test_missing_interruption_metric_clears_the_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     version = _version(agents={"gpt-realtime": "A1"})
     del version["metric_ids"]["interruption_rate"]
 
-    fields = scenario_map_fields(_map(**{"workflow-bank": {"v1": version}}))
+    monkeypatch.setattr(
+        "coval_bench.gcs.read_json", lambda bucket, key: _map(**{"workflow-bank": {"v1": version}})
+    )
 
-    assert "coval_s2s_interruption_metric_id" not in fields
-    assert fields["coval_s2s_call_length_metric_id"] == "LEN"
+    with capture_logs() as logs:
+        loaded = with_scenario_map(
+            Settings(s2s_scenario_map_uri=_URI, coval_s2s_interruption_metric_id="OLD")
+        )
+
+    assert loaded.coval_s2s_interruption_metric_id is None
+    assert loaded.coval_s2s_call_length_metric_id == "LEN"
+    assert any(log["event"] == "daily_metric_not_configured" for log in logs)
 
 
 def test_missing_scenario_is_rejected() -> None:

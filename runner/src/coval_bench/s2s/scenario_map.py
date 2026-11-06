@@ -170,14 +170,12 @@ def scenario_map_fields(raw: object) -> dict[str, Any]:
     )
     if missing:
         raise ValueError(f"scenario map {_DAILY_SCENARIO!r} has no metric id for {missing}")
+    for key in sorted(_OPTIONAL_DAILY_METRICS - daily.metric_ids.keys()):
+        logger.info("daily_metric_not_configured", scenario=_DAILY_SCENARIO, metric=key)
     clean_persona_id = daily.personas["clean"].id
     return {
         "coval_s2s_scenarios": scenarios,
-        **{
-            field: daily.metric_ids[key]
-            for field, key in _DAILY_METRICS.items()
-            if daily.metric_ids.get(key)
-        },
+        **{field: daily.metric_ids.get(key) for field, key in _DAILY_METRICS.items()},
         "s2s_persona_labels": {clean_persona_id: _CLEAN_PERSONA_LABEL},
     }
 
