@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-from importlib import import_module
-
 import pytest
 
 from coval_bench import scenarios
@@ -18,8 +16,10 @@ from coval_bench.s2s.conditions import (
     DATASET_ID_BANK,
     DATASET_ID_LLM_BANK,
     POOLED_DATASET_ID,
-    POOLED_DATASET_MEMBERS,
     SCENARIO_SLUGS,
+    TIERS,
+    Condition,
+    scenario_dataset_id,
 )
 
 
@@ -37,8 +37,9 @@ def test_each_board_headline_reads_its_scenario_dataset() -> None:
 def test_every_caller_pooled_into_the_s2s_headline_collects_latency() -> None:
     assert scenarios.headline_dataset(Benchmark.S2S) == POOLED_DATASET_ID
     assert POOLED_DATASET_ID not in CONDITIONS
-    assert len(POOLED_DATASET_MEMBERS) == 5
-    for dataset in POOLED_DATASET_MEMBERS:
+    for condition in (Condition.CLEAN, *TIERS):
+        dataset = scenario_dataset_id("workflow-bank", condition)
+        assert dataset is not None
         assert Metric.V2V in CONDITIONS[dataset].fetched
 
 
@@ -70,11 +71,3 @@ def test_only_bank_runs_over_text() -> None:
         happy_customer.family(Benchmark.LLM)
     with pytest.raises(ValueError, match="no text-board settings"):
         happy_customer.ids(Settings())
-
-
-def test_the_pooled_view_migration_pools_the_same_callers_as_the_rollups() -> None:
-    migration = import_module(
-        "coval_bench.db.migrations.versions.20261107_0049_pooled_workflow_bank"
-    )
-    assert migration._POOL_ID == POOLED_DATASET_ID
-    assert migration._POOL_MEMBERS == POOLED_DATASET_MEMBERS

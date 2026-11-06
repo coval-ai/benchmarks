@@ -3,10 +3,12 @@
 # ruff: noqa: E501, S608
 """Add the pooled workflow-bank dataset to the window views.
 
-Every workflow-bank caller (clean and the four noise tiers) is also grouped as
-``s2s-workflow-bank-all-callers-v1``, the S2S headline. Percentiles come from the
-raw values of all five, never from averaged per-dataset rows. Each tier keeps its
-own rows, and the ``__all__`` row is unchanged.
+``benchmarks_v2.pooled_dataset_id`` is the one place that says which datasets pool:
+S2S workflow-bank v1, every caller (clean and the four noise tiers), grouped as
+``s2s-workflow-bank-all-callers-v1``, the S2S headline. The views here and the
+rollups both call it. Percentiles come from the raw values of every member, never
+from averaged per-dataset rows. Each tier keeps its own rows, and ``__all__`` is
+unchanged.
 
 The replacement views are built populated under temporary names and swapped in,
 as in 0047, so readers never see an empty view.
@@ -24,14 +26,13 @@ depends_on = None
 _WINDOWS = (("24h", "24 hours"), ("7d", "7 days"), ("30d", "30 days"))
 _INDEX_SUFFIXES = ("key", "lookup", "metric_id_lookup")
 
-_POOL_ID = "s2s-workflow-bank-all-callers-v1"
-_POOL_MEMBERS = (
-    "s2s-workflow-bank-v1",
-    "s2s-workflow-bank-low-v1",
-    "s2s-workflow-bank-medium-v1",
-    "s2s-workflow-bank-hard-v1",
-    "s2s-workflow-bank-extra-hard-v1",
-)
+_POOL_FUNCTION = """
+CREATE FUNCTION benchmarks_v2.pooled_dataset_id(benchmark TEXT, dataset_id TEXT) RETURNS TEXT
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE WHEN benchmark = 'S2S' AND dataset_id ~ '^s2s-workflow-bank(-[a-z-]+)?-v1$'
+              THEN 's2s-workflow-bank-all-callers-v1' END
+$$
+"""
 
 _SOURCE_SQL = """
 WITH evaluations AS (
@@ -85,17 +86,17 @@ _AGGREGATES = """public_metric metric_type,metric_version,evaluation_variant,
         CASE WHEN public_metric='WER' THEN 100*SUM(deletion_count)/NULLIF(SUM(reference_words),0) END::float8 wer_deletions_pct,
         CASE WHEN public_metric='WER' THEN 100*SUM(substitution_count)/NULLIF(SUM(reference_words),0) END::float8 wer_substitutions_pct"""
 
-_MEMBERS_SQL = ",".join(f"'{member}'" for member in _POOL_MEMBERS)
-
 # The pooled dataset is its own pass over member rows only, so the other groups cost
 # what they did in 0047.
 _WITH_POOL = {
-    "__POOL_UNION__": f"""
+    "__POOL_UNION__": """
  UNION ALL
- SELECT provider,model,benchmark,'{_POOL_ID}' dataset_id,
+ SELECT provider,model,benchmark,benchmarks_v2.pooled_dataset_id(benchmark,dataset_id) dataset_id,
         __AGGREGATES__
- FROM public_values WHERE dataset_id IN ({_MEMBERS_SQL})
- GROUP BY provider,model,benchmark,public_metric,metric_version,evaluation_variant""",
+ FROM public_values
+ WHERE benchmark='S2S' AND benchmarks_v2.pooled_dataset_id(benchmark,dataset_id) IS NOT NULL
+ GROUP BY provider,model,benchmark,benchmarks_v2.pooled_dataset_id(benchmark,dataset_id),
+          public_metric,metric_version,evaluation_variant""",
 }
 
 # The 0047 definition, so a downgrade drops the pooled rows.
@@ -141,8 +142,10 @@ def _swap_views(parts: dict[str, str]) -> None:
 
 
 def upgrade() -> None:
+    op.execute(_POOL_FUNCTION)
     _swap_views(_WITH_POOL)
 
 
 def downgrade() -> None:
     _swap_views(_WITHOUT_POOL)
+    op.execute("DROP FUNCTION benchmarks_v2.pooled_dataset_id(TEXT, TEXT)")

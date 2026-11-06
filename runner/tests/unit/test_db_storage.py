@@ -82,6 +82,7 @@ async def _observation(
     sample: str = "sample",
     run_dataset: str = "run-dataset",
     observation_dataset: str = "observation-dataset",
+    benchmark: Benchmark = Benchmark.STT,
 ) -> tuple[int, Observation]:
     run = await writer.start_run(dataset_id=run_dataset, dataset_sha256=_SHA, scheduled_at=_NOW)
     observation = await writer.insert_observation(
@@ -92,7 +93,7 @@ async def _observation(
             sample_id=sample,
             provider="provider",
             model="model",
-            benchmark=Benchmark.STT,
+            benchmark=benchmark,
             source_kind=ObservationSourceKind.DATASET_AUDIO,
             transport_protocol="HTTP/2",
             submit_to_headers_ms=5.0,

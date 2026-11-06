@@ -16,6 +16,8 @@ from coval_bench.db.dashboard_rollups import (
 )
 from coval_bench.db.models import MetricValue, RunStatus
 from coval_bench.db.writer import RunWriter
+from coval_bench.registries import Benchmark
+from coval_bench.s2s.conditions import POOLED_DATASET_ID, TIERS, Condition, scenario_dataset_id
 from tests.unit import test_db_storage as storage
 from tests.unit.conftest import apply_migrations
 
@@ -103,6 +105,27 @@ async def test_finished_run_queues_its_slot_even_when_the_inline_rebuild_fails(
         await pool.close()
 
 
+def test_only_s2s_workflow_bank_v1_datasets_pool(pg_conn: psycopg.Connection[Any]) -> None:
+    apply_migrations(pg_conn)
+    workflow = [
+        scenario_dataset_id("workflow-bank", condition) for condition in (Condition.CLEAN, *TIERS)
+    ]
+    cases = [("S2S", dataset, POOLED_DATASET_ID) for dataset in workflow] + [
+        ("S2S", "s2s-bank-v1", None),
+        ("S2S", "s2s-bank-hard-v1", None),
+        ("S2S", "s2s-workflow-bank-v2", None),
+        ("S2S", "s2s-instruction-bank-v1", None),
+        ("STT", "s2s-workflow-bank-v1", None),
+        ("TTS", "tts-v2", None),
+    ]
+    for benchmark, dataset, expected in cases:
+        row = pg_conn.execute(
+            "SELECT benchmarks_v2.pooled_dataset_id(%s, %s)", (benchmark, dataset)
+        ).fetchone()
+        assert row is not None
+        assert row[0] == expected, (benchmark, dataset)
+
+
 @pytest.mark.asyncio
 async def test_workflow_callers_also_roll_up_as_one_pooled_dataset(
     pg_conn: psycopg.Connection[Any],
@@ -118,7 +141,7 @@ async def test_workflow_callers_also_roll_up_as_one_pooled_dataset(
             ("c", "s2s-bank-v1", 90.0),
         ):
             run_id, observation = await storage._observation(
-                writer, sample=sample, observation_dataset=dataset
+                writer, sample=sample, observation_dataset=dataset, benchmark=Benchmark.S2S
             )
             evaluation = await storage._evaluation(writer, observation)
             evaluation_id = storage._required(evaluation.id)
