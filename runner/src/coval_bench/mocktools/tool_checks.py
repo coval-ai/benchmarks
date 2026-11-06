@@ -18,6 +18,9 @@ if TYPE_CHECKING:
     from coval_bench.mocktools.codecs import ToolCall
 
 CHARACTER_ERROR_RATE = "character_error_rate"
+NO_CALL = "(no call)"
+NOT_SENT = "(not sent)"
+MAX_SHOWN_CHARS = 200
 
 
 def character_error_rate(expected: str, heard: str) -> float:
@@ -50,6 +53,24 @@ def character_error_rates(
                 character_error_rate(value, str(heard)) if heard is not None else 1.0
             )
     return rates
+
+
+def shown_values(
+    expected: Mapping[str, Mapping[str, str]], calls: Sequence[ToolCall]
+) -> dict[str, str]:
+    """``<tool>.<argument>.expected`` and ``.heard``, from the first call the rate scored."""
+    shown = {}
+    for tool, arguments in expected.items():
+        first = next((call for call in calls if call.tool == tool), None)
+        for argument, value in arguments.items():
+            heard = first.args.get(argument) if first else None
+            if heard is not None:
+                heard = str(heard)
+            shown[f"{tool}.{argument}.expected"] = value[:MAX_SHOWN_CHARS]
+            shown[f"{tool}.{argument}.heard"] = (
+                heard[:MAX_SHOWN_CHARS] if heard is not None else NOT_SENT if first else NO_CALL
+            )
+    return shown
 
 
 def _plain(text: str) -> str:
