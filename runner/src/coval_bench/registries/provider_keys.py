@@ -74,4 +74,5 @@ PROVIDER_ENV: dict[str, str] = {
     "stepfun": "STEPFUN_API_KEY",
     "cloudflare": "CLOUDFLARE_API_KEY",
     "telnyx": "TELNYX_API_KEY",
+    "saidwire": "SAIDWIRE_API_KEY",
 }
