@@ -35,7 +35,7 @@ _POOL_MEMBERS = (
 
 _SOURCE_SQL = """
 WITH evaluations AS (
- SELECT o.provider,o.model,o.benchmark,o.dataset_id,__POOL_COLUMN__e.metric_type,e.metric_version,e.evaluation_variant,
+ SELECT o.provider,o.model,o.benchmark,o.dataset_id,e.metric_type,e.metric_version,e.evaluation_variant,
         e.value,e.roundtrip,e.leading_silence,e.has_primary_role,
         e.substitution_count,e.deletion_count,e.insertion_count,e.reference_words
  FROM benchmarks_v2.dashboard_metric_values e
@@ -54,8 +54,21 @@ WITH evaluations AS (
  ) p(metric_type,value) WHERE p.value IS NOT NULL
 ), grouped AS (
  SELECT provider,model,benchmark,
-        __DATASET__ dataset_id,
-        public_metric metric_type,metric_version,evaluation_variant,
+        CASE WHEN GROUPING(dataset_id)=1 THEN '__all__' ELSE dataset_id END dataset_id,
+        __AGGREGATES__
+ FROM public_values GROUP BY GROUPING SETS
+ ((provider,model,benchmark,dataset_id,public_metric,metric_version,evaluation_variant),
+  (provider,model,benchmark,public_metric,metric_version,evaluation_variant))__POOL_UNION__
+)
+SELECT provider,model,benchmark,dataset_id,
+       metric_type, benchmarks_v2.metric_id_for_code(metric_type) AS metric_id,metric_version,evaluation_variant,
+       avg_value,stddev_value,p25,p50,p75,p90,p95,p99,
+       min_value,max_value,sample_count,primary_sample_count,
+       wer_insertions_pct,wer_deletions_pct,wer_substitutions_pct,'{"schema_version" : 1}'::jsonb metadata
+FROM grouped WHERE avg_value IS NOT NULL
+"""
+
+_AGGREGATES = """public_metric metric_type,metric_version,evaluation_variant,
         CASE WHEN public_metric='WER'
              THEN 100*SUM(substitution_count+deletion_count+insertion_count)/NULLIF(SUM(reference_words),0)
              ELSE AVG(public_value) END::float8 avg_value,
@@ -70,42 +83,30 @@ WITH evaluations AS (
         COUNT(*)::bigint sample_count,COUNT(*) FILTER (WHERE has_primary_role)::bigint primary_sample_count,
         CASE WHEN public_metric='WER' THEN 100*SUM(insertion_count)/NULLIF(SUM(reference_words),0) END::float8 wer_insertions_pct,
         CASE WHEN public_metric='WER' THEN 100*SUM(deletion_count)/NULLIF(SUM(reference_words),0) END::float8 wer_deletions_pct,
-        CASE WHEN public_metric='WER' THEN 100*SUM(substitution_count)/NULLIF(SUM(reference_words),0) END::float8 wer_substitutions_pct
- FROM public_values GROUP BY GROUPING SETS
- ((provider,model,benchmark,dataset_id,public_metric,metric_version,evaluation_variant),
-  (provider,model,benchmark,public_metric,metric_version,evaluation_variant)__POOL_SET__)__POOL_HAVING__
-)
-SELECT provider,model,benchmark,dataset_id,
-       metric_type, benchmarks_v2.metric_id_for_code(metric_type) AS metric_id,metric_version,evaluation_variant,
-       avg_value,stddev_value,p25,p50,p75,p90,p95,p99,
-       min_value,max_value,sample_count,primary_sample_count,
-       wer_insertions_pct,wer_deletions_pct,wer_substitutions_pct,'{"schema_version" : 1}'::jsonb metadata
-FROM grouped WHERE avg_value IS NOT NULL
-"""
+        CASE WHEN public_metric='WER' THEN 100*SUM(substitution_count)/NULLIF(SUM(reference_words),0) END::float8 wer_substitutions_pct"""
 
 _MEMBERS_SQL = ",".join(f"'{member}'" for member in _POOL_MEMBERS)
 
+# The pooled dataset is its own pass over member rows only, so the other groups cost
+# what they did in 0047.
 _WITH_POOL = {
-    "__POOL_COLUMN__": f"CASE WHEN o.dataset_id IN ({_MEMBERS_SQL}) THEN '{_POOL_ID}' END pool_id,",
-    "__DATASET__": "CASE WHEN GROUPING(pool_id)=0 THEN pool_id WHEN GROUPING(dataset_id)=1 THEN '__all__' ELSE dataset_id END",
-    "__POOL_SET__": ",\n  (provider,model,benchmark,pool_id,public_metric,metric_version,evaluation_variant)",
-    "__POOL_HAVING__": "\n HAVING NOT (GROUPING(pool_id)=0 AND pool_id IS NULL)",
+    "__POOL_UNION__": f"""
+ UNION ALL
+ SELECT provider,model,benchmark,'{_POOL_ID}' dataset_id,
+        __AGGREGATES__
+ FROM public_values WHERE dataset_id IN ({_MEMBERS_SQL})
+ GROUP BY provider,model,benchmark,public_metric,metric_version,evaluation_variant""",
 }
 
 # The 0047 definition, so a downgrade drops the pooled rows.
-_WITHOUT_POOL = {
-    "__POOL_COLUMN__": "",
-    "__DATASET__": "CASE WHEN GROUPING(dataset_id)=1 THEN '__all__' ELSE dataset_id END",
-    "__POOL_SET__": "",
-    "__POOL_HAVING__": "",
-}
+_WITHOUT_POOL = {"__POOL_UNION__": ""}
 
 
 def _view_sql(window: str, parts: dict[str, str]) -> str:
     sql = _SOURCE_SQL.replace("__WINDOW__", window)
     for marker, text in parts.items():
         sql = sql.replace(marker, text)
-    return sql
+    return sql.replace("__AGGREGATES__", _AGGREGATES)
 
 
 def _swap_views(parts: dict[str, str]) -> None:

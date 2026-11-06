@@ -52,6 +52,21 @@ SELECT pg_advisory_xact_lock(hashtext(%(grain)s),
 _RUN_SLOT_FILTER = "run.scheduled_at = %(bucket)s"
 _INTERVAL_FILTER = "run.scheduled_at >= %(bucket)s AND run.scheduled_at < %(bucket)s + %(step)s"
 
+_ROLLUP_AGGREGATES = """
+       metric_id, metric_version, evaluation_variant, value_key, %(grain)s, %(bucket)s,
+       MIN(measured)::float8,
+       PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY measured)::float8,
+       PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY measured)::float8,
+       PERCENTILE_CONT(.75) WITHIN GROUP (ORDER BY measured)::float8,
+       PERCENTILE_CONT(.9) WITHIN GROUP (ORDER BY measured)::float8,
+       PERCENTILE_CONT(.95) WITHIN GROUP (ORDER BY measured)::float8,
+       MAX(measured)::float8, SUM(measured)::float8, COUNT(*)::int,
+       CASE WHEN value_key = 'primary' THEN SUM(error_words)::float8 END,
+       CASE WHEN value_key = 'primary' THEN SUM(reference_words)::float8 END,
+       MAX(scheduled_at)"""
+
+# The pooled dataset is its own pass over member rows only, so the per-dataset and
+# ``__all__`` groups cost what they did before it existed.
 FILL_ROLLUP_SQL = """
 INSERT INTO benchmarks_v2.dashboard_rollups
 (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
@@ -60,7 +75,6 @@ INSERT INTO benchmarks_v2.dashboard_rollups
  wer_error_words, wer_reference_words, latest_run_at)
 WITH evaluations AS (
   SELECT o.provider, o.model, o.benchmark, o.dataset_id,
-         CASE WHEN o.dataset_id = ANY(%(pool_members)s) THEN %(pool_id)s END AS pool_id,
          e.metric_id, e.metric_version, e.evaluation_variant,
          e.value, e.roundtrip, e.leading_silence,
          e.substitution_count + e.deletion_count + e.insertion_count AS error_words,
@@ -79,29 +93,19 @@ WITH evaluations AS (
   ) AS part(value_key, measured)
   WHERE part.measured IS NOT NULL
 )
-SELECT provider, model, benchmark,
-       CASE WHEN GROUPING(pool_id) = 0 THEN pool_id ELSE COALESCE(dataset_id, '__all__') END,
-       metric_id, metric_version, evaluation_variant, value_key, %(grain)s, %(bucket)s,
-       MIN(measured)::float8,
-       PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY measured)::float8,
-       PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY measured)::float8,
-       PERCENTILE_CONT(.75) WITHIN GROUP (ORDER BY measured)::float8,
-       PERCENTILE_CONT(.9) WITHIN GROUP (ORDER BY measured)::float8,
-       PERCENTILE_CONT(.95) WITHIN GROUP (ORDER BY measured)::float8,
-       MAX(measured)::float8, SUM(measured)::float8, COUNT(*)::int,
-       CASE WHEN value_key = 'primary' THEN SUM(error_words)::float8 END,
-       CASE WHEN value_key = 'primary' THEN SUM(reference_words)::float8 END,
-       MAX(scheduled_at)
+SELECT provider, model, benchmark, COALESCE(dataset_id, '__all__'),__AGGREGATES__
 FROM measurements
 GROUP BY GROUPING SETS (
   (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
    value_key),
-  (provider, model, benchmark, metric_id, metric_version, evaluation_variant, value_key),
-  (provider, model, benchmark, pool_id, metric_id, metric_version, evaluation_variant,
-   value_key)
+  (provider, model, benchmark, metric_id, metric_version, evaluation_variant, value_key)
 )
-HAVING NOT (GROUPING(pool_id) = 0 AND pool_id IS NULL)
-"""
+UNION ALL
+SELECT provider, model, benchmark, %(pool_id)s,__AGGREGATES__
+FROM measurements
+WHERE dataset_id = ANY(%(pool_members)s)
+GROUP BY provider, model, benchmark, metric_id, metric_version, evaluation_variant, value_key
+""".replace("__AGGREGATES__", _ROLLUP_AGGREGATES)
 
 CLAIM_SLOTS_SQL = """
 DELETE FROM benchmarks_v2.dashboard_rollup_queue

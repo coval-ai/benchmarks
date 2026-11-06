@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from importlib import import_module
+
 import pytest
 
 from coval_bench import scenarios
@@ -68,3 +70,11 @@ def test_only_bank_runs_over_text() -> None:
         happy_customer.family(Benchmark.LLM)
     with pytest.raises(ValueError, match="no text-board settings"):
         happy_customer.ids(Settings())
+
+
+def test_the_pooled_view_migration_pools_the_same_callers_as_the_rollups() -> None:
+    migration = import_module(
+        "coval_bench.db.migrations.versions.20261107_0049_pooled_workflow_bank"
+    )
+    assert migration._POOL_ID == POOLED_DATASET_ID
+    assert migration._POOL_MEMBERS == POOLED_DATASET_MEMBERS
