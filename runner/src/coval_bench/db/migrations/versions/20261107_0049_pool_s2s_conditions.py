@@ -1,14 +1,14 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: E501, S608
-"""Add the pooled workflow-bank dataset to the window views.
+"""Pool every condition of each S2S scenario version in the window views.
 
 ``benchmarks_v2.pooled_dataset_id`` is the one place that says which datasets pool:
-S2S workflow-bank v1, every caller (clean and the four noise tiers), grouped as
-``s2s-workflow-bank-all-callers-v1``, the S2S headline. The views here and the
-rollups both call it. Percentiles come from the raw values of every member, never
-from averaged per-dataset rows. Each tier keeps its own rows, and ``__all__`` is
-unchanged.
+an S2S scenario's clean caller, noise tiers and platform rooms, of one test-set
+version, become ``s2s-<scenario>-all-conditions-v<N>``. The S2S headline reads the
+headline scenario's pool. The views here and the rollups both call it. Percentiles
+come from the raw values of every member, never from averaged per-dataset rows.
+Each condition keeps its own rows, and ``__all__`` is unchanged.
 
 The replacement views are built populated under temporary names and swapped in,
 as in 0047, so readers never see an empty view.
@@ -26,11 +26,32 @@ depends_on = None
 _WINDOWS = (("24h", "24 hours"), ("7d", "7 days"), ("30d", "30 days"))
 _INDEX_SUFFIXES = ("key", "lookup", "metric_id_lookup")
 
-_POOL_FUNCTION = """
+_SCENARIOS = (
+    "bank",
+    "happy-customer",
+    "happy-smile",
+    "instruction-bank",
+    "workflow-bank",
+    "id-roulette",
+)
+_CONDITIONS = (
+    "low",
+    "medium",
+    "hard",
+    "extra-hard",
+    "quiet-room",
+    "office-desk",
+    "landline-with-air-conditioner",
+)
+_DATASET_PATTERN = f"^s2s-({'|'.join(_SCENARIOS)})(-({'|'.join(_CONDITIONS)}))?-v([0-9]+)$"
+
+# Groups: 1 scenario, 3 condition (absent for the clean caller), 4 test-set version.
+_POOL_FUNCTION = f"""
 CREATE FUNCTION benchmarks_v2.pooled_dataset_id(benchmark TEXT, dataset_id TEXT) RETURNS TEXT
 LANGUAGE sql IMMUTABLE AS $$
-  SELECT CASE WHEN benchmark = 'S2S' AND dataset_id ~ '^s2s-workflow-bank(-[a-z-]+)?-v1$'
-              THEN 's2s-workflow-bank-all-callers-v1' END
+  SELECT CASE WHEN benchmark = 'S2S' AND dataset_id ~ '{_DATASET_PATTERN}'
+              THEN regexp_replace(dataset_id, '{_DATASET_PATTERN}', 's2s-\\1-all-conditions-v\\4')
+         END
 $$
 """
 

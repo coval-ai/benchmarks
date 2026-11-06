@@ -63,9 +63,9 @@ _ROLLUP_AGGREGATES = """
        CASE WHEN value_key = 'primary' THEN SUM(reference_words)::float8 END,
        MAX(scheduled_at)"""
 
-# The pooled datasets are their own pass over S2S member rows only (membership is the
-# ``benchmarks_v2.pooled_dataset_id`` function, shared with the window views), so the
-# per-dataset and ``__all__`` groups cost what they did before it existed.
+# Each S2S scenario version's conditions also pool, in their own pass over S2S rows
+# only (membership is the ``benchmarks_v2.pooled_dataset_id`` function, shared with
+# the window views), so the per-dataset and ``__all__`` groups cost what they did.
 FILL_ROLLUP_SQL = """
 INSERT INTO benchmarks_v2.dashboard_rollups
 (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,

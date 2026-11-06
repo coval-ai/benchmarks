@@ -118,7 +118,7 @@ async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any)
 async def test_s2s_leaderboard_uses_the_headline_dataset(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    """The headline S2S board pools every workflow caller; the old bank and dental rows stay out."""
+    """The S2S headline pools every workflow condition; old bank and dental rows stay out."""
     primary_run = await _insert_run(postgresql, dataset_id="s2s-workflow-bank-v1")
     hard_run = await _insert_run(postgresql, dataset_id="s2s-workflow-bank-hard-v1")
     other_runs = {

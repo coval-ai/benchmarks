@@ -45,7 +45,6 @@ __all__ = [
     "FAMILY_LLM_DENTAL",
     "FAMILY_MULTITURN",
     "PLATFORM_SLUGS",
-    "POOLED_DATASET_ID",
     "ROOMS",
     "SCENARIO_SLUGS",
     "TIERS",
@@ -53,6 +52,7 @@ __all__ = [
     "DatasetMetrics",
     "condition_for",
     "dataset_id_for",
+    "pooled_dataset_id",
     "room_dataset_id",
     "scenario_dataset_id",
     "scenario_family",
@@ -239,10 +239,13 @@ def _ingested_id(slug: str, condition: Condition) -> str:
     return dataset_id
 
 
-# Every workflow-bank caller read as one dataset, the S2S headline. Never written by
-# the fetch: the database function ``benchmarks_v2.pooled_dataset_id`` decides which
-# datasets pool into it, for the window views and the rollups alike.
-POOLED_DATASET_ID = f"{scenario_family('workflow-bank')}-all-callers-v1"
+def pooled_dataset_id(slug: str, version: int = 1) -> str:
+    """Every condition of *slug*'s test-set *version* read as one dataset.
+
+    Never written by the fetch: the database function ``benchmarks_v2.pooled_dataset_id``
+    pools the window views and rollups under this id.
+    """
+    return f"{scenario_family(slug)}-all-conditions-v{version}"
 
 
 # Background noise sits in the lane Silero VAD uses for turn boundaries, so V2V
