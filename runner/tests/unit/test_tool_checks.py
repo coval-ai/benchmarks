@@ -58,5 +58,8 @@ def test_the_scored_call_is_shown_as_sent_next_to_the_right_value() -> None:
     assert shown_values(expected, [])["lookup_id.id.heard"] == "(no call)"
     assert shown_values(expected, [ToolCall("lookup_id", {})])["lookup_id.id.heard"] == "(not sent)"
     assert shown_values(expected, [ToolCall("lookup_id", {"id": 42})])["lookup_id.id.heard"] == "42"
-    long = shown_values(expected, [ToolCall("lookup_id", {"id": "x" * 500})])
-    assert len(long["lookup_id.id.heard"]) == 200
+    flag = shown_values(expected, [ToolCall("lookup_id", {"id": True})])
+    assert flag["lookup_id.id.heard"] == "true"
+    long = shown_values(expected, [ToolCall("lookup_id", {"id": "x" * 500})])["lookup_id.id.heard"]
+    assert len(long) == 200
+    assert long.endswith("…")
