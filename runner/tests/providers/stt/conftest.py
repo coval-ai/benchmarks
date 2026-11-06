@@ -80,6 +80,7 @@ _STT_KEY_FIELDS = (
     "cloudflare_api_key",
     "deepgram_api_key",
     "elevenlabs_api_key",
+    "fishaudio_api_key",
     "gemini_api_key",
     "gladia_api_key",
     "gradium_api_key",

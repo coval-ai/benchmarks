@@ -1,0 +1,7 @@
+[
+  {"type": "speech_start", "seq": 1, "turn_index": 0, "audio_ms": 120},
+  {"type": "draft", "seq": 2, "turn_index": 0, "text": "Hello", "settled_text": "", "audio_ms": 600},
+  {"type": "draft", "seq": 3, "turn_index": 0, "text": "Hello world, how", "settled_text": "Hello", "audio_ms": 1200},
+  {"type": "committed", "seq": 4, "turn_index": 0, "text": "Hello world, how are you?", "language": "English", "audio_start_ms": 120, "audio_end_ms": 2800, "reason": "finalize", "degraded": false, "user_turn": true, "turn_kind": "user"},
+  {"type": "session_done", "seq": 5, "stats": {"audio_ms": 3000, "turns": 1, "request_id": "req-test"}}
+]
