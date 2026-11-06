@@ -21,13 +21,15 @@ from coval_bench.s2s.conditions import PLATFORM_SLUGS
 
 logger = structlog.get_logger("coval_bench.s2s.scenario_map")
 
-FETCHED_SCENARIOS: tuple[str, ...] = ("bank", "workflow-bank")
+FETCHED_SCENARIOS: tuple[str, ...] = ("workflow-bank",)
+_DAILY_SCENARIO = "workflow-bank"
 _JUDGE_FIELDS = {"workflow-bank": "workflow_metric_id"}
-_BANK_METRICS = {
+_DAILY_METRICS = {
     "coval_s2s_latency_metric_id": "latency",
     "coval_s2s_interruption_metric_id": "interruption_rate",
     "coval_s2s_call_length_metric_id": "call_length",
 }
+_OPTIONAL_DAILY_METRICS = frozenset({"interruption_rate"})
 _CLEAN_PERSONA_LABEL = "Clean Speech Baseline"
 # Metrics the platform rows can carry; any other map key (e.g. one Coval adds before
 # we store it) is left out rather than failing the fetch.
@@ -160,19 +162,20 @@ def scenario_map_fields(raw: object) -> dict[str, Any]:
             scenarios[name] = _platform_ids(name, assets)
         except ValueError as exc:
             logger.error("platform_scenario_invalid", scenario=name, error=str(exc))
-    bank = live["bank"]
-    if bank.judge is None:
-        raise ValueError("scenario map 'bank' has no judge")
-    missing = sorted(key for key in _BANK_METRICS.values() if not bank.metric_ids.get(key))
+    daily = live[_DAILY_SCENARIO]
+    missing = sorted(
+        key
+        for key in _DAILY_METRICS.values()
+        if key not in _OPTIONAL_DAILY_METRICS and not daily.metric_ids.get(key)
+    )
     if missing:
-        raise ValueError(f"scenario map 'bank' has no metric id for {missing}")
-    clean_persona_id = bank.personas["clean"].id
+        raise ValueError(f"scenario map {_DAILY_SCENARIO!r} has no metric id for {missing}")
+    for key in sorted(_OPTIONAL_DAILY_METRICS - daily.metric_ids.keys()):
+        logger.info("daily_metric_not_configured", scenario=_DAILY_SCENARIO, metric=key)
+    clean_persona_id = daily.personas["clean"].id
     return {
         "coval_s2s_scenarios": scenarios,
-        **{field: bank.metric_ids[key] for field, key in _BANK_METRICS.items()},
-        "coval_s2s_bank_test_set_id": bank.test_set_id,
-        "coval_s2s_bank_instruction_metric_id": bank.judge.id,
-        "coval_s2s_bank_persona_id": clean_persona_id,
+        **{field: daily.metric_ids.get(key) for field, key in _DAILY_METRICS.items()},
         "s2s_persona_labels": {clean_persona_id: _CLEAN_PERSONA_LABEL},
     }
 

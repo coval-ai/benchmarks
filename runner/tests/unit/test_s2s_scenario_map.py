@@ -69,11 +69,6 @@ def test_fields_match_what_terraform_set() -> None:
     fields = scenario_map_fields(_map())
 
     assert fields["coval_s2s_scenarios"] == {
-        "bank": ScenarioCovalIds(
-            test_set_id="TS",
-            agents={"gpt-realtime": "A1", "gemini-live": "A2"},
-            personas={"clean": "P0", "hard": "P3"},
-        ),
         "workflow-bank": ScenarioCovalIds(
             test_set_id="TSW",
             agents={"gpt-realtime": "A1"},
@@ -84,29 +79,55 @@ def test_fields_match_what_terraform_set() -> None:
     assert fields["coval_s2s_latency_metric_id"] == "LAT"
     assert fields["coval_s2s_interruption_metric_id"] == "INT"
     assert fields["coval_s2s_call_length_metric_id"] == "LEN"
-    assert fields["coval_s2s_bank_test_set_id"] == "TS"
-    assert fields["coval_s2s_bank_instruction_metric_id"] == "JUDGE"
-    assert fields["coval_s2s_bank_persona_id"] == "P0"
+    assert "coval_s2s_bank_test_set_id" not in fields
     assert fields["s2s_persona_labels"] == {"P0": "Clean Speech Baseline"}
 
 
 def test_newest_version_with_an_enabled_schedule_wins() -> None:
-    bank = {
+    workflow = {
         "v1": _version(agents={"gpt-realtime": "OLD"}),
         "v2": _version(agents={"gpt-realtime": "NEW"}),
         "v3": _version(agents={"gpt-realtime": "PAUSED"}, enabled=False),
     }
 
-    fields = scenario_map_fields(_map(bank=bank))
+    fields = scenario_map_fields(_map(**{"workflow-bank": workflow}))
 
-    assert fields["coval_s2s_scenarios"]["bank"].agents == {"gpt-realtime": "NEW"}
+    assert fields["coval_s2s_scenarios"]["workflow-bank"].agents == {"gpt-realtime": "NEW"}
 
 
 def test_scenario_without_an_enabled_schedule_is_rejected() -> None:
-    bank = {"v1": _version(agents={"gpt-realtime": "A1"}, enabled=False)}
+    workflow = {"v1": _version(agents={"gpt-realtime": "A1"}, enabled=False)}
 
-    with pytest.raises(ValueError, match="no 'bank' version with an enabled schedule"):
-        scenario_map_fields(_map(bank=bank))
+    with pytest.raises(ValueError, match="no 'workflow-bank' version with an enabled schedule"):
+        scenario_map_fields(_map(**{"workflow-bank": workflow}))
+
+
+def test_bank_is_not_fetched_scheduled_or_not() -> None:
+    unscheduled = {"v1": _version(agents={"gpt-realtime": "A1"}, enabled=False)}
+
+    for scenario_map in (_map(), _map(bank=unscheduled)):
+        assert set(scenario_map_fields(scenario_map)["coval_s2s_scenarios"]) == {"workflow-bank"}
+    without_bank = _map()
+    del without_bank["bank"]
+    assert set(scenario_map_fields(without_bank)["coval_s2s_scenarios"]) == {"workflow-bank"}
+
+
+def test_missing_interruption_metric_clears_the_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    version = _version(agents={"gpt-realtime": "A1"})
+    del version["metric_ids"]["interruption_rate"]
+
+    monkeypatch.setattr(
+        "coval_bench.gcs.read_json", lambda bucket, key: _map(**{"workflow-bank": {"v1": version}})
+    )
+
+    with capture_logs() as logs:
+        loaded = with_scenario_map(
+            Settings(s2s_scenario_map_uri=_URI, coval_s2s_interruption_metric_id="OLD")
+        )
+
+    assert loaded.coval_s2s_interruption_metric_id is None
+    assert loaded.coval_s2s_call_length_metric_id == "LEN"
+    assert any(log["event"] == "daily_metric_not_configured" for log in logs)
 
 
 def test_missing_scenario_is_rejected() -> None:
@@ -122,22 +143,22 @@ def test_repeated_registry_model_is_rejected() -> None:
     version["agents"]["b"]["registry_model"] = "a"
 
     with pytest.raises(ValueError, match="repeats model 'a'"):
-        scenario_map_fields(_map(bank={"v1": version}))
+        scenario_map_fields(_map(**{"workflow-bank": {"v1": version}}))
 
 
 def test_scenario_without_a_clean_persona_is_rejected() -> None:
-    bank = {"v1": _version(agents={"gpt-realtime": "A1"}, personas={"hard": "P3"})}
+    workflow = {"v1": _version(agents={"gpt-realtime": "A1"}, personas={"hard": "P3"})}
 
-    with pytest.raises(ValueError, match="'bank' has no clean persona"):
-        scenario_map_fields(_map(bank=bank))
+    with pytest.raises(ValueError, match="'workflow-bank' has no clean persona"):
+        scenario_map_fields(_map(**{"workflow-bank": workflow}))
 
 
-def test_missing_bank_metric_is_rejected() -> None:
+def test_missing_daily_metric_is_rejected() -> None:
     version = _version(agents={"gpt-realtime": "A1"})
     del version["metric_ids"]["call_length"]
 
     with pytest.raises(ValueError, match=r"no metric id for \['call_length'\]"):
-        scenario_map_fields(_map(bank={"v1": version}))
+        scenario_map_fields(_map(**{"workflow-bank": {"v1": version}}))
 
 
 def test_without_a_uri_settings_are_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -168,7 +189,7 @@ def test_map_replaces_the_env_ids(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert reads == [("coval-bench-asset-versions", "coval-benchmarking/scenario_map.json")]
     assert loaded.coval_s2s_latency_metric_id == "LAT"
-    assert loaded.coval_s2s_scenarios["bank"].agents == {"gpt-realtime": "A1", "gemini-live": "A2"}
+    assert loaded.coval_s2s_scenarios["workflow-bank"].agents == {"gpt-realtime": "A1"}
     assert loaded.log_level == "DEBUG"
 
 
@@ -185,22 +206,22 @@ def test_uri_must_name_a_gcs_object() -> None:
 
 
 def test_an_old_version_of_another_shape_is_ignored() -> None:
-    bank = {
+    workflow = {
         "v1": {"schedules": {"clean": {"enabled": False}}, "agents": "pre-registry"},
         "v2": _version(agents={"gpt-realtime": "A1"}),
     }
 
-    fields = scenario_map_fields(_map(bank=bank))
+    fields = scenario_map_fields(_map(**{"workflow-bank": workflow}))
 
-    assert fields["coval_s2s_scenarios"]["bank"].agents == {"gpt-realtime": "A1"}
+    assert fields["coval_s2s_scenarios"]["workflow-bank"].agents == {"gpt-realtime": "A1"}
 
 
 @pytest.mark.parametrize("bad", ['A1" OR agent_id="X', "A 1", ""])
 def test_ids_outside_coval_format_are_rejected(bad: str) -> None:
-    bank = {"v1": _version(agents={"gpt-realtime": bad})}
+    workflow = {"v1": _version(agents={"gpt-realtime": bad})}
 
     with pytest.raises(ValueError, match="pattern"):
-        scenario_map_fields(_map(bank=bank))
+        scenario_map_fields(_map(**{"workflow-bank": workflow}))
 
 
 def _platform_agent(provider: str, ident: str) -> dict[str, Any]:
@@ -280,7 +301,6 @@ def test_platform_agents_are_keyed_by_provider_and_model() -> None:
             "ToolCallCount": "TCC",
         },
     )
-    assert fields["coval_s2s_bank_test_set_id"] == "TS"
 
 
 def test_platform_metrics_absent_from_the_map_are_left_out() -> None:
@@ -301,7 +321,7 @@ def test_unscheduled_platform_scenario_is_skipped_not_rejected() -> None:
     with capture_logs() as logs:
         fields = scenario_map_fields(_map(**{"id-roulette": _id_roulette(enabled=False)}))
 
-    assert set(fields["coval_s2s_scenarios"]) == {"bank", "workflow-bank"}
+    assert set(fields["coval_s2s_scenarios"]) == {"workflow-bank"}
     assert any(
         log["event"] == "platform_scenario_not_scheduled" and log["scenario"] == "id-roulette"
         for log in logs
@@ -317,7 +337,7 @@ def test_unscheduled_platform_scenario_is_skipped_not_rejected() -> None:
         lambda v: v.update(agents={}),
     ],
 )
-def test_broken_platform_scenario_is_skipped_and_bank_still_loads(
+def test_broken_platform_scenario_is_skipped_and_workflow_bank_still_loads(
     break_it: Any,
 ) -> None:
     id_roulette = _id_roulette()
@@ -326,7 +346,7 @@ def test_broken_platform_scenario_is_skipped_and_bank_still_loads(
     with capture_logs() as logs:
         fields = scenario_map_fields(_map(**{"id-roulette": id_roulette}))
 
-    assert set(fields["coval_s2s_scenarios"]) == {"bank", "workflow-bank"}
+    assert set(fields["coval_s2s_scenarios"]) == {"workflow-bank"}
     assert any(
         log["event"] == "platform_scenario_invalid" and log["log_level"] == "error" for log in logs
     )
@@ -347,14 +367,6 @@ def test_repeated_platform_agent_is_skipped() -> None:
 
     assert "id-roulette" not in fields["coval_s2s_scenarios"]
     assert any("repeats agent 'vapi/pinned'" in log.get("error", "") for log in logs)
-
-
-def test_bank_still_needs_its_judge() -> None:
-    version = _version(agents={"gpt-realtime": "A1"})
-    version["judge"] = None
-
-    with pytest.raises(ValueError, match="'bank' has no judge"):
-        scenario_map_fields(_map(bank={"v1": version}))
 
 
 def test_workflow_bank_still_needs_its_judge() -> None:
