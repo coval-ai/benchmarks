@@ -4070,8 +4070,14 @@ async def test_only_defaults_tts_dataset_to_board_set(
     assert writer.start_run.await_args.kwargs["dataset_id"] == expected
 
 
-def test_gate_key_serializes_zoom_across_models() -> None:
-    """Zoom asked for one connection at a time, so every Zoom row shares a lock;
-    everyone else keeps a lock per model."""
-    assert _gate_key(_stt_entry("zoom", "scribe")) == _gate_key(_stt_entry("zoom", "scribe-pro"))
-    assert _gate_key(_stt_entry("deepgram", "nova-3")) != _gate_key(_stt_entry("deepgram", "flux"))
+def test_gate_key_follows_the_provider_class_single_connection_flag() -> None:
+    """A provider class asking for one connection shares a lock across its
+    models; everyone else, unknown providers included, locks per model."""
+    from coval_bench.providers.stt.zoom import ZoomSTTProvider
+
+    assert _gate_key(_stt_entry("zoom", "scribe"), ZoomSTTProvider) == _gate_key(
+        _stt_entry("zoom", "scribe-pro"), ZoomSTTProvider
+    )
+    assert _gate_key(_stt_entry("acme", "stt-1"), None) != _gate_key(
+        _stt_entry("acme", "stt-2"), None
+    )

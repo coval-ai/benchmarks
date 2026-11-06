@@ -94,6 +94,9 @@ class Provider(ABC):
     """Base class for all benchmark providers (STT and TTS)."""
 
     _VALID_MODELS: ClassVar[frozenset[str]] = frozenset()
+    # True when the upstream wants one open connection across all of this
+    # provider's models, not one per model.
+    _SINGLE_CONNECTION: ClassVar[bool] = False
 
     def _model_supported(self, model: str) -> bool:
         """Return True when *model* is allowed for this provider.

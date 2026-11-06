@@ -83,8 +83,6 @@ if TYPE_CHECKING:
 logger = structlog.get_logger("coval_bench.runner")
 
 _CONCURRENCY_CAP = 8
-# Providers that get one connection at a time across all their models.
-_SERIALIZED_PROVIDERS = frozenset({"zoom"})
 _STT_TIMEOUT_S = 45
 _TTS_TIMEOUT_S = 60
 # Stable contract — matched by the reason classifier and the alerting log metric.
@@ -98,8 +96,10 @@ _MAX_ERROR_LEN = 4000  # truncate error messages stored in DB (Postgres text is 
 _MIN_DEAD_ITEMS = 3
 
 
-def _gate_key(entry: RegisteredModel) -> Hashable:
-    if entry.provider in _SERIALIZED_PROVIDERS:
+def _gate_key(entry: RegisteredModel, provider_cls: type[Provider] | None) -> Hashable:
+    """One lock per model, or per provider when its class asks for a single connection."""
+    # getattr: tests register bare callables as providers.
+    if getattr(provider_cls, "_SINGLE_CONNECTION", False):
         return entry.provider
     return (entry.provider, entry.model)
 
@@ -716,9 +716,9 @@ async def _run_stt_item(
     if writer is not None and artifact_client is None:
         raise RuntimeError("required STT capture is not initialized")
     rows = _item_rows(entry, run_id, "stt")
+    provider_cls = stt_providers.get(entry.provider)
 
-    async with gate.slot(_gate_key(entry)):
-        provider_cls = stt_providers.get(entry.provider)
+    async with gate.slot(_gate_key(entry, provider_cls)):
         if provider_cls is None:
             logger.warning("unknown_stt_provider", provider=entry.provider, model=entry.model)
             return []
@@ -938,9 +938,9 @@ async def _run_tts_item(
     ResultStatus = rows.result_status
     audio_path: Path | None = None
     capture_outcome: Any | None = None
+    provider_cls = tts_providers.get(entry.provider)
 
-    async with gate.slot(_gate_key(entry)):
-        provider_cls = tts_providers.get(entry.provider)
+    async with gate.slot(_gate_key(entry, provider_cls)):
         if provider_cls is None:
             logger.warning("unknown_tts_provider", provider=entry.provider, model=entry.model)
             return []

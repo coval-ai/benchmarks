@@ -26,6 +26,8 @@ class ZoomSTTProvider(WebSocketSTTProvider):
     """Zoom Scribe streaming STT provider."""
 
     _SAMPLE_RATE = 16000
+    # Zoom asked for one session at a time against Scribe Live.
+    _SINGLE_CONNECTION = True
 
     def __init__(self, settings: Settings, model: str = "scribe") -> None:
         super().__init__(settings, model)
