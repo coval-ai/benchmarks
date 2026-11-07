@@ -8,7 +8,11 @@ from __future__ import annotations
 import pytest
 
 from coval_bench.mocktools.codecs import ToolCall
-from coval_bench.mocktools.tool_checks import character_error_rate, character_error_rates
+from coval_bench.mocktools.tool_checks import (
+    character_error_rate,
+    character_error_rates,
+    shown_values,
+)
 
 ID = "KD7BO0RWNLMX0O4BYD"
 
@@ -42,3 +46,20 @@ def test_punctuation_counts_where_the_right_answer_has_it() -> None:
     assert character_error_rate("O'Neill", "O’Neill") == 0.0
     assert character_error_rate("O'Neill", "ONeill") == pytest.approx(1 / 7)
     assert character_error_rate("4242424242424242", "4242-4242-4242-4242") == 0.0
+
+
+def test_the_scored_call_is_shown_as_sent_next_to_the_right_value() -> None:
+    expected = {"lookup_id": {"id": ID}}
+    first, retry = ToolCall("lookup_id", {"id": "kd7 b"}), ToolCall("lookup_id", {"id": ID})
+    assert shown_values(expected, [first, retry]) == {
+        "lookup_id.id.expected": ID,
+        "lookup_id.id.heard": "kd7 b",
+    }
+    assert shown_values(expected, [])["lookup_id.id.heard"] == "(no call)"
+    assert shown_values(expected, [ToolCall("lookup_id", {})])["lookup_id.id.heard"] == "(not sent)"
+    assert shown_values(expected, [ToolCall("lookup_id", {"id": 42})])["lookup_id.id.heard"] == "42"
+    flag = shown_values(expected, [ToolCall("lookup_id", {"id": True})])
+    assert flag["lookup_id.id.heard"] == "true"
+    long = shown_values(expected, [ToolCall("lookup_id", {"id": "x" * 500})])["lookup_id.id.heard"]
+    assert len(long) == 200
+    assert long.endswith("…")

@@ -107,6 +107,8 @@ async def test_the_score_goes_to_coval_as_corrals_span(
     assert span.name == "character_error_rate"
     attributes: dict[str, Any] = dict(span.attributes or {})
     assert attributes["lookup.value"] == pytest.approx(1 / 18)
+    assert attributes["lookup.value.expected"] == "KD7BO0RWNLMX0O4BYD"
+    assert attributes["lookup.value.heard"] == "KD7B00RWNLMX0O4BYD"
     assert attributes["coval_bench.platform"] == "vapi"
     assert attributes["coval_bench.test_case"] == "account-1"
 

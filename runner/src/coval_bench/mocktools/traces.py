@@ -172,13 +172,13 @@ def build_check_span(
     provider: TracerProvider,
     name: str,
     platform: str,
-    rates: Mapping[str, float],
+    values: Mapping[str, float | str],
     test_case: str | None,
     started_ns: int,
     ended_ns: int,
 ) -> ReadableSpan:
-    """One check's span, named after the check, one attribute per ``<tool>.<argument>``."""
-    attributes: dict[str, AttributeValue] = {"coval_bench.platform": platform, **rates}
+    """One check's span, named after the check, with its values keyed by ``<tool>.<argument>``."""
+    attributes: dict[str, AttributeValue] = {"coval_bench.platform": platform, **values}
     if test_case:
         attributes["coval_bench.test_case"] = test_case
     span = provider.get_tracer(__name__).start_span(

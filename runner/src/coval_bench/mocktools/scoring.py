@@ -23,7 +23,11 @@ import httpx
 import structlog
 from opentelemetry.sdk.trace.export import SpanExportResult
 
-from coval_bench.mocktools.tool_checks import CHARACTER_ERROR_RATE, character_error_rates
+from coval_bench.mocktools.tool_checks import (
+    CHARACTER_ERROR_RATE,
+    character_error_rates,
+    shown_values,
+)
 from coval_bench.mocktools.traces import build_check_span, post_spans, queue
 
 if TYPE_CHECKING:
@@ -127,7 +131,13 @@ async def _score(
             return
         rates = character_error_rates(expected, calls)
         span = build_check_span(
-            provider, CHARACTER_ERROR_RATE, platform, rates, test_case, started_ns, ended_ns
+            provider,
+            CHARACTER_ERROR_RATE,
+            platform,
+            {**rates, **shown_values(expected, calls)},
+            test_case,
+            started_ns,
+            ended_ns,
         )
         result = await post_spans(api_key, api_base, simulation_id, [span])
     except asyncio.CancelledError:
