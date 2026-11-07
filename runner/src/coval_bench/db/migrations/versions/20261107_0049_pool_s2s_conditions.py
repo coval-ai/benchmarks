@@ -11,7 +11,10 @@ come from the raw values of every member, never from averaged per-dataset rows.
 Each condition keeps its own rows, and ``__all__`` is unchanged.
 
 The replacement views are built populated under temporary names and swapped in,
-as in 0047, so readers never see an empty view.
+as in 0047, so readers never see an empty view. The last 30 days of S2S run slots
+are queued, so the rollup drain rebuilds them with pooled rows and the pooled
+timeline starts with history. A downgrade keeps the function, because the rollup
+code calls it whichever order the code and database roll back in.
 """
 
 from __future__ import annotations
@@ -47,7 +50,7 @@ _DATASET_PATTERN = f"^s2s-({'|'.join(_SCENARIOS)})(-({'|'.join(_CONDITIONS)}))?-
 
 # Groups: 1 scenario, 3 condition (absent for the clean caller), 4 test-set version.
 _POOL_FUNCTION = f"""
-CREATE FUNCTION benchmarks_v2.pooled_dataset_id(benchmark TEXT, dataset_id TEXT) RETURNS TEXT
+CREATE OR REPLACE FUNCTION benchmarks_v2.pooled_dataset_id(benchmark TEXT, dataset_id TEXT) RETURNS TEXT
 LANGUAGE sql IMMUTABLE AS $$
   SELECT CASE WHEN benchmark = 'S2S' AND dataset_id ~ '{_DATASET_PATTERN}'
               THEN regexp_replace(dataset_id, '{_DATASET_PATTERN}', 's2s-\\1-all-conditions-v\\4')
@@ -59,7 +62,7 @@ _SOURCE_SQL = """
 WITH evaluations AS (
  SELECT o.provider,o.model,o.benchmark,o.dataset_id,e.metric_type,e.metric_version,e.evaluation_variant,
         e.value,e.roundtrip,e.leading_silence,e.has_primary_role,
-        e.substitution_count,e.deletion_count,e.insertion_count,e.reference_words
+        e.substitution_count,e.deletion_count,e.insertion_count,e.reference_words__POOL_COLUMN__
  FROM benchmarks_v2.dashboard_metric_values e
  JOIN benchmarks_v2.benchmark_observations o ON o.id=e.observation_id
  JOIN benchmarks_v2.runs r ON r.id=o.run_id
@@ -110,18 +113,27 @@ _AGGREGATES = """public_metric metric_type,metric_version,evaluation_variant,
 # The pooled dataset is its own pass over member rows only, so the other groups cost
 # what they did in 0047.
 _WITH_POOL = {
+    "__POOL_COLUMN__": ",benchmarks_v2.pooled_dataset_id(o.benchmark,o.dataset_id) pool_id",
     "__POOL_UNION__": """
  UNION ALL
- SELECT provider,model,benchmark,benchmarks_v2.pooled_dataset_id(benchmark,dataset_id) dataset_id,
+ SELECT provider,model,benchmark,pool_id dataset_id,
         __AGGREGATES__
  FROM public_values
- WHERE benchmark='S2S' AND benchmarks_v2.pooled_dataset_id(benchmark,dataset_id) IS NOT NULL
- GROUP BY provider,model,benchmark,benchmarks_v2.pooled_dataset_id(benchmark,dataset_id),
-          public_metric,metric_version,evaluation_variant""",
+ WHERE pool_id IS NOT NULL
+ GROUP BY provider,model,benchmark,pool_id,public_metric,metric_version,evaluation_variant""",
 }
 
 # The 0047 definition, so a downgrade drops the pooled rows.
-_WITHOUT_POOL = {"__POOL_UNION__": ""}
+_WITHOUT_POOL = {"__POOL_COLUMN__": "", "__POOL_UNION__": ""}
+
+_QUEUE_S2S_SLOTS = """
+INSERT INTO benchmarks_v2.dashboard_rollup_queue (slot_at)
+SELECT DISTINCT r.scheduled_at FROM benchmarks_v2.runs r
+WHERE r.scheduled_at >= now() - interval '30 days' AND r.status IN ('succeeded','partial')
+  AND EXISTS (SELECT 1 FROM benchmarks_v2.benchmark_observations o
+              WHERE o.run_id=r.id AND o.benchmark='S2S')
+ON CONFLICT (slot_at) DO NOTHING
+"""
 
 
 def _view_sql(window: str, parts: dict[str, str]) -> str:
@@ -165,8 +177,8 @@ def _swap_views(parts: dict[str, str]) -> None:
 def upgrade() -> None:
     op.execute(_POOL_FUNCTION)
     _swap_views(_WITH_POOL)
+    op.execute(_QUEUE_S2S_SLOTS)
 
 
 def downgrade() -> None:
     _swap_views(_WITHOUT_POOL)
-    op.execute("DROP FUNCTION benchmarks_v2.pooled_dataset_id(TEXT, TEXT)")

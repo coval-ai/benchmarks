@@ -2,7 +2,10 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import psycopg
 import pytest
@@ -192,6 +195,56 @@ async def test_workflow_callers_also_roll_up_as_one_pooled_dataset(
         assert pooled["p50"] == pytest.approx((rows[4]["p50"] + rows[5]["p50"]) / 2)
     finally:
         await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_the_pooling_migration_queues_recent_s2s_slots_only(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    apply_migrations(pg_conn)
+    pool = await storage._pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        slots = {}
+        for sample, benchmark, age in (
+            ("a", Benchmark.S2S, timedelta(days=2)),
+            ("b", Benchmark.STT, timedelta(days=3)),
+            ("c", Benchmark.S2S, timedelta(days=40)),
+        ):
+            run_id, _ = await storage._observation(writer, sample=sample, benchmark=benchmark)
+            await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
+            slot = floor_rollup(datetime.now(tz=UTC) - age, "1h")
+            async with pool.connection() as conn:
+                await conn.execute(
+                    "UPDATE benchmarks_v2.runs SET scheduled_at = %s WHERE id = %s", (slot, run_id)
+                )
+                await conn.execute("DELETE FROM benchmarks_v2.dashboard_rollup_queue")
+            slots[sample] = slot
+        async with pool.connection() as conn:
+            await conn.execute(_pooling_migration()._QUEUE_S2S_SLOTS)
+        queued = await _rows(pool, "SELECT slot_at FROM benchmarks_v2.dashboard_rollup_queue")
+        assert [row["slot_at"] for row in queued] == [slots["a"]]
+    finally:
+        await pool.close()
+
+
+def test_the_pooling_downgrade_keeps_the_function_the_rollups_call(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    apply_migrations(pg_conn)
+    migration = _pooling_migration()
+    with patch.object(migration, "op", SimpleNamespace(execute=pg_conn.execute)):
+        migration.downgrade()
+        migration.upgrade()
+    row = pg_conn.execute(
+        "SELECT benchmarks_v2.pooled_dataset_id('S2S', 's2s-workflow-bank-hard-v1')"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "s2s-workflow-bank-all-conditions-v1"
+
+
+def _pooling_migration() -> Any:
+    return import_module("coval_bench.db.migrations.versions.20261107_0049_pool_s2s_conditions")
 
 
 @pytest.mark.asyncio

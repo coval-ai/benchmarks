@@ -104,6 +104,8 @@ ADHERENCE_SLUGS: dict[str, Metric] = {
     "instruction-bank": Metric.INSTRUCTION_FOLLOWING,
     "workflow-bank": Metric.WORKFLOW_ADHERENCE,
 }
+# Migration 20261107_0049's ``benchmarks_v2.pooled_dataset_id`` keeps its own copy of
+# these slugs, tiers and rooms; adding one needs a migration that recreates it.
 SCENARIO_SLUGS: tuple[str, ...] = (*_DOMAIN_SLUGS, *ADHERENCE_SLUGS)
 TIERS: tuple[Condition, ...] = (
     Condition.LOW,

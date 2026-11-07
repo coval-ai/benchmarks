@@ -77,7 +77,8 @@ WITH evaluations AS (
          e.metric_id, e.metric_version, e.evaluation_variant,
          e.value, e.roundtrip, e.leading_silence,
          e.substitution_count + e.deletion_count + e.insertion_count AS error_words,
-         e.reference_words, run.scheduled_at
+         e.reference_words, run.scheduled_at,
+         benchmarks_v2.pooled_dataset_id(o.benchmark, o.dataset_id) AS pool_id
   FROM benchmarks_v2.dashboard_metric_values e
   JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
   JOIN benchmarks_v2.runs run ON run.id = o.run_id
@@ -100,12 +101,11 @@ GROUP BY GROUPING SETS (
   (provider, model, benchmark, metric_id, metric_version, evaluation_variant, value_key)
 )
 UNION ALL
-SELECT provider, model, benchmark, benchmarks_v2.pooled_dataset_id(benchmark, dataset_id),
-__AGGREGATES__
+SELECT provider, model, benchmark, pool_id, __AGGREGATES__
 FROM measurements
-WHERE benchmark = 'S2S' AND benchmarks_v2.pooled_dataset_id(benchmark, dataset_id) IS NOT NULL
-GROUP BY provider, model, benchmark, benchmarks_v2.pooled_dataset_id(benchmark, dataset_id),
-         metric_id, metric_version, evaluation_variant, value_key
+WHERE pool_id IS NOT NULL
+GROUP BY provider, model, benchmark, pool_id, metric_id, metric_version, evaluation_variant,
+         value_key
 """.replace("__AGGREGATES__", _ROLLUP_AGGREGATES)
 
 CLAIM_SLOTS_SQL = """

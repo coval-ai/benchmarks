@@ -320,6 +320,44 @@ async def test_component_only_ttfa_is_visible_and_discovers_dataset(
     }
 
 
+async def test_by_dataset_adds_one_pooled_block_per_s2s_scenario_without_a_persona(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """The workflow conditions keep their own blocks and also pool into one, with no persona."""
+    for dataset_id, value in (
+        ("s2s-workflow-bank-v1", 1200.0),
+        ("s2s-workflow-bank-hard-v1", 1600.0),
+    ):
+        run_id = await _insert_run(postgresql, dataset_id=dataset_id)
+        await _insert_value(
+            postgresql,
+            run_id,
+            value,
+            provider="openai",
+            model="gpt-realtime",
+            metric_type="V2V",
+            benchmark="S2S",
+            dataset_id=dataset_id,
+        )
+
+    await _publish(postgresql)
+    blocks = {
+        block["dataset"]: block
+        for block in (
+            await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "S2S"})
+        ).json()["blocks"]
+    }
+    assert set(blocks) == {
+        "s2s-workflow-bank-v1",
+        "s2s-workflow-bank-hard-v1",
+        "s2s-workflow-bank-all-conditions-v1",
+    }
+    pooled = blocks["s2s-workflow-bank-all-conditions-v1"]
+    assert pooled["persona"] is None
+    assert pooled["model_stats"][0]["p50"] == 1400.0
+    assert pooled["model_stats"][0]["sample_count"] == 2
+
+
 async def test_stats_pool_scope_and_group_exact_distribution(
     client: AsyncClient, postgresql: Any
 ) -> None:
