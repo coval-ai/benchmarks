@@ -14,6 +14,7 @@ from coval_bench.s2s.conditions import (
     SCENARIO_SLUGS,
     Condition,
     dataset_id_for,
+    pooled_dataset_id,
     scenario_family,
 )
 
@@ -118,6 +119,13 @@ HEADLINE: dict[Benchmark, Scenario] = {
 
 
 def headline_dataset(benchmark: Benchmark) -> str | None:
-    """The dataset *benchmark*'s headline reads, or None for boards without one."""
+    """The dataset *benchmark*'s headline reads, or None for boards without one.
+
+    S2S reads every condition of its scenario pooled; other boards read the clean caller.
+    """
     scenario = HEADLINE.get(benchmark)
-    return scenario.primary_dataset(benchmark) if scenario else None
+    if scenario is None:
+        return None
+    if benchmark is Benchmark.S2S:
+        return pooled_dataset_id(scenario.slug)
+    return scenario.primary_dataset(benchmark)
