@@ -54,12 +54,10 @@ from coval_bench.s2s.coval_runs import CovalRun
 from coval_bench.s2s.rows import (
     VALUE_MAPPERS,
     InvalidInstructionVerdict,
-    call_length_value,
     has_duplicate_ids,
     ingestable_metrics,
     instruction_value,
     instruction_verdict,
-    interruption_value,
     population_mismatch,
     s2s_rows,
 )
@@ -2001,15 +1999,15 @@ def test_latency_metric_is_required_only_for_a_family_that_fetches_it() -> None:
 
 
 def test_interruption_value_maps() -> None:
-    assert interruption_value(1.1666666666666632) == (
+    assert VALUE_MAPPERS[Metric.INTERRUPTION_RATE](1.1666666666666632) == (
         1.1666666666666632,
         ResultStatus.SUCCESS,
     )
-    assert interruption_value(0.0041) == (0.0041, ResultStatus.SUCCESS)
-    assert interruption_value(0) == (0.0, ResultStatus.SUCCESS)
-    assert interruption_value(None) == (None, ResultStatus.FAILED)
-    assert interruption_value("1.5") == (None, ResultStatus.FAILED)
-    assert interruption_value(True) == (None, ResultStatus.FAILED)
+    assert VALUE_MAPPERS[Metric.INTERRUPTION_RATE](0.0041) == (0.0041, ResultStatus.SUCCESS)
+    assert VALUE_MAPPERS[Metric.INTERRUPTION_RATE](0) == (0.0, ResultStatus.SUCCESS)
+    assert VALUE_MAPPERS[Metric.INTERRUPTION_RATE](None) == (None, ResultStatus.FAILED)
+    assert VALUE_MAPPERS[Metric.INTERRUPTION_RATE]("1.5") == (None, ResultStatus.FAILED)
+    assert VALUE_MAPPERS[Metric.INTERRUPTION_RATE](True) == (None, ResultStatus.FAILED)
 
 
 @pytest.mark.asyncio
@@ -2054,11 +2052,11 @@ async def test_ingest_run_writes_interruption_rows() -> None:
 
 
 def test_call_length_value_maps() -> None:
-    assert call_length_value(73.4) == (73.4, ResultStatus.SUCCESS)
-    assert call_length_value(0) == (0.0, ResultStatus.SUCCESS)
-    assert call_length_value(None) == (None, ResultStatus.FAILED)
-    assert call_length_value("73.4") == (None, ResultStatus.FAILED)
-    assert call_length_value(True) == (None, ResultStatus.FAILED)
+    assert VALUE_MAPPERS[Metric.CALL_LENGTH](73.4) == (73.4, ResultStatus.SUCCESS)
+    assert VALUE_MAPPERS[Metric.CALL_LENGTH](0) == (0.0, ResultStatus.SUCCESS)
+    assert VALUE_MAPPERS[Metric.CALL_LENGTH](None) == (None, ResultStatus.FAILED)
+    assert VALUE_MAPPERS[Metric.CALL_LENGTH]("73.4") == (None, ResultStatus.FAILED)
+    assert VALUE_MAPPERS[Metric.CALL_LENGTH](True) == (None, ResultStatus.FAILED)
 
 
 @pytest.mark.asyncio
@@ -3230,3 +3228,12 @@ async def test_persisted_import_rejects_disabled_capture_before_client(
     with pytest.raises(RuntimeError, match="benchmark_artifact_bucket"):
         await fetch_v2v.fetch_and_write_v2v(configured, benchmark=benchmark)
     client.assert_not_called()
+
+
+def test_numeric_value_maps_scale_and_rounding() -> None:
+    assert VALUE_MAPPERS[Metric.V2V](1.23456) == (1234.6, ResultStatus.SUCCESS)
+    assert VALUE_MAPPERS[Metric.CHARACTER_ERROR_RATE](0.455) == (45.5, ResultStatus.SUCCESS)
+    assert VALUE_MAPPERS[Metric.TOOL_CALL_COUNT](2) == (2.0, ResultStatus.SUCCESS)
+    for metric in (Metric.V2V, Metric.CHARACTER_ERROR_RATE, Metric.TOOL_CALL_COUNT):
+        assert VALUE_MAPPERS[metric](None) == (None, ResultStatus.FAILED)
+        assert VALUE_MAPPERS[metric](True) == (None, ResultStatus.FAILED)

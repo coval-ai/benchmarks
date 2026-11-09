@@ -19,11 +19,19 @@ from coval_bench.s2s.specs import AgentSpec
 logger = structlog.get_logger("coval_bench.s2s.rows")
 
 
-def v2v_value(raw: object) -> tuple[float | None, ResultStatus] | None:
-    """Seconds to ms; a clip with no numeric value becomes a FAILED row."""
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        return round(float(raw) * 1000, 1), ResultStatus.SUCCESS
-    return None, ResultStatus.FAILED
+ValueMapper = Callable[[object], tuple[float | None, ResultStatus] | None]
+
+
+def numeric_value(scale: float = 1.0, digits: int | None = None) -> ValueMapper:
+    """A numeric Coval value times *scale*, rounded to *digits*; anything else is a FAILED row."""
+
+    def value(raw: object) -> tuple[float | None, ResultStatus]:
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            scaled = float(raw) * scale
+            return (scaled if digits is None else round(scaled, digits)), ResultStatus.SUCCESS
+        return None, ResultStatus.FAILED
+
+    return value
 
 
 class InvalidInstructionVerdict(Exception):
@@ -90,44 +98,16 @@ def instruction_value(raw: object) -> tuple[float | None, ResultStatus] | None:
     return (100.0 if verdict else 0.0), ResultStatus.SUCCESS
 
 
-def interruption_value(raw: object) -> tuple[float | None, ResultStatus] | None:
-    """Interruptions per minute, unrounded; a clip with no numeric value becomes a FAILED row."""
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        return float(raw), ResultStatus.SUCCESS
-    return None, ResultStatus.FAILED
-
-
-def call_length_value(raw: object) -> tuple[float | None, ResultStatus] | None:
-    """Conversation audio duration in seconds; a clip with no numeric value becomes a FAILED row."""
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        return float(raw), ResultStatus.SUCCESS
-    return None, ResultStatus.FAILED
-
-
-def character_error_rate_value(raw: object) -> tuple[float | None, ResultStatus] | None:
-    """Coval's 0-1 fraction as a percentage; a clip with no numeric value becomes a FAILED row."""
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        return float(raw) * 100.0, ResultStatus.SUCCESS
-    return None, ResultStatus.FAILED
-
-
-def tool_call_count_value(raw: object) -> tuple[float | None, ResultStatus] | None:
-    """Tool calls in the conversation; a clip with no numeric value becomes a FAILED row."""
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        return float(raw), ResultStatus.SUCCESS
-    return None, ResultStatus.FAILED
-
-
 # The only per-metric part: one raw Coval value -> (row value, status), or None to
 # write no row. A metric is ingestable once it appears here.
-VALUE_MAPPERS: dict[Metric, Callable[[object], tuple[float | None, ResultStatus] | None]] = {
-    Metric.V2V: v2v_value,
+VALUE_MAPPERS: dict[Metric, ValueMapper] = {
+    Metric.V2V: numeric_value(1000, digits=1),
     Metric.INSTRUCTION_FOLLOWING: instruction_value,
-    Metric.INTERRUPTION_RATE: interruption_value,
-    Metric.CALL_LENGTH: call_length_value,
+    Metric.INTERRUPTION_RATE: numeric_value(),
+    Metric.CALL_LENGTH: numeric_value(),
     Metric.WORKFLOW_ADHERENCE: instruction_value,
-    Metric.CHARACTER_ERROR_RATE: character_error_rate_value,
-    Metric.TOOL_CALL_COUNT: tool_call_count_value,
+    Metric.CHARACTER_ERROR_RATE: numeric_value(100),
+    Metric.TOOL_CALL_COUNT: numeric_value(),
 }
 
 
