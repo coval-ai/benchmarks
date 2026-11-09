@@ -13,7 +13,8 @@
         ".github/workflows/codeql.yml",
         ".github/workflows/switchboard.yml",
         ".switchboard/impact.json",
-        ".switchboard/service-selection-contracts.json"
+        ".switchboard/service-selection-contracts.json",
+        ".switchboard/catalog-generation.json"
       ]
     },
     "api_types": {

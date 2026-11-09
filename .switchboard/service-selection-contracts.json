@@ -82,6 +82,15 @@
         "benchmarks.runner",
         "benchmarks.api_typegen"
       ]
+    },
+    {
+      "id": "catalog-metadata",
+      "changedFiles": [
+        ".switchboard/catalog-generation.json"
+      ],
+      "surfaces": [
+        "benchmarks.runner"
+      ]
     }
   ]
 }

@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "repository": "benchmarks",
+  "catalogs": {
+    "benchmarks.runner": {
+      "nativeProject": {
+        "kind": "python",
+        "importRoots": [
+          {
+            "name": "coval_bench",
+            "directory": "runner/src/coval_bench"
+          }
+        ]
+      },
+      "excludeDirs": [
+        ".git",
+        ".venv",
+        "__pycache__",
+        "node_modules"
+      ],
+      "testOrder": "id",
+      "localNamespacePrefix": "benchmarks.runner.",
+      "broadPathclass": "benchmarks.runner.source",
+      "publishes": {
+        "kind": "static",
+        "static": [
+          {
+            "name": "benchmarks.runner.source",
+            "kind": "broad",
+            "include": [
+              "runner/**"
+            ]
+          }
+        ]
+      },
+      "testSources": [
+        {
+          "kind": "python-tests",
+          "dir": "runner",
+          "recursive": true,
+          "pattern": "^(test_.*|.*_test)\\.py$",
+          "suite": "benchmarks.runner.ci",
+          "id": {
+            "kind": "relpath"
+          },
+          "coupling": {
+            "kind": "unscoped"
+          }
+        }
+      ]
+    }
+  },
+  "contracts": [
+    {
+      "id": "runner-source",
+      "service": "benchmarks.runner",
+      "suite": "benchmarks.runner.ci",
+      "changedFiles": [
+        "runner/src/coval_bench/__main__.py"
+      ],
+      "all": true
+    },
+    {
+      "id": "test-file",
+      "service": "benchmarks.runner",
+      "suite": "benchmarks.runner.ci",
+      "changedFiles": [
+        "runner/tests/unit/test_config.py"
+      ],
+      "all": true
+    },
+    {
+      "id": "native-project",
+      "service": "benchmarks.runner",
+      "suite": "benchmarks.runner.ci",
+      "changedFiles": [
+        "runner/pyproject.toml",
+        "runner/uv.lock"
+      ],
+      "all": true
+    },
+    {
+      "id": "pytest-harness",
+      "service": "benchmarks.runner",
+      "suite": "benchmarks.runner.ci",
+      "changedFiles": [
+        "runner/pytest.ini",
+        "runner/tests/conftest.py"
+      ],
+      "all": true
+    },
+    {
+      "id": "workflow",
+      "service": "benchmarks.runner",
+      "suite": "benchmarks.runner.ci",
+      "changedFiles": [
+        ".github/workflows/ci.yml"
+      ],
+      "all": true
+    },
+    {
+      "id": "catalog-metadata",
+      "service": "benchmarks.runner",
+      "suite": "benchmarks.runner.ci",
+      "changedFiles": [
+        ".switchboard/catalog-generation.json"
+      ],
+      "all": true
+    },
+    {
+      "id": "mixed-test-and-methodology",
+      "service": "benchmarks.runner",
+      "suite": "benchmarks.runner.ci",
+      "changedFiles": [
+        "runner/tests/unit/test_config.py",
+        "docs/methodology.md"
+      ],
+      "all": true
+    }
+  ]
+}
