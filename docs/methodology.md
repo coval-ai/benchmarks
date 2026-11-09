@@ -15,7 +15,7 @@ four. This document describes each one and where it lives.
   [LibriSpeech `test-clean`](https://www.openslr.org/12/) (`CC-BY-4.0`):
   studio-quality read English speech, speaker-balanced per ADR-020. The easy
   tier: most providers train on LibriSpeech, so absolute WER runs low.
-- `stt-v3` — 897 conversational clips from
+- `stt-v3` — 882 conversational clips from
   [pipecat-ai/stt-benchmark-data](https://huggingface.co/datasets/pipecat-ai/stt-benchmark-data):
   spontaneous voice-agent speech (fragments, fillers, prompted turns) with
   model-generated reference transcripts. The hard tier.

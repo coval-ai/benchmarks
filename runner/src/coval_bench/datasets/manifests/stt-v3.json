@@ -1,7 +1,7 @@
 {
   "_license": "unspecified (no data license published by pipecat-ai)",
   "id": "stt-v3",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "unspecified (no data license published by pipecat-ai)",
   "source": "pipecat-ai/stt-benchmark-data train",
   "items": [
@@ -72,7 +72,7 @@
     {
       "path": "audio/0009.wav",
       "sha256": "faa8a3598a13978ec25601d489fc70fa957482a87c2b40d84c420ad3bc1e609d",
-      "transcript": "And a lot of is like the same artist and when I don't know",
+      "transcript": "And a lot of it is like the same artist and when I don't know",
       "duration_sec": 3.012,
       "speech_end_offset_ms": 3012.0,
       "sample_id": "51269c0c-005e-acce-35d2-d0dcccf8a0ff"
@@ -190,14 +190,6 @@
       "sample_id": "ba35d4c9-8a6d-6261-8d23-4edd87bcb72b"
     },
     {
-      "path": "audio/0024.wav",
-      "sha256": "5c42e5c45a7c734d001a114a04dc448ae93c884ed6366e41b7bb6b98abb61c02",
-      "transcript": "CAT scan scheduled for next Wednesday at 9:00 AM with fasting instruct",
-      "duration_sec": 4.896,
-      "speech_end_offset_ms": 4896.0,
-      "sample_id": "d4fceb5d-8a86-6206-966b-23c9cc674be5"
-    },
-    {
       "path": "audio/0025.wav",
       "sha256": "c1a28dad197978b868e373dcafc7ba4b811dfeea5bf422cccc27b30581a968f4",
       "transcript": "Can I pay for this with my phone",
@@ -272,7 +264,7 @@
     {
       "path": "audio/0034.wav",
       "sha256": "3fcd001a2a9d2b2ff36e51edb4dcab0c6e3f2eefd42c548a93fecdc6c7cc70ac",
-      "transcript": "Can you give me a brief overview of the historical event known as the Boston Tea Party explaining why it happened and what its sig s significance was in the American Revol lutionary War?",
+      "transcript": "Can you give me a brief overview of the historical event known as the Boston Tea Party, explaining why it happened and what its significance was in the American Revolutionary War?",
       "duration_sec": 11.82425,
       "speech_end_offset_ms": 11044.0,
       "sample_id": "5589157a-23ef-c865-ae01-a592870c4528"
@@ -616,7 +608,7 @@
     {
       "path": "audio/0077.wav",
       "sha256": "5571b7f508640a656602762c586a5fe014bfa3130cf1f81bc627bedd55f9ebe9",
-      "transcript": "Could you help me compose a formal letter of complaint to an airline regarding a piece of luggage that was severely damaged during my recent flight from Denver to Or Orlando last Saturday?",
+      "transcript": "Could you help me compose a formal letter of complaint to an airline regarding a piece of luggage that was severely damaged during my recent flight from Denver to Orlando last Saturday?",
       "duration_sec": 14.482375,
       "speech_end_offset_ms": 13700.0,
       "sample_id": "cd6135c2-8457-6885-1e72-0bb2ce461b11"
@@ -648,7 +640,7 @@
     {
       "path": "audio/0081.wav",
       "sha256": "65148762489d7d3c42919cbae57973435a4fab64fc841c78a856af4817ed7080",
-      "transcript": "Could you look up at the warranty information for my wa washing machine? I have the serial number right here and I need to know if the electronic control panel is still covered because",
+      "transcript": "Could you look up at the warranty information for my washing machine? I have the serial number right here, and I need to know if the electronic control panel is still covered, because",
       "duration_sec": 14.152125,
       "speech_end_offset_ms": 12580.0,
       "sample_id": "136dbe9f-30a6-fab1-282c-71b06fdae9d6"
@@ -824,7 +816,7 @@
     {
       "path": "audio/0103.wav",
       "sha256": "4b592799c2f023f54b570516ad8a0e3850fa73634fd3a5de425b1c5a20a03eb3",
-      "transcript": "For my upcoming road trip I need to calculate the total driving distance and estimated fuel cost from my current location to a National Park assuming that my car gets about twenty-five",
+      "transcript": "For my upcoming road trip, I need to calculate the total driving distance and estimated fuel costs from my current location to a national park, assuming that my car gets about 25.",
       "duration_sec": 13.913937,
       "speech_end_offset_ms": 13188.0,
       "sample_id": "f37d01b8-9c52-4e87-5378-1e692700e666"
@@ -944,7 +936,7 @@
     {
       "path": "audio/0118.wav",
       "sha256": "63d6edfd4536d53849135ade45f0259c59d46a2e575102993cecc78ff9e0f112",
-      "transcript": "How do I properly back up all the data from my old laptop to an external hard hard drive before I perform a full factory reset to wipe all of my personal information?",
+      "transcript": "How do I property backup all the data from my old laptop to an external hard drive before I perform a full factory reset to wipe all of my personal information?",
       "duration_sec": 12.770188,
       "speech_end_offset_ms": 11972.0,
       "sample_id": "223e29b5-216f-35e5-0b07-94fe02040496"
@@ -1168,7 +1160,7 @@
     {
       "path": "audio/0146.wav",
       "sha256": "cf319c21e80761ddf392e934237755345cc5377ae9af4e836b34246045b32169",
-      "transcript": "I am plan a road trip along the Specific Coast Highway from San Francisco to Los Angeles and need suggestions for sce scenic stops, unique roadside attractions, and recommended restaurants along the route.",
+      "transcript": "I am planning a road trip along the specific Coast Highway from San Francisco to Los Angeles and need suggestions for scenic stops, unique roadside attractions, and recommended restaurants along the road.",
       "duration_sec": 14.07625,
       "speech_end_offset_ms": 13476.0,
       "sample_id": "8a948ab7-d1c1-4b3e-f87d-1a9b1f564f42"
@@ -1296,7 +1288,7 @@
     {
       "path": "audio/0162.wav",
       "sha256": "2bec0d4ce37546d62864c8627dbf041f8bc7ee0abbeb9d90daa0ca9dcd9bdfcf",
-      "transcript": "I believe there was an error in my last paycheck because the amount for overtime hours seems to be incorrect when I calculate it based on the hours I was submitted and",
+      "transcript": "i believe there was an error in my last paycheck because the amount for overtime hours seemed to be incorrect when i calculate it based on hours i was submitted and",
       "duration_sec": 11.950125,
       "speech_end_offset_ms": 11268.0,
       "sample_id": "84ec1ac6-fe87-1b5d-63f1-c3ddf79fe444"
@@ -1336,7 +1328,7 @@
     {
       "path": "audio/0167.wav",
       "sha256": "0765174d8a9452dc1268838ce4a226ae683d24419ebf75742bbe6f23581fdd3e",
-      "transcript": "I crunch 'em up and put 'em in but not as much Doritos more like tortillas",
+      "transcript": "I crunch them up and put them in, but not as much Doritos, more like tortillas.",
       "duration_sec": 3.615,
       "speech_end_offset_ms": 3615.0,
       "sample_id": "b1913d8a-4368-8155-4141-83c2812b8684"
@@ -1376,7 +1368,7 @@
     {
       "path": "audio/0172.wav",
       "sha256": "a115280ab1ed2ad2d00cffb3098aece0d3d5877bc8c334999fef5750b6c6b091",
-      "transcript": "I have a flight credit from a trip that was cancelled last year and I want to see if I could apply it to a new booking for this",
+      "transcript": "I have a flight credit from a trip that was cancelled last year and I want to see if I can apply it to a new booking for this.",
       "duration_sec": 8.035375,
       "speech_end_offset_ms": 7524.0,
       "sample_id": "3a76da98-9490-6573-116c-2514152df9ac"
@@ -1416,7 +1408,7 @@
     {
       "path": "audio/0177.wav",
       "sha256": "a717fbef25f15fd2f5b166251fbc214c4c6d7b1f31b450bfbfbe64fdb64888f2",
-      "transcript": "I have a question about the pre-wash cycle on my dishwasher because the user manual isn't clear on whether I should be using detergent for that part of the",
+      "transcript": "I have a question about the pre-wash cycle on my dishwasher because the user manual isn't clear on whether I should be using detergent for the part of the",
       "duration_sec": 8.477313,
       "speech_end_offset_ms": 7684.0,
       "sample_id": "1e993cf8-6b73-8570-12d7-6e0aabb5354d"
@@ -1440,7 +1432,7 @@
     {
       "path": "audio/0180.wav",
       "sha256": "38755f13952e931b31c53aedfed95aa890b2e262de7a871437bf7e80ba239dd9",
-      "transcript": "I have an appointment with the dentist tomorrow at 2:00 p.m. but something has come up at work and I need to see if it's possible to reschedule it for some time",
+      "transcript": "I have an appointment with a dentist tomorrow at 2 PM, but something has come up at work and I need to see if it's possible to reschedule it for some time",
       "duration_sec": 12.674625,
       "speech_end_offset_ms": 11940.0,
       "sample_id": "73f3fe76-c269-eaf3-1250-7f2c7f607e42"
@@ -1484,14 +1476,6 @@
       "duration_sec": 12.19175,
       "speech_end_offset_ms": 11460.0,
       "sample_id": "589e2aee-ef26-15b2-7fc0-b72dfa85ae98"
-    },
-    {
-      "path": "audio/0186.wav",
-      "sha256": "349a6aeef74e8c28c9e5c888d49f22bfd012d653402b9adb942d5cf166718012",
-      "transcript": "I have an upcoming trip to Europe next month and I need to inform my bank so that they don't flag my credit card for unusual activity while I'm traveling aboard",
-      "duration_sec": 9.254,
-      "speech_end_offset_ms": 8484.0,
-      "sample_id": "989bf9c5-b087-994b-3b65-ff2dd43a5b00"
     },
     {
       "path": "audio/0187.wav",
@@ -1896,7 +1880,7 @@
     {
       "path": "audio/0237.wav",
       "sha256": "ab273606aa7a0d24634d0c16874103a86534d8d784e950338a3cde5013298de0",
-      "transcript": "I need to find the best route to the airport for a 7:00 AM flight tomorrow, avoiding the main highway because I heard there's major construction happening there.",
+      "transcript": "I need to find the best route to the airport for a 7 a.m. flight tomorrow, avoiding the main highway because I heard there's major construction happening there.",
       "duration_sec": 9.970125,
       "speech_end_offset_ms": 9156.0,
       "sample_id": "381eb51f-21fb-8b09-ef66-a8937b11d74d"
@@ -2190,14 +2174,6 @@
       "sample_id": "ba91eab8-3074-c881-a627-2cf56038d65e"
     },
     {
-      "path": "audio/0274.wav",
-      "sha256": "953bd5f42c75f4830d803e9b08d03991ca0a49a7d6f2e06f478cfb4f473be17f",
-      "transcript": "I the third and final tip but cer",
-      "duration_sec": 3.068,
-      "speech_end_offset_ms": 3068.0,
-      "sample_id": "e469df66-a6a7-e9a4-bab2-b83c059fb14e"
-    },
-    {
       "path": "audio/0275.wav",
       "sha256": "dd935100a43ee108d18f84ca94cdb755ea9e8e90527db68761b648faa12cdc5d",
       "transcript": "I think I think I know kind of like how they're used to",
@@ -2304,7 +2280,7 @@
     {
       "path": "audio/0288.wav",
       "sha256": "6c4c31d8f94f5166a9d90c9d6207d52469b28960c1fbfcebabbb3a57ce0ed2bb",
-      "transcript": "I want to learn how to play the ukelela, can you suggest a good online resource or a mobile application for an absolute beginner with no prior musical instrument experience?",
+      "transcript": "I want to learn how to play the ukulela. Can you suggest a good online resource or a mobile application for an absolute beginner with no prior musical instrument experience?",
       "duration_sec": 11.036687,
       "speech_end_offset_ms": 10308.0,
       "sample_id": "969bfeb8-d95b-6050-2801-de67cf2d21e9"
@@ -2696,7 +2672,7 @@
     {
       "path": "audio/0337.wav",
       "sha256": "a8600520f9c115c1321e31f380c1ebc27ad43d9ce6d212d056bcfe732c40d28e",
-      "transcript": "I would like to know what the current wait time are at the local department of motor vehicle because my driver license is expire soon and I need to go on in",
+      "transcript": "I would like to know what the current wait time are at the local department of motor vehicle because my driver license is expired soon and I need to go on in",
       "duration_sec": 12.29775,
       "speech_end_offset_ms": 11524.0,
       "sample_id": "6418e6b7-ab95-52cb-848b-716470adc5e7"
@@ -2736,7 +2712,7 @@
     {
       "path": "audio/0342.wav",
       "sha256": "5f2f7e5626bf6c3309c1fef0cf64828430964acb7bbb52fc60110c63024ccccf",
-      "transcript": "I'd like a comprehensive explanation of how to properly set up a home composting system in my backyard including what materials are safe to include and what should be avoid",
+      "transcript": "I'd like a comprehensive explanation of how to properly set up a home composting system in my backyard. Including what materials are safe to include and what should be avoided.",
       "duration_sec": 13.161437,
       "speech_end_offset_ms": 12388.0,
       "sample_id": "cf39424c-577c-86ba-e3b6-eba9d4fe1b82"
@@ -2864,7 +2840,7 @@
     {
       "path": "audio/0358.wav",
       "sha256": "22be535c837a364dfa47d8ac4f1489068b249fd82c317a55c284d3a75ed57f98",
-      "transcript": "I'm calling about the warranty on my washing machine because it's started making a very loud clunking noise during the spin cycle and I want to know if a technician visit is covered or",
+      "transcript": "I'm calling about the warranty on my washing machine because it started making a very loud clunking noise during the spin cycle and I want to know if a technician visit is covered or",
       "duration_sec": 13.151813,
       "speech_end_offset_ms": 12356.0,
       "sample_id": "3405803a-a941-4a56-4f7e-bf9abec6f3f3"
@@ -2928,7 +2904,7 @@
     {
       "path": "audio/0366.wav",
       "sha256": "5b7eedb56e5a4cbe7e857d065f52f16df7e11dce4c2950b1fad0c11be82ed134",
-      "transcript": "I'm looking for a book I read a long time ago about a journeyer to the center of the earth but it is not the famous one by Jules Verne it is",
+      "transcript": "I'm looking for a book I read a long time ago about a journey to the center of the earth, but it is not the famous one by Julius Venue. It is...",
       "duration_sec": 12.667563,
       "speech_end_offset_ms": 11972.0,
       "sample_id": "1d1b8787-f156-3be6-d1b1-40d1f2663783"
@@ -3112,7 +3088,7 @@
     {
       "path": "audio/0389.wav",
       "sha256": "b3fc248d0e2eea85c8e4aa06e8ac0d5bff57afe7a033bea9ab5c1c4dd24037c9",
-      "transcript": "I'm planning a road trip along the Pacific Coast Highway from San Francisco to Los Angeles. Can you suggest some most sessscenic viewpoints, attractions, and places to eat along the way?",
+      "transcript": "I'm planning a road trip along the Pacific Coast Highway from San Francisco to Los Angeles. Can you suggest some must-see scenic viewpoints, attractions, and places to eat along the way?",
       "duration_sec": 13.6775,
       "speech_end_offset_ms": 12868.0,
       "sample_id": "74993fad-65ce-7709-b1f2-1f14b7a5eafd"
@@ -3136,7 +3112,7 @@
     {
       "path": "audio/0392.wav",
       "sha256": "481496694ce5f14eebb08eebc445a98510b978c8377501b895884368c12a108c",
-      "transcript": "I'm planning to surprise party and need ideas for the theme that will be appropriate for an adult in 50th birthday along with the suggestion for decoration food and entertainment",
+      "transcript": "I'm planning to surprise party and need ideas for a theme that would be appropriate for an adult in 50th birthday. Along with the suggestion for decoration, food, and entertainment.",
       "duration_sec": 13.346438,
       "speech_end_offset_ms": 12580.0,
       "sample_id": "2fd521b4-9b83-b391-869f-213f2c835e93"
@@ -3296,7 +3272,7 @@
     {
       "path": "audio/0412.wav",
       "sha256": "9f01a6963f59de5a6296e8c8564ab4b587954c45a021c503f387d151b7206b25",
-      "transcript": "I'm trying to create a complex spreadsheet to track my personal budget with formulas that automatically categorize my spending based on data from my bank statement but I'm not sure how",
+      "transcript": "I'm trying to create a complex spreadsheet to track my personal budget with formulas that automatically categorize my spending based on data from my bank statements, but I'm not sure how.",
       "duration_sec": 14.735625,
       "speech_end_offset_ms": 13924.0,
       "sample_id": "c8deca97-0209-428b-654e-c72757fa9023"
@@ -3352,7 +3328,7 @@
     {
       "path": "audio/0419.wav",
       "sha256": "1cb49ea14b985bdfa95979d21fd4b5b16653984268c2d94d43e0d0e1411a1245",
-      "transcript": "I'm trying to dispute a transaction from three weeks ago, but the automated system says that the window for disputes has closed, even though I was told I had 60 days.",
+      "transcript": "I'm trying to dispute a transaction from three weeks ago, but the automated system says that window for disputes has closed, even though I was told I had 60 days.",
       "duration_sec": 13.382188,
       "speech_end_offset_ms": 12612.0,
       "sample_id": "70918c03-3aea-0ddb-d1de-ab0ab2cc2348"
@@ -3622,14 +3598,6 @@
       "sample_id": "0a172920-fc59-f86e-1f68-21b9010a508f"
     },
     {
-      "path": "audio/0453.wav",
-      "sha256": "6e4205798c4c61b5d55d8821b3ae1b6ed29fdefefb44628fd441c7032a0099ce",
-      "transcript": "I'm trying to recognize all of my digital photos into albums but it's a very overwhelming task and I was hoping you could suggest some software or a method that could hel",
-      "duration_sec": 12.320063,
-      "speech_end_offset_ms": 11492.0,
-      "sample_id": "3f0e6d92-67db-39cb-8ae3-80f0c5824e44"
-    },
-    {
       "path": "audio/0454.wav",
       "sha256": "dcb9baf614bec44232e856dcecd6071a298dfbbf2448e8387945ee02bfce2726",
       "transcript": "I'm trying to redeem the gift card I received for my birthday, but your website keeps saying the code is invalid even though I am typing it exactly as it appears and",
@@ -3664,7 +3632,7 @@
     {
       "path": "audio/0458.wav",
       "sha256": "3c3a7ad9f8ece676687503157a254f0fcdb2d255fff14859a851fad5d8a95a03",
-      "transcript": "I'm trying to return an item I bought online but I've misplaced the original shipping label that came in the box and I need to know if you can",
+      "transcript": "I'm trying to return an item I bought online, but I misplaced the original shipping label that came in the box, and I need to know if you can",
       "duration_sec": 11.279687,
       "speech_end_offset_ms": 10468.0,
       "sample_id": "086978b2-e554-e5c7-ef76-d661345ca6c9"
@@ -4040,7 +4008,7 @@
     {
       "path": "audio/0505.wav",
       "sha256": "9bd7b6ea75996d7cc19b66065282fa7b714d66de88cca9f1305eccbf7fc8d718",
-      "transcript": "My car check engine light came on this morning. Could you list some of the most common reasons why this light might be activated in a modern vehicle today?",
+      "transcript": "My car's check engine light came on this morning. Could you list some of the most common reason why this light might be activated in a modern vehicle today?",
       "duration_sec": 9.586813,
       "speech_end_offset_ms": 8804.0,
       "sample_id": "0baa9ab9-ce29-b095-2b86-c1f58b690f3f"
@@ -4192,7 +4160,7 @@
     {
       "path": "audio/0524.wav",
       "sha256": "6ab12dde40f5367ad2129a3ed3557b15e1c7d92b8938f1f80c4ce7defd990371",
-      "transcript": "My flight has been unexpectedly cancelled and I need to find an alternate flight leaving today to the same destination even if it has a layover or is on another airline",
+      "transcript": "My flight has been unexpectedly cancelled, and I need to find an alternative flight leaving today to the same destination. Even if it has a layover, or or is on another airline.",
       "duration_sec": 14.324438,
       "speech_end_offset_ms": 13508.0,
       "sample_id": "c76feff6-284a-1692-cc3c-ca10562c51f3"
@@ -4240,7 +4208,7 @@
     {
       "path": "audio/0530.wav",
       "sha256": "b1fe49672f14f6be18feaa47dea9964f5d37e619052c203c9224e367d928b985",
-      "transcript": "My friend recommend a documentary about deep sea exploration but I can't remember the exact title of it only that its is released in the last few years and featured",
+      "transcript": "My friend recommend a documentary about deep sea exploration but I can't remember the exact title of it. Only that it's just released in the last few years and featured",
       "duration_sec": 12.739062,
       "speech_end_offset_ms": 11940.0,
       "sample_id": "6b3e93a2-e773-fdd2-e416-6689c9ed2699"
@@ -4312,7 +4280,7 @@
     {
       "path": "audio/0539.wav",
       "sha256": "4366854243e9c87dd0bbf4c1bbfef3f239e596aea093e22a1bd8571633634f1e",
-      "transcript": "My mortgage payment is due soon and I need to confirm the exact amount due and schedule the elec electronic payment from my primary checking account.",
+      "transcript": "My mortgage payment is due soon, and I need to confirm the exact amount due and schedule the electronic payment from my primary checking account.",
       "duration_sec": 10.884813,
       "speech_end_offset_ms": 10212.0,
       "sample_id": "22f6e93a-9b37-080d-9e43-40c20890017a"
@@ -4488,7 +4456,7 @@
     {
       "path": "audio/0561.wav",
       "sha256": "f87c678fdc4623ff198d2891d01ceabeb03ca62e8a860378fa4cf331626a8c17",
-      "transcript": "My property tax assessment seems much higher this year compared to last year and I want to understand the appeals process in the case I decide to formally challenge the new valuation but",
+      "transcript": "My property tax assessment seemed much higher this year compared to last year, and I want to understand appeals process in the case I decide to formally challenge the new valuation. But",
       "duration_sec": 12.600875,
       "speech_end_offset_ms": 11844.0,
       "sample_id": "d68d45e1-f8f9-89eb-74fd-c3ce834d46e9"
@@ -4584,7 +4552,7 @@
     {
       "path": "audio/0573.wav",
       "sha256": "28156ddac24000de6ff03c451821e8eb3f7444eb7368708a921e3771a295241b",
-      "transcript": "My smartwatch is failing to sync my recent workout data with the app on my phone and I've already tried restarting both of the",
+      "transcript": "My smartwatch is failing to sync my recent workout data with the app on my phone, and I've already tried restarting both of them.",
       "duration_sec": 7.630375,
       "speech_end_offset_ms": 6820.0,
       "sample_id": "dcfccffe-a592-af40-6a3e-f88c65b0c837"
@@ -4608,7 +4576,7 @@
     {
       "path": "audio/0576.wav",
       "sha256": "c4e941c753e39fa4e8058553afd415ffe949431728546e18f3305d489807b58e",
-      "transcript": "My smoke detector started chirping intermittently last night and I would like to know what this unusual indicates and how I should go about fixing the problem",
+      "transcript": "My smoke detector started chirping intermittently last night, and I would like to know what this sound usually indicates and how I should go about fixing the problem.",
       "duration_sec": 10.643062,
       "speech_end_offset_ms": 9860.0,
       "sample_id": "b9c2ca23-d52c-a814-9d46-bbea97c1e284"
@@ -4632,7 +4600,7 @@
     {
       "path": "audio/0579.wav",
       "sha256": "3cbf3ac5f1bc0a256d69ab936c535ebeaa131ccb648293276d3bebf4f592285f",
-      "transcript": "My video service is constantly buffering and showing a low quality picture even though my internet speed test shows a very fast and stable connection. What could be causing this?",
+      "transcript": "My streaming video service is constantly buffering and showing a low quality picture, even though my internet speed test shows a very fast and stable connection. What could be causing this?",
       "duration_sec": 12.412125,
       "speech_end_offset_ms": 11652.0,
       "sample_id": "a527441e-14d4-a44d-1c60-7e0352e7624b"
@@ -4904,7 +4872,7 @@
     {
       "path": "audio/0613.wav",
       "sha256": "e5da296095175881342426911f164f8b0086a97b2d4675c0564726b87857d169",
-      "transcript": "Please find the most up-to-date public transportation schedule for the downtown bus route including any recent changes or detours that might affect my commute to work tomorrow morning.",
+      "transcript": "Please find the most up-to-date public transportation schedule for downtown bus route, including any recent changes or detours that might affect my commute to work tomorrow morning.",
       "duration_sec": 12.399313,
       "speech_end_offset_ms": 11620.0,
       "sample_id": "aac8759a-3cdf-8839-335d-5a185768e6c4"
@@ -5320,7 +5288,7 @@
     {
       "path": "audio/0665.wav",
       "sha256": "9cfcbb875884d879c85afd122fa94db0d0a0200a1f5e63d4a1216d7035b74787",
-      "transcript": "That being said, there were a couple times where I was like holy crap this spicy tuna roll p",
+      "transcript": "That being said, there were a couple times where I was like, holy crap, this spicy tuna roll paired",
       "duration_sec": 4.287,
       "speech_end_offset_ms": 4287.0,
       "sample_id": "ca2f2a84-30fb-37f1-9f2a-4af0ca73410a"
@@ -5336,7 +5304,7 @@
     {
       "path": "audio/0667.wav",
       "sha256": "38932431a5304c040cc5d2d4414134f10fdfd0ac5afb575e9edaf0ae88c338ca",
-      "transcript": "That's four staff total at forty-five dollars p",
+      "transcript": "That's four staff total at forty five dollars per",
       "duration_sec": 3.251,
       "speech_end_offset_ms": 3251.0,
       "sample_id": "08197272-47ab-230c-6a71-3b75c7db5753"
@@ -5398,28 +5366,12 @@
       "sample_id": "dac19c66-0a3f-966b-299f-e4800cded3ea"
     },
     {
-      "path": "audio/0675.wav",
-      "sha256": "6fe95199d73fe513c8fa685feff8d067d817828ea66d056ad83e12c6c2a60aeb",
-      "transcript": "The checkout page for my online grocery order keeps freezing every time I try to select a delivery window. I've already tried using a different device.",
-      "duration_sec": 11.447563,
-      "speech_end_offset_ms": 10756.0,
-      "sample_id": "21ae428e-3746-7321-84d9-8d350053c375"
-    },
-    {
       "path": "audio/0676.wav",
       "sha256": "d7cf0d1882677fe95c2d8eb04096b16b135c3978d69bd9971badc70aa81184b8",
       "transcript": "The checkout process on this website is not working. Every time I click the proceed to payment button, it just reloads the shopping cart page and doesn't move forward. So I can't complete",
       "duration_sec": 11.068125,
       "speech_end_offset_ms": 10244.0,
       "sample_id": "43fb812d-8133-9f09-a3d3-5009b4f0a8c0"
-    },
-    {
-      "path": "audio/0677.wav",
-      "sha256": "04a41ceb29db967ff4f0f09bd78d2d3c6c0e1aac1e0c6239c6feb1fc212c4ad5",
-      "transcript": "The depth of the Pacific Ocean as its deepest point is er",
-      "duration_sec": 6.909375,
-      "speech_end_offset_ms": 6909.4,
-      "sample_id": "41a3843e-b0b8-ea1c-18bc-53417c929043"
     },
     {
       "path": "audio/0678.wav",
@@ -5624,7 +5576,7 @@
     {
       "path": "audio/0703.wav",
       "sha256": "bc1951b756a9878c5c6eaa20b6c387d48e40586188238de3b6d94ada63b35087",
-      "transcript": "The primary video streaming application on my smarts television has started buffering every few minutes, although a network speed test shows my internet connection is currently wor working perfectly fine and",
+      "transcript": "The primary video streaming application on my smart television has started buffering every few minutes. Although a network speed test shows my internet connection is currently working perfectly fine, and",
       "duration_sec": 14.310688,
       "speech_end_offset_ms": 13604.0,
       "sample_id": "0a567068-6833-af18-fb44-8584bd199345"
@@ -5696,18 +5648,10 @@
     {
       "path": "audio/0712.wav",
       "sha256": "7b0eb50dbeca19f7498cfc0d63b7ca529e0c1e4e0daf4d8ff213dc6f711af7ac",
-      "transcript": "The smart lightbulb in my living room has started flickering randomly over the past couple of days and it's not the bulb itself because I swapped it with another one so",
+      "transcript": "The smart light bulb in my living room has started flickering randomly over the past couple of days, and it's not the bulb itself because I swapped it with another one, so",
       "duration_sec": 12.264625,
       "speech_end_offset_ms": 11460.0,
       "sample_id": "fd606b3a-e18e-a01a-5329-64cec54575a3"
-    },
-    {
-      "path": "audio/0713.wav",
-      "sha256": "ae42d0b281737b78ca9aa83cb3c7b3cd9a125129c21337fcfdb2d8d088904527",
-      "transcript": "The smoke detector in my hallway is chirping every thirty seconds and I already perplaced the battery with a brand new one but the annoying sound has not stopped at all.",
-      "duration_sec": 10.714875,
-      "speech_end_offset_ms": 9924.0,
-      "sample_id": "7bbe5b67-892c-c11c-e052-882af12aee4e"
     },
     {
       "path": "audio/0714.wav",
@@ -5776,7 +5720,7 @@
     {
       "path": "audio/0722.wav",
       "sha256": "ac9b3c62ca0239fcf05f8dbf3d4ae56f7dc24ac3e528c35843b5cfa5672370e3",
-      "transcript": "The warranty on my laptop is about to expire next month and I have been noticing that the battery life has been significantly decreasing lately so I was wondering what",
+      "transcript": "The warranty on my laptop is about expired next month, and I never been noticing that the battery life has been significantly decreasing lately. So I was wondering, what",
       "duration_sec": 13.1985,
       "speech_end_offset_ms": 11652.0,
       "sample_id": "5a02f4db-3b66-b579-0322-c47c54cf120c"
@@ -6030,14 +5974,6 @@
       "sample_id": "f9ea0c50-ed77-df9a-d4fb-a70424dd5b4a"
     },
     {
-      "path": "audio/0754.wav",
-      "sha256": "245f75677f6b05ccadffaf93dcdae0271fd61492ed2042495c365c20c750cd2f",
-      "transcript": "We we generally charge per square foot and generally it's at least a hundred square feet so we could give a rough es-",
-      "duration_sec": 5.636,
-      "speech_end_offset_ms": 5636.0,
-      "sample_id": "7d0b2f38-f47d-6c22-7ffd-1fe156d3919d"
-    },
-    {
       "path": "audio/0755.wav",
       "sha256": "c270d2407f97cbd41410072b223224b3bdaf120c484ee3348e0a1be7ad9312be",
       "transcript": "We're planning a trip to see the northern lights and we're trying to figure out the best time of year to go for maximum visibility and also which locations are recommended because",
@@ -6254,14 +6190,6 @@
       "sample_id": "f747e9b5-dbfb-9d49-6c73-6a95c0ac8c51"
     },
     {
-      "path": "audio/0782.wav",
-      "sha256": "a98576ff5ae65e0a2b3c657415771039201cf350d358b90da35ea848ca09dbe4",
-      "transcript": "What is the standard protocol for escalating customer service complaints when I feel the initiative, so",
-      "duration_sec": 6.523,
-      "speech_end_offset_ms": 5700.0,
-      "sample_id": "8b279051-2729-bca5-2caf-d864e2f16e60"
-    },
-    {
       "path": "audio/0783.wav",
       "sha256": "37af1105b7aa8c39f58b5e36211fb7428f1343b56d4132813bc17ed3932ddc47",
       "transcript": "What is the theory of plate tectonics",
@@ -6320,7 +6248,7 @@
     {
       "path": "audio/0790.wav",
       "sha256": "6e3efd3f559147536f61deeb8f3afdec7356c7d6dd7123de616e4b278f300f89",
-      "transcript": "What's on sale in the electronics depart",
+      "transcript": "What's on sale in the electronics department?",
       "duration_sec": 3.057437,
       "speech_end_offset_ms": 2756.0,
       "sample_id": "366a995b-7fa5-d8d5-cf79-4cb34fc19abd"
@@ -6520,7 +6448,7 @@
     {
       "path": "audio/0815.wav",
       "sha256": "48467fb283dbaf90e54beeae55da0dc6a201034316fcd741ad27263264da11d2",
-      "transcript": "You'll have peace of mind knowing Ralph is covered for both acci-",
+      "transcript": "You'll have peace of mind knowing Ralph is covered for both acts.",
       "duration_sec": 3.635,
       "speech_end_offset_ms": 3635.0,
       "sample_id": "96cb7d51-a59e-a54d-6776-f94a1404457a"
@@ -6646,17 +6574,9 @@
       "sample_id": "95ef2dc3-7b3b-f502-e5ce-cd133e04bcc5"
     },
     {
-      "path": "audio/0831.wav",
-      "sha256": "3f3c29a0bc4ec781db08aafa478be108ccf179714570bb813271645b6a2cb584",
-      "transcript": "dollar adoption fee covers Cooper's complete set of vaction",
-      "duration_sec": 4.245,
-      "speech_end_offset_ms": 4245.0,
-      "sample_id": "a9cff83d-43a1-4e6e-3800-bd1ee8efef93"
-    },
-    {
       "path": "audio/0832.wav",
       "sha256": "eb62eaeaf32e3558feac7037455a44b579c019ccd709bc842c1a913864dd3c5a",
-      "transcript": "familiar with where you I I also have been through the part of the country where you live",
+      "transcript": "clear with where you... I I I also have been through the part of the country where you live",
       "duration_sec": 4.739,
       "speech_end_offset_ms": 4739.0,
       "sample_id": "45908b00-1728-3f5b-9081-1ef9609cc976"
@@ -6680,7 +6600,7 @@
     {
       "path": "audio/0835.wav",
       "sha256": "6b364cf3e4dd166580fc1a3d1b03920b92050d2996e688c5bbaa6e6fce764b2d",
-      "transcript": "floor so no balcony and then we only had two king sized beds",
+      "transcript": "So no balcony. And then we only had two king-size beds.",
       "duration_sec": 4.057,
       "speech_end_offset_ms": 4057.0,
       "sample_id": "46656e19-2f59-8aed-ac81-d4eda61df945"
@@ -6720,7 +6640,7 @@
     {
       "path": "audio/0840.wav",
       "sha256": "4fae472e4fe3ae2735ab7a7481368e73df0815ba39c2df5b477d00e9331eaec7",
-      "transcript": "in so anytime I cook something and it's like room temperature",
+      "transcript": "So anytime I cook something and it's like room temperature.",
       "duration_sec": 3.04,
       "speech_end_offset_ms": 3040.0,
       "sample_id": "b8058056-97c0-557e-2f00-614f094edd23"
@@ -6734,14 +6654,6 @@
       "sample_id": "951a041f-12d5-6f0c-9494-2ff611d32f46"
     },
     {
-      "path": "audio/0842.wav",
-      "sha256": "a1578e36f91837143b3a0a0c8002f137076566893c05bda89d1cf2d7bdaaa1bb",
-      "transcript": "ing that I'm going to be safe in this brank banking fraud uh",
-      "duration_sec": 3.135,
-      "speech_end_offset_ms": 3135.0,
-      "sample_id": "fee3eebb-8f0a-6852-af2c-872c9aaa9d06"
-    },
-    {
       "path": "audio/0843.wav",
       "sha256": "9ec3fd8323285787d8fd20ed7180932f9ccfe013f233ad0c5619aa107254c27b",
       "transcript": "initiate the self-cleaning mode on the oven",
@@ -6750,17 +6662,9 @@
       "sample_id": "64d2a4f8-3b38-2729-128b-a07bc241d812"
     },
     {
-      "path": "audio/0844.wav",
-      "sha256": "97349bfeade5a469a635b2d97585a359804eb43a909b3ae5d9102a4b253266d5",
-      "transcript": "is the battle of living in modern society there's so many different ing",
-      "duration_sec": 3.548,
-      "speech_end_offset_ms": 3548.0,
-      "sample_id": "550bfb57-9805-d253-2cfe-c3fea6f1a55e"
-    },
-    {
       "path": "audio/0845.wav",
       "sha256": "0fe724c9ac2ec34ca2f505bc10c512d06b7984b14c16613a0d009ac032f11885",
-      "transcript": "is this cheese on everything she goes yeah I'm like I can't do it I just can't like I just it's not",
+      "transcript": "Is this cheese on everything? She goes, yeah. I'm like, I can't do it. I just can't. Like, it just is not.",
       "duration_sec": 5.034,
       "speech_end_offset_ms": 5034.0,
       "sample_id": "551411c2-803d-494a-e35d-08f712bbfd70"
@@ -6772,14 +6676,6 @@
       "duration_sec": 7.04,
       "speech_end_offset_ms": 7040.0,
       "sample_id": "f34c2c17-d84e-1175-831a-a1a7e4bfa0a8"
-    },
-    {
-      "path": "audio/0847.wav",
-      "sha256": "5654e3eb2bd061047ac53d261ab730a6ab51c027f07f2e94a0b76967d9f1ffd1",
-      "transcript": "it's on your social media do we still have pictures of those posted some",
-      "duration_sec": 3.286,
-      "speech_end_offset_ms": 3286.0,
-      "sample_id": "c43432b2-2b4b-1edc-503a-76f3db51baca"
     },
     {
       "path": "audio/0848.wav",
@@ -6936,7 +6832,7 @@
     {
       "path": "audio/0867.wav",
       "sha256": "7b927c6906a308c87ebbbdacb931ae23e140616e013400e44297a29623c3790b",
-      "transcript": "react to that new thing and a lot of comics and shows tr",
+      "transcript": "react to that new thing. And a lot of comics and shows",
       "duration_sec": 3.346,
       "speech_end_offset_ms": 3346.0,
       "sample_id": "035025c0-d31f-a917-bdaf-ec2b8aa1e6ae"
@@ -6968,7 +6864,7 @@
     {
       "path": "audio/0871.wav",
       "sha256": "bbbb1e5a5de97b93d87fd5c9058bb693a33928fd4e18a760bc65beb22c9d10c5",
-      "transcript": "s if there are any good scary movies coming out this summer I haven't done any research to s",
+      "transcript": "If there are any good scary movies coming out this summer, I haven't done any research to see.",
       "duration_sec": 5.04,
       "speech_end_offset_ms": 5040.0,
       "sample_id": "da9a0712-74ec-4d0f-3297-2ac627528fbd"
@@ -7008,7 +6904,7 @@
     {
       "path": "audio/0876.wav",
       "sha256": "0d3431e2f93b53f67aaa91ae5ac59a7ecfc411b915d5c80745a65a5bf9a51d62",
-      "transcript": "ship fee to keep your access to backup power available t-",
+      "transcript": "Ship fee to keep your access to backup power available.",
       "duration_sec": 3.386,
       "speech_end_offset_ms": 3386.0,
       "sample_id": "11519378-0408-b9fe-efa0-592e995766f1"
@@ -7046,14 +6942,6 @@
       "sample_id": "d380826a-e600-b92e-6c3e-d072d3c8078b"
     },
     {
-      "path": "audio/0881.wav",
-      "sha256": "99ec9ccdab8f49ec0b9861e1c2311bd4ba77eea53df3e63c37704a9363380a4a",
-      "transcript": "that you can apply but it's usually not significant it's maybe like you know ten per-",
-      "duration_sec": 4.221,
-      "speech_end_offset_ms": 4221.0,
-      "sample_id": "39bebd69-9f40-e927-fdf1-97e1bca82c42"
-    },
-    {
       "path": "audio/0882.wav",
       "sha256": "f69418546989029ee9fa842daf37304fe7da7bac4765452c2a0cfe1401253567",
       "transcript": "the um aren't the um",
@@ -7088,7 +6976,7 @@
     {
       "path": "audio/0886.wav",
       "sha256": "ea079f58ff06e9d0af0c64a2a777bf1804e018fa7c4bd5bce2a9a340d9da3012",
-      "transcript": "to are uh I'm sorry for that frustration I'll do everything I can to try",
+      "transcript": "you are. Uh, I'm sorry for that frustration. I'll do everything I can to try to",
       "duration_sec": 5.041,
       "speech_end_offset_ms": 5041.0,
       "sample_id": "7eb2d947-69ae-a79f-d0b6-1c127057f19a"
@@ -7100,14 +6988,6 @@
       "duration_sec": 5.058,
       "speech_end_offset_ms": 5058.0,
       "sample_id": "f948d20f-d3e2-4b18-ab5e-241588700b69"
-    },
-    {
-      "path": "audio/0888.wav",
-      "sha256": "2c0353c62f25d2ea658ef91c0544716db3f2c17b48fe2fd2c75eaae5381b9cb5",
-      "transcript": "to the survey a little bit um something a little bit I'm going to take you off course a little bit from what we were just tal",
-      "duration_sec": 5.659,
-      "speech_end_offset_ms": 5659.0,
-      "sample_id": "a6e76108-8f41-5b12-ff3d-d6ca17365834"
     },
     {
       "path": "audio/0889.wav",
@@ -7144,7 +7024,7 @@
     {
       "path": "audio/0893.wav",
       "sha256": "8e9af145940907d5c26271e2d8b3d1b1d4a61ae6f6a8a076b2714423233759b9",
-      "transcript": "you don't need to have a team of people to work on the same case it's usual",
+      "transcript": "You don't need to have a team of people to work on the same case. It's usually.",
       "duration_sec": 3.012,
       "speech_end_offset_ms": 3012.0,
       "sample_id": "c75ab615-d7ac-629a-c706-502de1ffceba"
@@ -7160,7 +7040,7 @@
     {
       "path": "audio/0895.wav",
       "sha256": "2cde23d0d2c6119f9d0e911c9c7049adaad37e4e9ce619aecde4f01c6a0519e3",
-      "transcript": "you have to do on the weekend sometimes that take up your time",
+      "transcript": "You have to do on the weekend sometime that take up your time.",
       "duration_sec": 3.046,
       "speech_end_offset_ms": 3046.0,
       "sample_id": "ac83cb3b-d328-12c7-a4f7-ae54ce286ede"
