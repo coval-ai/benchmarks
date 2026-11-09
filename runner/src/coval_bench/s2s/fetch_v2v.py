@@ -519,6 +519,7 @@ async def fetch_and_write_v2v(
         elif benchmark is Benchmark.S2S:
             specs = (*specs, *platform_specs(settings, models))
         registered = frozenset((m.provider, m.model) for m in models)
+        retired = frozenset((m.provider, m.model) for m in models if not m.collected)
         writer = RunWriter(pool)
         from coval_bench.runner.capture import preflight_capture_storage
 
@@ -543,6 +544,9 @@ async def fetch_and_write_v2v(
                     model=spec.model,
                     fix="add the registry row (published=false) before enabling this agent",
                 )
+                continue
+            if only_run_ids is None and (spec.provider, spec.model) in retired:
+                logger.info("model_not_collected", provider=spec.provider, model=spec.model)
                 continue
             # An agent on its own test set is skipped when that id is missing rather
             # than falling back to the shared one, which would file its runs under
