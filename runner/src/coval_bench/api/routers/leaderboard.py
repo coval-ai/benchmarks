@@ -59,8 +59,8 @@ _VALID_COMBOS: set[tuple[str, str]] = {
     ("TTFT", "LLM"),
 }
 
-# Each board's headline dataset comes from ``scenarios.HEADLINE``. Every other
-# dataset (the still-fetched bank set, frozen dental and multi-turn) stays
+# Each board's headline dataset comes from ``scenarios.headline_dataset`` (S2S pools
+# every workflow-bank caller). Every other dataset (frozen bank, dental and multi-turn) stays
 # reachable through the aggregates ``dataset`` param, as does ``__all__`` for
 # callers that want every S2S condition pooled.
 _PRIMARY_DATASET_BY_BENCHMARK = {

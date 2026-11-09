@@ -118,8 +118,9 @@ async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any)
 async def test_s2s_leaderboard_uses_the_headline_dataset(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    """The headline S2S board is the workflow set; the old bank and dental rows stay out."""
+    """The S2S headline pools every workflow condition; old bank and dental rows stay out."""
     primary_run = await _insert_run(postgresql, dataset_id="s2s-workflow-bank-v1")
+    hard_run = await _insert_run(postgresql, dataset_id="s2s-workflow-bank-hard-v1")
     other_runs = {
         dataset_id: await _insert_run(postgresql, dataset_id=dataset_id)
         for dataset_id in ("s2s-bank-v1", "s2s-dental-v1")
@@ -133,6 +134,16 @@ async def test_s2s_leaderboard_uses_the_headline_dataset(
         metric_type="V2V",
         benchmark="S2S",
         dataset_id="s2s-workflow-bank-v1",
+    )
+    await _insert_value(
+        postgresql,
+        hard_run,
+        1600.0,
+        provider="openai",
+        model="gpt-realtime",
+        metric_type="V2V",
+        benchmark="S2S",
+        dataset_id="s2s-workflow-bank-hard-v1",
     )
     for dataset_id, run in other_runs.items():
         await _insert_value(
@@ -150,9 +161,10 @@ async def test_s2s_leaderboard_uses_the_headline_dataset(
     response = await client.get("/v1/leaderboard", params={"metric": "V2V", "benchmark": "S2S"})
 
     assert response.status_code == 200
-    assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == [
-        ("openai", "gpt-realtime")
-    ]
+    entries = response.json()["entries"]
+    assert [(e["provider"], e["model"]) for e in entries] == [("openai", "gpt-realtime")]
+    assert entries[0]["p50"] == 1400.0
+    assert entries[0]["n"] == 2
 
 
 async def test_ttft_llm_uses_the_bank_primary_dataset(client: AsyncClient, postgresql: Any) -> None:

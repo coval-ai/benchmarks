@@ -52,6 +52,7 @@ __all__ = [
     "DatasetMetrics",
     "condition_for",
     "dataset_id_for",
+    "pooled_dataset_id",
     "room_dataset_id",
     "scenario_dataset_id",
     "scenario_family",
@@ -103,6 +104,8 @@ ADHERENCE_SLUGS: dict[str, Metric] = {
     "instruction-bank": Metric.INSTRUCTION_FOLLOWING,
     "workflow-bank": Metric.WORKFLOW_ADHERENCE,
 }
+# Migration 20261107_0049's ``benchmarks_v2.pooled_dataset_id`` keeps its own copy of
+# these slugs, tiers and rooms; adding one needs a migration that recreates it.
 SCENARIO_SLUGS: tuple[str, ...] = (*_DOMAIN_SLUGS, *ADHERENCE_SLUGS)
 TIERS: tuple[Condition, ...] = (
     Condition.LOW,
@@ -236,6 +239,15 @@ def _ingested_id(slug: str, condition: Condition) -> str:
     if dataset_id is None:
         raise ValueError(f"scenario {slug!r} never runs {condition!r}")
     return dataset_id
+
+
+def pooled_dataset_id(slug: str, version: int = 1) -> str:
+    """Every condition of *slug*'s test-set *version* read as one dataset.
+
+    Never written by the fetch: the database function ``benchmarks_v2.pooled_dataset_id``
+    pools the window views and rollups under this id.
+    """
+    return f"{scenario_family(slug)}-all-conditions-v{version}"
 
 
 # Background noise sits in the lane Silero VAD uses for turn boundaries, so V2V

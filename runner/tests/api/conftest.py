@@ -296,6 +296,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(pooled_only, "op", SimpleNamespace(execute=conn.execute)):
             pooled_only.upgrade()
+        pooled_workflow = import_module(
+            "coval_bench.db.migrations.versions.20261107_0049_pool_s2s_conditions"
+        )
+        with patch.object(pooled_workflow, "op", SimpleNamespace(execute=conn.execute)):
+            pooled_workflow.upgrade()
         # Model/tag registry tables (mirrors migration 20260824_0020).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.models (
