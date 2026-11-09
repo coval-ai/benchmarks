@@ -22,6 +22,7 @@ import structlog
 from google.cloud import storage
 
 from coval_bench import scenarios
+from coval_bench.alerts import coval_error_text, publish_coval_failure
 from coval_bench.config import Settings, get_settings, require_capture_bucket
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.models import (
@@ -219,6 +220,7 @@ async def _fetch_one_provider(
     artifact_bucket: str = "",
     workspace_id: str | None = None,
     unmapped_personas: dict[str, int] | None = None,
+    coval_errors: dict[tuple[str, str, str], str] | None = None,
 ) -> tuple[RunStatus, int]:
     """Scan the window and ingest every clean, not-yet-ingested run.
 
@@ -366,7 +368,13 @@ async def _fetch_one_provider(
             sampled_runs.extend(candidates.values())
         return _aggregate_status(statuses), len(statuses)
     except Exception as exc:
-        logger.warning("provider_fetch_failed", provider=spec.provider, error=str(exc))
+        if isinstance(exc, httpx.HTTPError):
+            error = coval_error_text(exc)
+            if coval_errors is not None:
+                coval_errors[(spec.family, spec.provider, spec.model)] = error
+        else:
+            error = str(exc)
+        logger.warning("provider_fetch_failed", provider=spec.provider, error=error)
         return RunStatus.FAILED, len(statuses)
 
 
@@ -464,6 +472,7 @@ async def fetch_and_write_v2v(
     window_seconds: int | None = None,
     page_size: int = WINDOW_PAGE_SIZE,
     llm_agent_ids: Mapping[str, str] | None = None,
+    coval_errors: dict[tuple[str, str, str], str] | None = None,
 ) -> dict[str, RunStatus]:
     """Ingest the selected benchmark's providers; return per-provider status.
 
@@ -598,6 +607,7 @@ async def fetch_and_write_v2v(
                 artifact_bucket=artifact_bucket,
                 workspace_id=spec_workspace_id,
                 unmapped_personas=unmapped_personas,
+                coval_errors=coval_errors,
             )
             total_ingested += ingested
 
@@ -703,6 +713,7 @@ def _run_fetch(
         if benchmark is Benchmark.S2S:
             settings = with_scenario_map(settings)
         only_run_ids = frozenset(coval_run_ids) or None
+        coval_errors: dict[tuple[str, str, str], str] = {}
         statuses = asyncio.run(
             fetch_and_write_v2v(
                 settings,
@@ -711,6 +722,7 @@ def _run_fetch(
                 window_seconds=window_hours * 3600 if only_run_ids else None,
                 page_size=page_size if only_run_ids else WINDOW_PAGE_SIZE,
                 llm_agent_ids=llm_agent_ids,
+                coval_errors=coval_errors,
             )
         )
     except Exception as exc:
@@ -728,6 +740,16 @@ def _run_fetch(
         raise click.ClickException(f"{label} failed for all providers")
     if failed:
         log_run_partial(f"{label} has no fresh data from: {', '.join(failed)}")
+    for (scenario, provider, model), error in coval_errors.items():
+        publish_coval_failure(
+            settings.alerts_topic,
+            job=f"{benchmark.value.lower()}-fetch",
+            failure="api_request",
+            error=error,
+            scenario=scenario,
+            provider=provider,
+            model=model,
+        )
 
 
 @click.command(name="fetch-s2s")

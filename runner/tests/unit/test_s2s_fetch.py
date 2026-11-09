@@ -2595,6 +2595,81 @@ def test_cli_all_failed_alerts_failed_exit_nonzero(monkeypatch: pytest.MonkeyPat
     assert "RUN_PARTIAL" not in events
 
 
+def _run_fetch_with_coval_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    statuses: dict[str, RunStatus],
+    errors: dict[tuple[str, str, str], str],
+) -> tuple[int, list[dict[str, object]]]:
+    async def fake_fetch(_settings: Settings, **kwargs: object) -> dict[str, RunStatus]:
+        coval_errors = kwargs["coval_errors"]
+        assert isinstance(coval_errors, dict)
+        coval_errors.update(errors)
+        return statuses
+
+    published: list[dict[str, object]] = []
+    settings = Settings.model_construct(log_level="INFO", alerts_topic="projects/p/topics/alerts")
+    monkeypatch.setattr(fetch_v2v, "fetch_and_write_v2v", fake_fetch)
+    monkeypatch.setattr(fetch_v2v, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        fetch_v2v,
+        "publish_coval_failure",
+        lambda topic, **card: published.append({"topic": topic, **card}),
+    )
+    monkeypatch.setattr("coval_bench.logging.configure_logging", lambda level: None)
+    result = CliRunner().invoke(fetch_v2v.fetch_s2s, [])
+    return result.exit_code, published
+
+
+def test_cli_posts_one_coval_card_per_failed_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    code, published = _run_fetch_with_coval_errors(
+        monkeypatch,
+        {
+            "s2s-bank:openai:gpt-live-1": RunStatus.SUCCEEDED,
+            "s2s-bank:google:gemini-3.8-live": RunStatus.FAILED,
+            "s2s-bank:xai:grok-voice-3.0": RunStatus.FAILED,
+        },
+        {
+            ("s2s-bank", "google", "gemini-3.8-live"): "HTTPStatusError 503",
+            ("s2s-bank", "xai", "grok-voice-3.0"): "ConnectTimeout",
+        },
+    )
+
+    assert code == 0
+    assert published == [
+        {
+            "topic": "projects/p/topics/alerts",
+            "job": "s2s-fetch",
+            "failure": "api_request",
+            "error": "HTTPStatusError 503",
+            "scenario": "s2s-bank",
+            "provider": "google",
+            "model": "gemini-3.8-live",
+        },
+        {
+            "topic": "projects/p/topics/alerts",
+            "job": "s2s-fetch",
+            "failure": "api_request",
+            "error": "ConnectTimeout",
+            "scenario": "s2s-bank",
+            "provider": "xai",
+            "model": "grok-voice-3.0",
+        },
+    ]
+
+
+def test_cli_posts_no_coval_card_when_every_provider_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    code, published = _run_fetch_with_coval_errors(
+        monkeypatch,
+        {"s2s-bank:google:gemini-3.8-live": RunStatus.FAILED},
+        {("s2s-bank", "google", "gemini-3.8-live"): "HTTPStatusError 503"},
+    )
+
+    assert code != 0
+    assert published == []
+
+
 def test_cli_no_providers_alerts_failed_exit_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
     code, events = _run_fetch_cli(monkeypatch, {})
     assert code != 0
