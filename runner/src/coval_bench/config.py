@@ -344,6 +344,7 @@ class Settings(BaseSettings):
     s2s_stale_grace_seconds: int = Field(default=0, ge=0)
     # Public bucket for per-tick sample recordings; empty disables sampling.
     s2s_samples_bucket: str = ""
+    alerts_topic: str = ""
 
     # --- Analytics ---
     posthog_project_token: str = ""
