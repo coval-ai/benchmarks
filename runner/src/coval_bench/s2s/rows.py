@@ -22,7 +22,7 @@ logger = structlog.get_logger("coval_bench.s2s.rows")
 ValueMapper = Callable[[object], tuple[float | None, ResultStatus] | None]
 
 
-def numeric(scale: float = 1.0, digits: int | None = None) -> ValueMapper:
+def numeric_value(scale: float = 1.0, digits: int | None = None) -> ValueMapper:
     """A numeric Coval value times *scale*, rounded to *digits*; anything else is a FAILED row."""
 
     def value(raw: object) -> tuple[float | None, ResultStatus]:
@@ -101,13 +101,13 @@ def instruction_value(raw: object) -> tuple[float | None, ResultStatus] | None:
 # The only per-metric part: one raw Coval value -> (row value, status), or None to
 # write no row. A metric is ingestable once it appears here.
 VALUE_MAPPERS: dict[Metric, ValueMapper] = {
-    Metric.V2V: numeric(1000, digits=1),
+    Metric.V2V: numeric_value(1000, digits=1),
     Metric.INSTRUCTION_FOLLOWING: instruction_value,
-    Metric.INTERRUPTION_RATE: numeric(),
-    Metric.CALL_LENGTH: numeric(),
+    Metric.INTERRUPTION_RATE: numeric_value(),
+    Metric.CALL_LENGTH: numeric_value(),
     Metric.WORKFLOW_ADHERENCE: instruction_value,
-    Metric.CHARACTER_ERROR_RATE: numeric(100),
-    Metric.TOOL_CALL_COUNT: numeric(),
+    Metric.CHARACTER_ERROR_RATE: numeric_value(100),
+    Metric.TOOL_CALL_COUNT: numeric_value(),
 }
 
 
