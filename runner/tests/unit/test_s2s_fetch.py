@@ -1066,6 +1066,63 @@ async def test_fetch_and_write_skips_an_arm_with_no_registry_row(
     fetch_one.assert_not_awaited()
 
 
+async def _fetch_with_stepfun_retired(
+    monkeypatch: pytest.MonkeyPatch, only_run_ids: frozenset[str] | None
+) -> AsyncMock:
+    settings = _settings(
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_scenarios={
+            "bank": ScenarioCovalIds(
+                test_set_id="TSB",
+                agents={"stepaudio-3-realtime-preview": "b5"},
+                personas={"clean": "PID"},
+            )
+        },
+        coval_s2s_bank_test_set_id="TSB",
+        coval_s2s_bank_instruction_metric_id="IID",
+        coval_s2s_bank_persona_id="PID",
+    )
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    async def _fetch_one(*_args: Any, **kwargs: Any) -> tuple[RunStatus, int]:
+        if kwargs.get("matched_run_ids") is not None and only_run_ids:
+            kwargs["matched_run_ids"].update(only_run_ids)
+        return RunStatus.SUCCEEDED, 0
+
+    fetch_one = AsyncMock(side_effect=_fetch_one)
+    rows = [
+        m.model_copy(update={"collected": False}) if m.provider == "stepfun" else m
+        for m in _every_s2s_row()
+    ]
+    monkeypatch.setattr(fetch_v2v, "fetch_models", AsyncMock(return_value=rows))
+    monkeypatch.setattr(fetch_v2v, "coval_client", lambda _settings: _fake_client({}, {}))
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: _stub_writer())
+    monkeypatch.setattr(fetch_v2v, "_fetch_one_provider", fetch_one)
+
+    await fetch_v2v.fetch_and_write_v2v(settings, only_run_ids=only_run_ids)
+    return fetch_one
+
+
+@pytest.mark.asyncio
+async def test_retired_model_is_not_fetched_nightly(monkeypatch: pytest.MonkeyPatch) -> None:
+    fetch_one = await _fetch_with_stepfun_retired(monkeypatch, None)
+
+    fetch_one.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_retired_model_is_still_backfilled(monkeypatch: pytest.MonkeyPatch) -> None:
+    fetch_one = await _fetch_with_stepfun_retired(monkeypatch, frozenset({"run-1"}))
+
+    fetch_one.assert_awaited_once()
+    assert fetch_one.await_args is not None
+    assert fetch_one.await_args.kwargs["spec"].provider == "stepfun"
+
+
 ID_ROULETTE = ScenarioCovalIds(
     test_set_id="TSR",
     agents={"vapi/pinned": "AV", "livekit/pinned": "AL"},
