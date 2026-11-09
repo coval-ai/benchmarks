@@ -158,6 +158,7 @@ jobs:
           target-repo: ${{ matrix.repository }}
           target-branch: ${{ matrix.branch }}
           target-path: ${{ matrix.path }}
+          target-input: ${{ matrix.consumerInput && toJSON(matrix.consumerInput) || '' }}
           token: ${{ steps.app_token.outputs.token }}
           commit-message: >-
             chole: publish ${{ env.ARTIFACT_ID }} from
