@@ -107,7 +107,9 @@ spellings to American, and strips diacritics and punctuation.
 punctuation-only tokens are never scored as words. Initialisms lose their
 periods (`U.S.` and `US` match). A possessive `'s` drops its apostrophe rather
 than expanding to `is`; only `'s` after a pronoun-like word (`it's`, `that's`)
-is treated as a contraction. Clock times are written the way the spoken form
+is treated as a contraction. A contracted `is` after a noun (`John's going`)
+is therefore read as a possessive and will not match a reference that spells
+out `John is going`. Clock times are written the way the spoken form
 normalizes (`9:40` and `nine forty`, `5:00` and `five o'clock`). Digits
 followed by a spelled-out number stay two numbers. A small table of equivalent
 spellings and compounds (`ok`/`okay`, `team work`/`teamwork`) is applied last.

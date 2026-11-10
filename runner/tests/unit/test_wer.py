@@ -107,6 +107,7 @@ def test_normalize_text(text: str, expected: str) -> None:
 
 _KNOWN_GAPS: list[tuple[str, str]] = [
     ("a hundred", "a 100"),
+    ("John's going", "johns going"),
     ("100 USD", "100 usd"),
 ]
 
