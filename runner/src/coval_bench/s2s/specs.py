@@ -122,6 +122,7 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
 # ``Settings.coval_s2s_scenarios``.
 SCENARIO_MODELS: tuple[tuple[str, str], ...] = (
     ("openai", "gpt-realtime"),
+    ("openai", "gpt-realtime-2.1"),
     ("openai", "gpt-live-1"),
     ("google", "gemini-live"),
     ("google", "gemini-3.8-live"),
