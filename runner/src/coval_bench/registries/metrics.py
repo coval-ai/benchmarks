@@ -37,6 +37,7 @@ class Metric(StrEnum):
     EXPECTED_BEHAVIOR_ADHERENCE = "ExpectedBehaviorAdherence"
     WORKFLOW_ADHERENCE = "WorkflowAdherence"
     CHARACTER_ERROR_RATE = "CharacterErrorRate"
+    SEMDIST_MINILM = "SemDistMiniLM"
     TOOL_CALL_COUNT = "ToolCallCount"
     INTERRUPTION_CUE_LANDED = "InterruptionCueLanded"
     INTERRUPTION_YIELDED = "InterruptionYielded"
@@ -220,6 +221,15 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         benchmarks=frozenset({Benchmark.STT, Benchmark.TTS, Benchmark.S2S}),
         scored_from_text=True,
     ),
+    Metric.SEMDIST_MINILM: MetricSpec(
+        display_name="SemDist (MiniLM)",
+        # One minus the cosine similarity of the reference and hypothesis embeddings.
+        units="ratio",
+        direction=MetricDirection.LOWER_IS_BETTER,
+        decimals=3,
+        benchmarks=frozenset({Benchmark.STT, Benchmark.TTS}),
+        scored_from_text=True,
+    ),
     Metric.TOOL_CALL_COUNT: MetricSpec(
         display_name="Tool Call Count",
         # The right count is whatever the test case expects, so neither way ranks better.
@@ -312,6 +322,7 @@ METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
         Metric.CALL_LENGTH,
         Metric.EXPECTED_BEHAVIOR_ADHERENCE,
         Metric.WORKFLOW_ADHERENCE,
+        Metric.SEMDIST_MINILM,
         Metric.TOOL_CALL_COUNT,
         Metric.INTERRUPTION_CUE_LANDED,
         Metric.INTERRUPTION_YIELDED,
