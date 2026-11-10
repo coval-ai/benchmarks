@@ -5,6 +5,22 @@ These JSON files are packaged inside the `coval-bench` wheel and loaded via
 for each dataset version — the runner validates every downloaded file against
 the recorded hash before use.
 
+## Reference corrections (version 1.1.0)
+
+Clips where no model ever scored zero WER were reviewed by ear. Where the
+reference was wrong (the script instead of what was said, a typo) it was
+replaced with what is spoken, and clips cut off mid-word were dropped. The
+audio is unchanged. Affected manifests moved from 1.0.0 to 1.1.0:
+
+| Manifest | Transcripts corrected | Clips dropped | Clips now |
+|---|---|---|---|
+| `stt-v3` | 44 | 20 | 877 |
+| `stt-wildasr-*` (all six, same clips) | 40 | 7 | 277 |
+| `stt-wildasr-accent` | 2 | 1 | 844 |
+
+These edits are made by hand on the manifests. The build recipes below
+reproduce the 1.0.0 selection, so rerunning one would undo them.
+
 ## How each manifest is produced
 
 ### The WildASR environment family (`stt-wildasr-*`)

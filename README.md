@@ -39,13 +39,13 @@ Most STT providers train on clean studio speech, so nearly all of them look good
 | Dataset | Condition |
 |---|---|
 | `clean` | Clean read speech (FLEURS), the undistorted control |
-| `accent` | 845 clips across demographic accents |
+| `accent` | 844 clips across demographic accents |
 | `noisegap` | Intermittent background-noise bursts |
 | `reverb` | Room echo |
 | `farfield` | Mic at a distance |
 | `clipping` | Peak distortion |
 | `phonecodec` | Telephony compression |
-| `stt-v3` | 897 spontaneous voice-agent turns, with fragments and fillers |
+| `stt-v3` | 877 spontaneous voice-agent turns, with fragments and fillers |
 | `tts-v1` | 30 short customer-service prompts: order tracking, appointments, account verification, tech support |
 
 Every clip is loudness-normalized to −20 dBFS RMS and **pinned to a SHA-256 hash**. If the audio changes, the runner refuses to score it.

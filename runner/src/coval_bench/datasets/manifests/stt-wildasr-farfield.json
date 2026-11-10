@@ -1,7 +1,7 @@
 {
   "_license": "Apache-2.0 (WildASR; audio derived from FLEURS, CC-BY-4.0)",
   "id": "stt-wildasr-farfield",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "Apache-2.0 (WildASR; audio derived from FLEURS, CC-BY-4.0)",
   "source": "bosonai/WildASR environment_degradation__en__fleurs_far_field_en",
   "items": [
@@ -28,7 +28,7 @@
     {
       "path": "audio/0003.wav",
       "sha256": "ea6951536c8cb05336e13ae2c340f4aa934b06032209ebe6793a9842995c019f",
-      "transcript": "a civilization is a singular culture shared by a significant large group of people who live and work co-operatively a society",
+      "transcript": "A civilization is a singular culture shared by a significant large group of people who live and work cooperatively, a society.",
       "duration_sec": 11.450688,
       "speech_end_offset_ms": 7812.0,
       "audio_hash_id": "9d2d9e2d9870595fca367d021081312a69ce1947155dc795da959ea49d38a01a",
@@ -66,16 +66,6 @@
       "condition_count": 6
     },
     {
-      "path": "audio/0007.wav",
-      "sha256": "d4c479ef77433b910c781acddac9ebed87f746eb67b8140c6c29e3a578c98e0b",
-      "transcript": "a simple popular dinner especially during the summer is the pa amb oli bread with olive oil tomato and any available condiments such as cheese tunafish etc",
-      "duration_sec": 14.787375,
-      "speech_end_offset_ms": 11332.0,
-      "audio_hash_id": "7d8c761d53d67dd9c97ba4e4c7c4a5e800397d6b0e0ada54d9843b77b7dbfaf2",
-      "condition_idx": 4,
-      "condition_count": 6
-    },
-    {
       "path": "audio/0008.wav",
       "sha256": "abb9df7826ad1d8135c3454234e50c5dc0f40040233162e4bfeac87d2247e579",
       "transcript": "a well rounded athlete the tiger can climb though not well swim leap great distances and pull with five times the force of a strong human",
@@ -88,7 +78,7 @@
     {
       "path": "audio/0009.wav",
       "sha256": "3d97afffea631bac035215c916b421186ae318586610a677a6ec955edc6b4362",
-      "transcript": "accepted were aristotle's views on all matters of science including psychology",
+      "transcript": "Accepted were Aristotle's views on all matters of science, including physiology.",
       "duration_sec": 9.290688,
       "speech_end_offset_ms": 4900.0,
       "audio_hash_id": "b5633d09184fdb8dc8805aafb1823b9d3eed1661ca156245a0d2fac81cf6b8b9",
@@ -136,33 +126,13 @@
       "condition_count": 6
     },
     {
-      "path": "audio/0014.wav",
-      "sha256": "ff1e8e8426f5fbf6df96a0fd2ed74261aea1a5c9da6dca105087e85a012ce6ab",
-      "transcript": "all nouns alongside the word sie for you always begin with a capital letter even in the middle of a sentence",
-      "duration_sec": 11.295687,
-      "speech_end_offset_ms": 8260.0,
-      "audio_hash_id": "fc77d074ed0947ee482fa7db58180adac2539ca46ba06c32bc9592c5590f22ed",
-      "condition_idx": 0,
-      "condition_count": 6
-    },
-    {
       "path": "audio/0015.wav",
       "sha256": "f7081839705b54041998545fe93f8340b253ce864c7d04ad8347fd2b2cc79bf1",
-      "transcript": "all things considered we should not be surprised if our own ancestors solved their protein problem in somewhat the same way that chimps on the savanna do today",
+      "transcript": "All things considered, we should not be surprised if our own ancestors solved their protein problem in somewhat the way that chimps on Savannah do today.",
       "duration_sec": 12.027375,
       "speech_end_offset_ms": 8612.0,
       "audio_hash_id": "803d50cd6975b0c97c9eb51bf803fb2b0a3a37909da5e24fd236b3588e9af077",
       "condition_idx": 4,
-      "condition_count": 6
-    },
-    {
-      "path": "audio/0016.wav",
-      "sha256": "be10418e7842c19fb627e868facdec7fcb880237a04cfa7263c401634a8db114",
-      "transcript": "alloys are basically a mixture of two or more metals don't forget that there are many elements on the periodic table",
-      "duration_sec": 10.927375,
-      "speech_end_offset_ms": 7556.0,
-      "audio_hash_id": "80f1f145429074fb346c413cf76eb968ff6229096ed653e0b828dae8106d88c8",
-      "condition_idx": 1,
       "condition_count": 6
     },
     {
@@ -268,7 +238,7 @@
     {
       "path": "audio/0027.wav",
       "sha256": "c250a3c1b8b0572c45b89cfa65cfd413534b037019c02ec35297a5a220e093d4",
-      "transcript": "as a result the process of an organization working together to overcome an obstacle can lead to a new innovative process to serve the customer's need",
+      "transcript": "As a result, the process of an organization working together to overcome an obstacle can lead to a new, innovative process to serve the customer's needs.",
       "duration_sec": 14.690687,
       "speech_end_offset_ms": 10820.0,
       "audio_hash_id": "1baefc1cfd3fdb9cb98539b7efe029205f7b82335ab03065edc95b70da287a76",
@@ -318,7 +288,7 @@
     {
       "path": "audio/0032.wav",
       "sha256": "4ddd6a25b1133c0f676923c44dd75fcb738718562105980dedce4bc563771fe6",
-      "transcript": "asus eee pc earlier launched world-wide for cost-saving and functionality factors became a hot topic in 2007 taipei it month",
+      "transcript": "Asus EPC earlier launched worldwide for cost-saving functionality factors became a hot topic in 2007 Taipei IT Month.",
       "duration_sec": 13.310688,
       "speech_end_offset_ms": 9508.0,
       "audio_hash_id": "0cbd4d8ba6cbe17dd43e424e27e244b2242acaf3caa11fbbf54f7adf148877a8",
@@ -346,19 +316,9 @@
       "condition_count": 6
     },
     {
-      "path": "audio/0035.wav",
-      "sha256": "fe2a6cf471c7d22459d52f84538c9cd16de717c38aa860a2b112ea2ef649481f",
-      "transcript": "be firm in turning down men and don't be afraid to stand your ground cultural differences or not it doesn't make it ok!",
-      "duration_sec": 13.527375,
-      "speech_end_offset_ms": 9092.0,
-      "audio_hash_id": "6a05ad3bd10c7766721dafe1998ac67fb73cdfda7b3a95570bb07ed274ccca11",
-      "condition_idx": 4,
-      "condition_count": 6
-    },
-    {
       "path": "audio/0036.wav",
       "sha256": "7c721a9dae0c781739a9ac71cdc3d40ae1fa94435965ca3eb1ff6105fe09bfe0",
-      "transcript": "between 10:00-11:00 pm mdt a fire was started by the inmates in the yard",
+      "transcript": "Between 10 to 11 p.m. Mountain Time, a fire was started by the inmates in the yard.",
       "duration_sec": 11.510687,
       "speech_end_offset_ms": 7876.0,
       "audio_hash_id": "c0c79e59b3c8818bbc31bf60c41e283ec8431cf8f755153a214014c32d903bc0",
@@ -416,19 +376,9 @@
       "condition_count": 6
     },
     {
-      "path": "audio/0042.wav",
-      "sha256": "f6809561feaf26d5a7e0d340f09c15835953668e9b173d5e56c85607553704f2",
-      "transcript": "buses depart the inter-district bus station across the river throughout the day though most especially those heading to the east and jakar/bumthang leave between 06:30 and 07:30",
-      "duration_sec": 14.690687,
-      "speech_end_offset_ms": 11140.0,
-      "audio_hash_id": "ec6b879ea3e7b5eaa6e41e55b4bf2663f9f7bb9dc943cf9c50d210bbeec7d8e7",
-      "condition_idx": 2,
-      "condition_count": 3
-    },
-    {
       "path": "audio/0043.wav",
       "sha256": "3c3614a7338f1f057456afffe9ba15536440a1e3d7feb2635b96d6f8dcd30a34",
-      "transcript": "but after losing the captain's wicket india only made 36 runs loosing 7 wickets to end the innings",
+      "transcript": "But after losing the captain's wicket India only made thirty six runs losing seven wickets to end the winnings.",
       "duration_sec": 11.090687,
       "speech_end_offset_ms": 7428.0,
       "audio_hash_id": "6c694ba476dd5b836028588a8a1cecf9960d22661adbaa27d4319a5fcfed57db",
@@ -458,7 +408,7 @@
     {
       "path": "audio/0046.wav",
       "sha256": "e7d3eaf9fae5096bd10611613552b1ac9c461fc7165376706a1c107af043e6ec",
-      "transcript": "by 1976 thirty percent of machu picchu had been restored and restoration continues till today",
+      "transcript": "By 1976, thirty percent of Machu Picchu has been restored, and restoration continues till today.",
       "duration_sec": 9.350687,
       "speech_end_offset_ms": 6660.0,
       "audio_hash_id": "7e118e29b08237b61aff1c8995e26b4b2d887dfa763e49b89ad744e45290cc4c",
@@ -478,7 +428,7 @@
     {
       "path": "audio/0048.wav",
       "sha256": "07a7aaafd144c680d42b14b7bcc4e7f1604e955f70aa72c8a01e975ac482b2bf",
-      "transcript": "cancellation policies vary but as of late march most coronavirus-based cancellation policies don't extend to july 2020 when the olympics had been scheduled",
+      "transcript": "Cancellation policies vary, but as of late March, most coronavirus-based cancellation policies don't extend to July 2020 when the Olympics have been scheduled.",
       "duration_sec": 11.835688,
       "speech_end_offset_ms": 8932.0,
       "audio_hash_id": "2f4773441122364c49c82de88ee794c3a43e476d05caf7dc18996c8dc252e023",
@@ -738,7 +688,7 @@
     {
       "path": "audio/0074.wav",
       "sha256": "8e18c1895519fb19393b3b87ddeaa4b56a4b8083e3c81bd52e2ab663388f1b37",
-      "transcript": "for example each year students from bennet school in north carolina design a website about their trip to the state capital each year the website gets remodeled but old versions are kept online to serve as a scrapbook",
+      "transcript": "For example, each year students from Bennett School in North Carolina design a website about their trip to the state capitol. Each year the website gets remodeled, but old versions are kept online to serve as a scrapbook.",
       "duration_sec": 13.827375,
       "speech_end_offset_ms": 11012.0,
       "audio_hash_id": "3dd1ebcddb596476688fa655f69e13f185b41aaa3e0e3b7c6dfae36eaf5cc8f4",
@@ -788,7 +738,7 @@
     {
       "path": "audio/0079.wav",
       "sha256": "fa38c9bc0cc22769cc2eacb37b65e16d6735c9114436e32f89a4b38aad211075",
-      "transcript": "he added that they should not however be asked to take on obligations that go beyond their development stage responsibility and capabilities",
+      "transcript": "He added they should not, however, be asked to take on obligations that go beyond their development stage, responsibility, and capabilities.",
       "duration_sec": 14.767375,
       "speech_end_offset_ms": 10980.0,
       "audio_hash_id": "e2e33c56d7523250b12c6a09d14934496b40282fce97750d7725aac7ffdda4dc",
@@ -858,7 +808,7 @@
     {
       "path": "audio/0086.wav",
       "sha256": "7998a9b0c2403b574eda03ddefe11c2ab10f105586e6ff524c1e8e511f4b2f91",
-      "transcript": "he was reportedly aged in his 20s. in a statement bieber said [w]hile i was not present nor directly involved with this tragic accident my thoughts and prayers are with the family of the victim.",
+      "transcript": "He was reportedly aged in his twenties. In a statement, Bieber said, \"While I was not present nor directly involved with this tragic accident, my thoughts and prayers are with the family of the victim.\"",
       "duration_sec": 13.107375,
       "speech_end_offset_ms": 9636.0,
       "audio_hash_id": "65ce81c9dd83fa1154a08c2882c86c99e0caffb911e837a4931d0d4e68614b28",
@@ -888,7 +838,7 @@
     {
       "path": "audio/0089.wav",
       "sha256": "03234a9e20a19b57aaea78645b508e957e900796ee91d810d6bb62055006b21c",
-      "transcript": "however due to the slow communication channels styles in the west could lag behind by 25 to 30 year",
+      "transcript": "However, due to the slow communication channels, styles in the West could lag behind by 25 to 30 years.",
       "duration_sec": 13.095688,
       "speech_end_offset_ms": 8932.0,
       "audio_hash_id": "33a9148738e320185ab97e669ccc4988a8b76cabbc9c26b9e2672d5d2af3a0b2",
@@ -1138,7 +1088,7 @@
     {
       "path": "audio/0114.wav",
       "sha256": "25751e0b879e7d2959a672ba253bff3585eb6e55e1d04bc0cea77756c5b0d056",
-      "transcript": "its renown for being an epicenter of luxury began in about 400 a.d. and lasted up until about 1100 a.d",
+      "transcript": "Its renown for being an epicenter of luxury began in about 400 AD and lasted up until about 1100 AD.",
       "duration_sec": 14.027375,
       "speech_end_offset_ms": 11140.0,
       "audio_hash_id": "2b8ae4f456c7132a6c81ba9109ce9e6b9653586dd88b7fa34a8d429b6dcbec82",
@@ -1238,7 +1188,7 @@
     {
       "path": "audio/0124.wav",
       "sha256": "90835010f28515cd6faf6e781ddb3730b6bb6ec4452f3403de27e4a1faf915ca",
-      "transcript": "many german baked goods also feature almonds hazelnuts and other tree nuts popular cakes often pair particularly well with a cup of strong coffee",
+      "transcript": "Many German baked goods are feature almonds, hazelnuts, and other tree nuts. Popular cakes often pair particularly well with a cup of strong coffee.",
       "duration_sec": 12.987375,
       "speech_end_offset_ms": 9380.0,
       "audio_hash_id": "ecbbcf1456dbe5520e5f340f1b69ed043f82a87425ccfa032b0cf0c50d68f00d",
@@ -1258,7 +1208,7 @@
     {
       "path": "audio/0126.wav",
       "sha256": "5c284f533515ec0d16db64a8b780ff27268795f13892ba43176232a01b989d54",
-      "transcript": "martelly swore in a new provisional electoral council cep of nine members yesterday",
+      "transcript": "Martelly swore in a new provisional electoral council of nine members yesterday.",
       "duration_sec": 12.667375,
       "speech_end_offset_ms": 8900.0,
       "audio_hash_id": "f616673c97956bedb3177ba2cd3f24b5706940196b2d8ff06f310005e882380c",
@@ -1268,7 +1218,7 @@
     {
       "path": "audio/0127.wav",
       "sha256": "dcaefbe621069aa371b04e7477f5fdfea4fbfbb30c050e252865c8215bb94a87",
-      "transcript": "mass car ownership also leads to a higher incidence of accidents on the roads which leads to the invention of new techniques in healthcare for repairing damaged bodies",
+      "transcript": "Mass car ownership also leads to a higher incidence of accidents on the road, which leads to the invention of new techniques in healthcare for repairing damaged bodies.",
       "duration_sec": 12.050688,
       "speech_end_offset_ms": 9124.0,
       "audio_hash_id": "5630b6f7f83b5c1faddb0d21d829e5b875675400a6f751a9190a9c1d942180e6",
@@ -1388,7 +1338,7 @@
     {
       "path": "audio/0139.wav",
       "sha256": "cc0d7de6b770bf02476cc302ae5496ac4f725508d2d1e5b23658aa33586c9d0f",
-      "transcript": "on 15 august 1940 the allies invaded southern france the invasion was called operation dragoon",
+      "transcript": "On August 15, 1940, the Allies invaded southern France, and the invasion was called Operation Dragoon.",
       "duration_sec": 12.655688,
       "speech_end_offset_ms": 9604.0,
       "audio_hash_id": "137acac870aeec4d211cdbc3e0718fbad2a82d2ccf584469fc1010be05dcb525",
@@ -1403,16 +1353,6 @@
       "speech_end_offset_ms": 7428.0,
       "audio_hash_id": "beac4e70410d6708768b015117cc62020217afcc8fa2c619d1484e287c6e191a",
       "condition_idx": 0,
-      "condition_count": 6
-    },
-    {
-      "path": "audio/0141.wav",
-      "sha256": "9906068f3595f10b6f92b5e4ec918dea6e0751d5f5452e3445552311b036f7f7",
-      "transcript": "on the other hand icy and snowy conditions are normal in many countries and traffic goes on mostly uninterrupted all year round",
-      "duration_sec": 12.255688,
-      "speech_end_offset_ms": 8004.0,
-      "audio_hash_id": "ce7d5645f821dd9e94b2bde6360aa9f03ed1aaef68602e0743aedb3e9ba689bf",
-      "condition_idx": 3,
       "condition_count": 6
     },
     {
@@ -1588,7 +1528,7 @@
     {
       "path": "audio/0159.wav",
       "sha256": "0acf65fab36264a5491179adfc146b9ec9c59e601ee0c65b909ef6f0c8d79e79",
-      "transcript": "re-entry shock comes on sooner than culture shock there's less of a honeymoon phase lasts longer and can be more severe",
+      "transcript": "Re-entry shock comes on sooner than culture shock. There's less of a honeymoon phase, lasts longer, and can be even more severe.",
       "duration_sec": 11.150688,
       "speech_end_offset_ms": 7812.0,
       "audio_hash_id": "f4c3a46e79d885fd86d191e8b184dce3430e4ca691967c8fd248a7acdca85c62",
@@ -1598,7 +1538,7 @@
     {
       "path": "audio/0160.wav",
       "sha256": "06bf5e321cef2e5992d6a345b484fdbaced0b55d242d7dcea1e80de6cb2123a2",
-      "transcript": "regional and seasonal severe weather phenomena include blizzards snowstorms ice storms and dust storms",
+      "transcript": "Regional and seasonal severe weather phenomena include blizzards, storms, ice storms, and dust storms.",
       "duration_sec": 10.127375,
       "speech_end_offset_ms": 7044.0,
       "audio_hash_id": "ce73b419934387f74f780ce700413e5acbf921b0ec081cbf13bd4560a6d856a0",
@@ -1628,7 +1568,7 @@
     {
       "path": "audio/0163.wav",
       "sha256": "7207e4cb792a978fbf1746477c32d58bef6bba464fe4cf1c63960cdc33abd7f9",
-      "transcript": "resting on the top of one of the mountains north of mecca the cave is completely isolated from the rest of the world",
+      "transcript": "Resting on the top of one of the mountains north of Mecca, the calf the cave is closely isolated from the rest of the world.",
       "duration_sec": 12.675688,
       "speech_end_offset_ms": 8068.0,
       "audio_hash_id": "ffa640c373d3756c485cdaf90e402b5aa64c59c6aa6805153783fa3f081676c2",
@@ -1738,7 +1678,7 @@
     {
       "path": "audio/0174.wav",
       "sha256": "61fd24b0c416d63807ccbf2ed52a8824565cfc1f457d5ee4065156fb19a7c577",
-      "transcript": "sharing a field trip virtually is also a great way to reflect a on a trip and share experiences with future classes",
+      "transcript": "Sharing a field trip virtually is also a great way to reflect on a trip and share experiences with future classes.",
       "duration_sec": 10.215687,
       "speech_end_offset_ms": 6820.0,
       "audio_hash_id": "e97a70a0bf711e6e04094e6b60f180b23238fdf8317a7f79008591554eceb762",
@@ -1788,7 +1728,7 @@
     {
       "path": "audio/0179.wav",
       "sha256": "dbfec1cd2f80fdb7418675f78682010967b8eb33d1eabade50d2d5982e94776f",
-      "transcript": "some cruises feature berlin germany in the brochures as you can see from the map above berlin is no where near the sea and a visit to the city is not included in the price of the cruise",
+      "transcript": "Some cruises feature Berlin, Germany in the brochures. As you can see from the map above, Berlin is nowhere near the sea and a visit to the city is not included in the price of the cruise.",
       "duration_sec": 13.370688,
       "speech_end_offset_ms": 9924.0,
       "audio_hash_id": "f21850dc71c0d0fbad5a5da1475f4b88e8724d5481f7b699a73694360a7f8cd9",
@@ -1928,7 +1868,7 @@
     {
       "path": "audio/0193.wav",
       "sha256": "2afb69b94fdc7bea9617a1f833356dd0553ca94852d03fae2167e8dff8de7dc1",
-      "transcript": "the city is also the base to climb the nyiragongo volcano along with some of the cheapest mountain gorilla tracking in africa",
+      "transcript": "The city is also the base to climb the Nyiragongo volcano, along with some of the cheapest mountain gorilla trafficking in Africa.",
       "duration_sec": 13.850687,
       "speech_end_offset_ms": 9924.0,
       "audio_hash_id": "66bcc757081e2d5358c83639ec9061020fd484a42576b39fbb4a2230712337c2",
@@ -1958,7 +1898,7 @@
     {
       "path": "audio/0196.wav",
       "sha256": "e965e474a84ae8681c22a1d71479d2d8f2553dbe57a4318b180eedba954ecfb7",
-      "transcript": "the composition of these crystals matches those found in the urine of affected pets when compared by infrared spectroscopy ftir",
+      "transcript": "The composition of these crystals matches those found in urine of affected pets when compared by infrared spectroscopy, FTIR.",
       "duration_sec": 14.450688,
       "speech_end_offset_ms": 10628.0,
       "audio_hash_id": "58239627053d4c3b988abf6cda24073c09d889c757ed6b674a53494d43462093",
@@ -1998,7 +1938,7 @@
     {
       "path": "audio/0200.wav",
       "sha256": "9864744b016a9da1357b1a42c3627a5b92051181999ed5eb7112606d07aab7cf",
-      "transcript": "the debate was sparked by controversy over spending on relief and reconstruction in the wake hurricane katrina which some fiscal conservatives have humorously labeled bush's new orleans deal",
+      "transcript": "The debate was sparked by controversy over spending on relief and reconstruction in the wake of Hurricane Katrina, which some fiscal conservatives have humorously labeled Bush's New Orleans deal.",
       "duration_sec": 14.895687,
       "speech_end_offset_ms": 11332.0,
       "audio_hash_id": "37fa9ee9cf992c6648eabe621d809b9a67ab5cebe1a643f885d2efc16a2084dc",
@@ -2008,7 +1948,7 @@
     {
       "path": "audio/0201.wav",
       "sha256": "ec15180cf0c328253c6aec02720f152719cf8bdba3757db90252323e0bef163c",
-      "transcript": "the disease is carried by pigs which then migrates to humans through mosquitos",
+      "transcript": "The disease is carried by pigs, which then migrates to humans through mosquitoes.",
       "duration_sec": 7.970688,
       "speech_end_offset_ms": 5124.0,
       "audio_hash_id": "95027a7f0db298884901ab65c5d22a23e563c3c44077f312628dc0c7a18cfe5f",
@@ -2058,7 +1998,7 @@
     {
       "path": "audio/0206.wav",
       "sha256": "e84fa5c54f50c98dc327f61242c9de51d2aaf8b9f619107c1a3a22ee8cd459ac",
-      "transcript": "the great pyramid at giza is the only one of the seven wonders that is still standing today",
+      "transcript": "The Great Pyramid at Giza is one of the seven wonders that is still standing today.",
       "duration_sec": 8.630688,
       "speech_end_offset_ms": 5348.0,
       "audio_hash_id": "00a3f7f00e1f0dc987b285d5eb2fde144eaf3029aaa282254c9d51efea95bb9e",
@@ -2126,16 +2066,6 @@
       "condition_count": 6
     },
     {
-      "path": "audio/0213.wav",
-      "sha256": "caf4e571b0d6b9a84267ac8456b36ffb2b87936f62520a6cd848dc2e537d315a",
-      "transcript": "the moroccan sultan rebuilt the city as daru l-badya and it was given the name casablanca by spanish traders who established trading bases there",
-      "duration_sec": 14.090687,
-      "speech_end_offset_ms": 10692.0,
-      "audio_hash_id": "6e64f15e43f7f2b34ca2a0108a76b525768bebdfd8a3e959bde4331c84a84389",
-      "condition_idx": 5,
-      "condition_count": 6
-    },
-    {
       "path": "audio/0214.wav",
       "sha256": "6fd4714cc32c0dc9f9b836f55b616e90719d1425faaafbc6103dd62a7f9cc598",
       "transcript": "the northern marianas emergency management office said that there were no damages reported in the nation",
@@ -2158,7 +2088,7 @@
     {
       "path": "audio/0216.wav",
       "sha256": "6ea37c1919b9f770731fdab5defd6391d550c6e1c3d7fd305f1183504a54c0b7",
-      "transcript": "the official falklands currency is the falkland pound fkp whose value is set equivalent to that of one british pound gbp",
+      "transcript": "The official Falklands currency is the Falkland pound. FKP whose value is set equivalent to that of a British pound. GPB.",
       "duration_sec": 12.615687,
       "speech_end_offset_ms": 9956.0,
       "audio_hash_id": "538ab78703b81d15dadd1570702333b5dda4837f7a2bc2d28fc69f6647bb88ef",
@@ -2188,7 +2118,7 @@
     {
       "path": "audio/0219.wav",
       "sha256": "e8a4cd3557f04654e88fa65b49231ec00a77b81bdc94610ba871683be45b24e2",
-      "transcript": "the presence of a true  invisible team” larson and lafasto 1989 p109 is also a unique component of a virtual team",
+      "transcript": "The presence of the true invisible team, Larson and LaFasto, 1989, page 109, is also a unique component of a virtual team.",
       "duration_sec": 14.510687,
       "speech_end_offset_ms": 10852.0,
       "audio_hash_id": "139532b258b5e4c32b078aa1fd20a8dc33b0664f41fe3c5b8893f71dd5a42eb5",
@@ -2218,7 +2148,7 @@
     {
       "path": "audio/0222.wav",
       "sha256": "e3f8aeedfef6571986fab7de36ccaab20813aea4a030329fbfb992ccc5a9a026",
-      "transcript": "the ruling party south west africa people's organisation swapo also retained a majority in the parliamentary elections",
+      "transcript": "ruling party southwest africa people's organization also retain a majority in the parliamentary elections",
       "duration_sec": 13.175688,
       "speech_end_offset_ms": 9924.0,
       "audio_hash_id": "966a581131c6d358b7dea3324a8ced0cf9c5eee6684cde0280b828445a96554a",
@@ -2258,7 +2188,7 @@
     {
       "path": "audio/0226.wav",
       "sha256": "3e70f7c0811160c7cea6da19383997dfc78e75bd64781357397c5bc5ad32da53",
-      "transcript": "the scientists were able to conclude that the dark matter affect other dark matter in the same way regular matter does",
+      "transcript": "The scientists were able to conclude that dark matter affect other dark matter in the same way regular matter does.",
       "duration_sec": 14.667375,
       "speech_end_offset_ms": 11012.0,
       "audio_hash_id": "a5e6a5a5e725eb9b43fa12cd300234bdd741911db1240a5e4ef65b440907c198",
@@ -2288,7 +2218,7 @@
     {
       "path": "audio/0229.wav",
       "sha256": "241f45b41042b4f2d89ffc8e5f2efd7f5a1ec177dfc68779aef5ed91fd78941c",
-      "transcript": "the sundarbans are the largest littoral mangrove belt in the world stretching 80 km 50 mi into the bangladeshi and indian hinterland from the coast",
+      "transcript": "The Sundarbans are the largest littoral mangrove in the world stretching eighty kilometers fifty miles into the Bangladeshi and Indian hinterland from the coast.",
       "duration_sec": 12.770687,
       "speech_end_offset_ms": 9060.0,
       "audio_hash_id": "348c7ea197bcb0f7268b350212b4cf0d13cce9a45f95d11172fb489216f360e0",
@@ -2358,7 +2288,7 @@
     {
       "path": "audio/0236.wav",
       "sha256": "48f4df14c1229ac37dd8b95cc3dc7527da6da799c1fcbde45d335f3af83394e4",
-      "transcript": "the tiger's roar is not like the full-voiced roar of a lion but more like a sentence of snarly shouted words",
+      "transcript": "The tiger's roar is not like the full-forced roar of a lion, but more like a sentence of a snarly shouted words.",
       "duration_sec": 11.295687,
       "speech_end_offset_ms": 7364.0,
       "audio_hash_id": "78b132ef544c9f474e4f7cf4255c2a34dd8f1527d6d1b525a4c2b8c716806783",
@@ -2428,7 +2358,7 @@
     {
       "path": "audio/0243.wav",
       "sha256": "cc9817e84a8d092b6cfc78135974d78d7a93415323384baa59636a34d859597a",
-      "transcript": "their disciplined defence ball handling skills and excellent team work made them stand out and it was clear that this was the team to beat",
+      "transcript": "Their discipline, defense, ball handling skills, and excellent teamwork made them stand out, and it was clear that this was the team to beat.",
       "duration_sec": 10.430687,
       "speech_end_offset_ms": 7044.0,
       "audio_hash_id": "9e7b4f0b1ee2b3ca50080b01c3d4088839287c9624848339ff679253a55af4e2",
@@ -2518,7 +2448,7 @@
     {
       "path": "audio/0252.wav",
       "sha256": "ae8f41dec6389128b1edec989a65628f8d9ae2cf232bf3bf1587399567bff1c3",
-      "transcript": "they usually have special food drink and entertainment offers to keep guests in a good mood and keep them at the premise",
+      "transcript": "They usually have special food, drink, and entertainment offers to keep guests in a good mood and to keep them at the premise.",
       "duration_sec": 9.495688,
       "speech_end_offset_ms": 6084.0,
       "audio_hash_id": "da45a75187f5673eea2c5f670a53af862ce187d2f354f4b978e59ad1581557a8",
@@ -2718,7 +2648,7 @@
     {
       "path": "audio/0272.wav",
       "sha256": "e3289133f17b5bb86da2a0837a2f3ea6c9659d198f56081933a3e8107d3aa58a",
-      "transcript": "usually you always here the sound of tourists and vendors the story of the sound and light is just like a story book",
+      "transcript": "Usually you always hear the sound of tourists and vendors. The story of the sound and light is just like a storybook.",
       "duration_sec": 9.927375,
       "speech_end_offset_ms": 6372.0,
       "audio_hash_id": "cd5b891519eff577bbe795af16d17540184777b72c6cadcf39d384c55234b16f",
@@ -2728,7 +2658,7 @@
     {
       "path": "audio/0273.wav",
       "sha256": "458672f4a1f6dfbbac6c621ce3f109eafb372447d53271e17611c4e00816d9e4",
-      "transcript": "vatican city's population is around 800 it is the smallest independent country in the world and the country with the lowest population",
+      "transcript": "Vatican City population is around 800. It is the smallest independent country in the world and the population",
       "duration_sec": 13.287375,
       "speech_end_offset_ms": 7652.0,
       "audio_hash_id": "6b4f1f6db82c43eb517b544e5f79c74669b161b5e561b19b15374d18d4be8d6e",
@@ -2738,7 +2668,7 @@
     {
       "path": "audio/0274.wav",
       "sha256": "14f2ba6c2ad3fb1fc5d07b83d1f811f769dfa4b88ac261b5b8c605550620f224",
-      "transcript": "virtual scaffolds are internalized in the software and are meant to question prompt and explain procedures that may have been to challenging for the student to handle alone",
+      "transcript": "Virtual scaffolds are internalized in the software and are meant to question, prompt, and explain procedures that may have been too challenging for the student to handle alone.",
       "duration_sec": 12.267375,
       "speech_end_offset_ms": 9380.0,
       "audio_hash_id": "c09b939b29020ad37b4ab031cd055fd2391362fb4983f32724d3f10ad9f6cfd5",
@@ -2748,7 +2678,7 @@
     {
       "path": "audio/0275.wav",
       "sha256": "772a0dd208543585c4afd051f697aaba0c08e5b5107a37a7c2458c31a6f65511",
-      "transcript": "virtual teams are held to the same standards of excellence as conventional teams but there are subtle differences",
+      "transcript": "Virtual teams are held to the same standard of excellence as conventional teams, but there are subtle differences.",
       "duration_sec": 8.175688,
       "speech_end_offset_ms": 5380.0,
       "audio_hash_id": "f83fdb729bbe1b8976d22735c94a162cbda7aebbf03fb129814862577c4f5f90",

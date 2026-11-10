@@ -1,7 +1,7 @@
 {
   "_license": "Apache-2.0 (WildASR)",
   "id": "stt-wildasr-accent",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "Apache-2.0 (WildASR)",
   "source": "bosonai/WildASR demographic_shift__en__demographic_accent_en",
   "items": [
@@ -3128,7 +3128,7 @@
     {
       "path": "audio/0391.wav",
       "sha256": "529e435321d797c32248fb0ee7d55ff2c2105dcf204448563ea81f5a09aaf713",
-      "transcript": "now i want to ask you fellows a couple of questions.",
+      "transcript": "Now, I want to ask you Fables a couple of questions.",
       "duration_sec": 2.486063,
       "speech_end_offset_ms": 2486.1,
       "audio_hash_id": "782cf32097e4a5cf29f4c8e215f432d755ac3d43c8ba901253e90d5240c2364e"
@@ -4272,7 +4272,7 @@
     {
       "path": "audio/0534.wav",
       "sha256": "7925147afb104055ff5766558dd0e0136b959ee37201443b29d1a2be72897c3a",
-      "transcript": "this is referred to locally as 'gallifords' reflecting its ownership.",
+      "transcript": "This is referred to locally as Galliford's reflecting its ownership.",
       "duration_sec": 5.404063,
       "speech_end_offset_ms": 5404.1,
       "audio_hash_id": "a2e5971d8ace3d840a33651ca8d387dab8361acd162aacd103a97897c0d6d265"
@@ -6308,14 +6308,6 @@
       "duration_sec": 3.74,
       "speech_end_offset_ms": 3740.0,
       "audio_hash_id": "ec7c5a66493bc429ae8242a5bb6c7cc30b7383e004486e9ab817b2164788b28f"
-    },
-    {
-      "path": "audio/0789.wav",
-      "sha256": "145c6a7b16ed5edd469b8a45f2a95493eb974808ccddec5f6e598ccbf4f5f106",
-      "transcript": "like the \"histoire\", it is more interesting than exact.",
-      "duration_sec": 2.876,
-      "speech_end_offset_ms": 2876.0,
-      "audio_hash_id": "ecc5c41d7c970b129110a45b52ea5401949b7bbe1f128f01af1da6cb519c4ecd"
     },
     {
       "path": "audio/0790.wav",
