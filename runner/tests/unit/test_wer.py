@@ -35,7 +35,7 @@ _GOLDEN: list[tuple[int, str, str, float, str]] = [
         "spoken date — 'the' deletion is the only error",
     ),
     (10, "don't worry", "do not worry", 0.0, "contraction expansion"),
-    (11, "3:30 PM", "3 30 PM", 0.0, "clock time"),
+    (11, "3:30 PM", "three thirty PM", 0.0, "clock time"),
     (12, "$347.89", "347 dollars and 89 cents", 0.0, "currency with cents"),
     (13, "the first second and third", "the 1st 2nd and 3rd", 0.0, "ordinals"),
     (14, "abc-def", "abc def", 0.0, "dehyphenation"),
@@ -95,6 +95,8 @@ _NORMALIZATION: list[tuple[str, str]] = [
     ("“hello”", "hello"),
     ("naïve café", "naive cafe"),
     ("", ""),
+    ("two fifteen pm", "215 pm"),
+    ("2:15 PM", "215 pm"),
 ]
 
 
@@ -104,8 +106,6 @@ def test_normalize_text(text: str, expected: str) -> None:
 
 
 _KNOWN_GAPS: list[tuple[str, str]] = [
-    ("two fifteen pm", "215 pm"),
-    ("2:15 PM", "2 15 pm"),
     ("a hundred", "a 100"),
     ("100 USD", "100 usd"),
 ]
@@ -135,8 +135,32 @@ def test_wer_percentage_approx() -> None:
 
 
 def test_norm_version() -> None:
-    assert NORM_VERSION == "2"
-    assert compute_wer("hello", "hello").norm_version == "2"
+    assert NORM_VERSION == "3"
+    assert compute_wer("hello", "hello").norm_version == "3"
+
+
+@pytest.mark.parametrize(
+    "ref, hyp",
+    [
+        ("the um are not the um", "The, um, aren't the, uh..."),
+        ("by 1976 thirty percent was restored", "By 1976, 30% was restored."),
+        ("at five pm", "At 5:00 PM."),
+        ("at 2:00 p.m. tomorrow", "at 2 p m tomorrow"),
+        ("at one forty five p m", "At 1.45 p.m."),
+        ("at five o'clock", "at 5"),
+        ("nine forty", "9:40"),
+        ("the us economy in 400 ad", "The U.S. economy in 400 A.D."),
+        ("the performers hat", "The performer's hat."),
+        ("it is okay", "It's OK."),
+        ("teamwork", "team work"),
+    ],
+)
+def test_formatting_variants_score_zero(ref: str, hyp: str) -> None:
+    assert compute_wer(ref, hyp).wer == 0.0
+
+
+def test_adjacent_numbers_stay_separate() -> None:
+    assert normalize_text("in 2020 five people") == "in 2020 5 people"
 
 
 # ---------------------------------------------------------------------------
