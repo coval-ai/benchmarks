@@ -103,7 +103,18 @@ and written forms of numbers, ordinals, dates, currency, and percentages into
 a canonical form, expands contractions, drops filler words, maps British
 spellings to American, and strips diacritics and punctuation.
 
-**Version constant.** `wer.NORM_VERSION` (currently `"2"`) is bumped on any
+`normalize_text` adds a few rules of its own around it. Ellipses and other
+punctuation-only tokens are never scored as words. Initialisms lose their
+periods (`U.S.` and `US` match). A possessive `'s` drops its apostrophe rather
+than expanding to `is`; only `'s` after a pronoun-like word (`it's`, `that's`)
+is treated as a contraction. A contracted `is` after a noun (`John's going`)
+is therefore read as a possessive and will not match a reference that spells
+out `John is going`. Clock times are written the way the spoken form
+normalizes (`9:40` and `nine forty`, `5:00` and `five o'clock`). Digits
+followed by a spelled-out number stay two numbers. A small table of equivalent
+spellings and compounds (`ok`/`okay`, `team work`/`teamwork`) is applied last.
+
+**Version constant.** `wer.NORM_VERSION` (currently `"3"`) is bumped on any
 behavioural change to the pipeline. The constant is included on every
 `WERResult` as `norm_version` while the metric is computed, but is not
 persisted with the result row.
@@ -117,6 +128,14 @@ with `EnglishTextNormalizer` per [ADR-021](#adr-references). WER values
 before and after the change are **not comparable**. Because result rows do not
 carry a normalization-version marker, historical rows cannot be reliably
 segmented by normalization pipeline version.
+
+**Methodology change (2026-11).** Version `"3"` added the rules above after a
+review of clips with non-zero WER found many of the errors were formatting
+artifacts: a trailing ellipsis scored as a word, possessives expanded to `is`,
+adjacent numbers merged into one (`1976 thirty percent` → `197630%`), and the
+same time or initialism normalizing differently depending on how it was
+written. WER drops for models that emit punctuated, formatted transcripts, so
+values before and after the change are not directly comparable.
 
 ### Aggregation
 
