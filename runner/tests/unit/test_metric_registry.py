@@ -36,6 +36,7 @@ def test_metric_values_match_stored_strings() -> None:
         "InterruptionCueLanded",
         "InterruptionYielded",
         "BackchannelContinued",
+        "JudgeJev",
     }
 
 
@@ -56,6 +57,7 @@ def test_units_match_stored_strings() -> None:
         Metric.CALL_LENGTH: "seconds",
         Metric.EXPECTED_BEHAVIOR_ADHERENCE: "percent",
         Metric.WORKFLOW_ADHERENCE: "percent",
+        Metric.JUDGE_JEV: "percent",
         Metric.CHARACTER_ERROR_RATE: "percent",
         Metric.SEMDIST_MINILM: "ratio",
         Metric.TOOL_CALL_COUNT: "count",
@@ -133,17 +135,20 @@ def test_headline_metrics_come_from_the_specs() -> None:
         Metric.TTFS,
         Metric.RTF,
         Metric.AUDIO_TO_FINAL,
+        Metric.JUDGE_JEV,
         Metric.CHARACTER_ERROR_RATE,
         Metric.SEMDIST_MINILM,
     }
     assert set(headline_metrics(Benchmark.TTS)) == {
         Metric.WER,
         Metric.TTFA,
+        Metric.JUDGE_JEV,
         Metric.CHARACTER_ERROR_RATE,
         Metric.SEMDIST_MINILM,
     }
     assert {m for m, spec in METRIC_SPECS.items() if spec.scored_from_text} == {
         Metric.WER,
+        Metric.JUDGE_JEV,
         Metric.CHARACTER_ERROR_RATE,
         Metric.SEMDIST_MINILM,
     }

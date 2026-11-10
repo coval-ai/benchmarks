@@ -201,6 +201,11 @@ def _frozen_values(metric: str, rows: Sequence[Result], primary: Result) -> list
                 ("reference_chars", primary.cer_reference_chars),
             )
         )
+    if metric == str(Metric.JUDGE_JEV) and primary.judgejev_counts is not None:
+        values.extend(
+            FrozenValue(value_key=key, unit="count", value=count, value_role="component")
+            for key, count in primary.judgejev_counts.items()
+        )
     if metric == str(Metric.TTFA):
         components = {str(row.metric_type): row for row in rows}
         for metric_type, key in (

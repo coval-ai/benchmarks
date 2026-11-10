@@ -144,6 +144,32 @@ same time or initialism normalizing differently depending on how it was
 written. WER drops for models that emit punctuated, formatted transcripts, so
 values before and after the change are not directly comparable.
 
+### JudgeJev
+
+WER charges the same for a dropped `the` as for a dropped `not`. JudgeJev
+counts only the differences that would change how a voice agent understands or
+responds to the speaker. It starts from the same normalized text and word
+alignment as WER and merges adjacent edits into one difference. A single
+request to TypeSafe's Jev model then asks one yes/no question per difference,
+with the full reference and transcript as context: would an agent acting on
+the transcript do or say something different because of this? Jev answers each
+with a probability. A difference at 0.5 or above is an error and costs the
+word count WER gives it, so the score is never above WER.
+
+Jev is not asked when the two texts match after normalization, and an empty
+transcript counts every reference word. `compute_judgejev` in
+`runner/src/coval_bench/metrics/judgejev.py` does the scoring. Each row stores
+the error counts at cutoffs of 0.3, 0.5 and 0.7, the probability-weighted
+count, the number of differences and the reference word count next to the
+percentage, so the metric can be pooled like WER and the cutoff revisited
+without asking Jev again. The Jev model version is pinned in code. Answers
+are not perfectly repeatable: the same request can move a probability by a few
+hundredths, which flips the verdict on a small share of borderline
+differences.
+
+The metric is collected only when a TypeSafe API key is configured, and a
+failed request is logged and skipped without failing the provider's row.
+
 ### Character Error Rate
 
 Every clip that gets a WER row also gets a `CharacterErrorRate` row, scored on

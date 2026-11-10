@@ -3,6 +3,7 @@
 """Public API for coval_bench metrics."""
 
 from coval_bench.metrics.cer import CERResult, compute_cer
+from coval_bench.metrics.judgejev import JudgeJevResult, ask_jev, compute_judgejev
 from coval_bench.metrics.semantic_wer import (
     LEVEL_WEIGHTS,
     SEMANTIC_WER_VERSION,
@@ -28,6 +29,9 @@ from coval_bench.metrics.wer import WERResult, compute_wer, normalize_text
 
 __all__ = [
     "CERResult",
+    "JudgeJevResult",
+    "ask_jev",
+    "compute_judgejev",
     "SemDistResult",
     "WERResult",
     "compute_cer",
