@@ -32,6 +32,9 @@ def test_metric_values_match_stored_strings() -> None:
         "WorkflowAdherence",
         "CharacterErrorRate",
         "ToolCallCount",
+        "InterruptionCueLanded",
+        "InterruptionYielded",
+        "BackchannelContinued",
     }
 
 
@@ -54,6 +57,9 @@ def test_units_match_stored_strings() -> None:
         Metric.WORKFLOW_ADHERENCE: "percent",
         Metric.CHARACTER_ERROR_RATE: "percent",
         Metric.TOOL_CALL_COUNT: "count",
+        Metric.INTERRUPTION_CUE_LANDED: "count",
+        Metric.INTERRUPTION_YIELDED: "percent",
+        Metric.BACKCHANNEL_CONTINUED: "percent",
     }
     assert {m: spec.units for m, spec in METRIC_SPECS.items()} == expected
 
@@ -71,17 +77,27 @@ def test_benchmark_coverage() -> None:
     assert METRIC_SPECS[Metric.WORKFLOW_ADHERENCE].benchmarks == {Benchmark.S2S}
     assert METRIC_SPECS[Metric.CHARACTER_ERROR_RATE].benchmarks == {Benchmark.S2S}
     assert METRIC_SPECS[Metric.TOOL_CALL_COUNT].benchmarks == {Benchmark.S2S}
+    for metric in (
+        Metric.INTERRUPTION_CUE_LANDED,
+        Metric.INTERRUPTION_YIELDED,
+        Metric.BACKCHANNEL_CONTINUED,
+    ):
+        assert METRIC_SPECS[metric].benchmarks == {Benchmark.S2S}
 
 
 def test_metric_directions() -> None:
-    # The adherence metrics are pass rates: higher is better. Tool Call Count has a
-    # right answer per test case, so no direction. Every other metric is a
-    # latency/error measure: lower is better.
-    assert METRIC_SPECS[Metric.TOOL_CALL_COUNT].direction is None
+    # The adherence and interruption judges are pass rates: higher is better. Tool
+    # Call Count has a right answer per test case and Cue Landed is a validity gate,
+    # so neither has a direction. Every other metric is a latency/error measure:
+    # lower is better.
+    undirected = {Metric.TOOL_CALL_COUNT, Metric.INTERRUPTION_CUE_LANDED}
+    assert all(METRIC_SPECS[m].direction is None for m in undirected)
     higher_is_better = {
         Metric.INSTRUCTION_FOLLOWING,
         Metric.EXPECTED_BEHAVIOR_ADHERENCE,
         Metric.WORKFLOW_ADHERENCE,
+        Metric.INTERRUPTION_YIELDED,
+        Metric.BACKCHANNEL_CONTINUED,
     }
     assert all(
         METRIC_SPECS[m].direction is MetricDirection.HIGHER_IS_BETTER for m in higher_is_better
@@ -89,11 +105,16 @@ def test_metric_directions() -> None:
     assert all(
         spec.direction is MetricDirection.LOWER_IS_BETTER
         for m, spec in METRIC_SPECS.items()
-        if m not in higher_is_better and m is not Metric.TOOL_CALL_COUNT
+        if m not in higher_is_better and m not in undirected
     )
 
 
 def test_adherence_rates_are_capped_at_100_percent() -> None:
-    for metric in (Metric.INSTRUCTION_FOLLOWING, Metric.WORKFLOW_ADHERENCE):
+    for metric in (
+        Metric.INSTRUCTION_FOLLOWING,
+        Metric.WORKFLOW_ADHERENCE,
+        Metric.INTERRUPTION_YIELDED,
+        Metric.BACKCHANNEL_CONTINUED,
+    ):
         (primary,) = METRIC_VALUE_CONTRACTS[(metric, "v1")].values
         assert (primary.minimum, primary.maximum) == (0.0, 100.0)

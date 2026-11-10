@@ -38,6 +38,9 @@ class Metric(StrEnum):
     WORKFLOW_ADHERENCE = "WorkflowAdherence"
     CHARACTER_ERROR_RATE = "CharacterErrorRate"
     TOOL_CALL_COUNT = "ToolCallCount"
+    INTERRUPTION_CUE_LANDED = "InterruptionCueLanded"
+    INTERRUPTION_YIELDED = "InterruptionYielded"
+    BACKCHANNEL_CONTINUED = "BackchannelContinued"
 
 
 class MetricDirection(StrEnum):
@@ -216,6 +219,27 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         decimals=0,
         benchmarks=frozenset({Benchmark.S2S}),
     ),
+    Metric.INTERRUPTION_CUE_LANDED: MetricSpec(
+        display_name="Interruption Cue Landed",
+        units="count",
+        direction=None,
+        decimals=0,
+        benchmarks=frozenset({Benchmark.S2S}),
+    ),
+    Metric.INTERRUPTION_YIELDED: MetricSpec(
+        display_name="Interruption Yielded",
+        units="percent",
+        direction=MetricDirection.HIGHER_IS_BETTER,
+        decimals=1,
+        benchmarks=frozenset({Benchmark.S2S}),
+    ),
+    Metric.BACKCHANNEL_CONTINUED: MetricSpec(
+        display_name="Backchannel Continued",
+        units="percent",
+        direction=MetricDirection.HIGHER_IS_BETTER,
+        decimals=1,
+        benchmarks=frozenset({Benchmark.S2S}),
+    ),
 }
 
 if METRIC_SPECS.keys() != set(Metric):
@@ -223,12 +247,22 @@ if METRIC_SPECS.keys() != set(Metric):
     raise RuntimeError(f"METRIC_SPECS is missing specs for: {_missing}")
 
 
+_BOUNDED_RATES = frozenset(
+    {
+        Metric.INSTRUCTION_FOLLOWING,
+        Metric.WORKFLOW_ADHERENCE,
+        Metric.INTERRUPTION_YIELDED,
+        Metric.BACKCHANNEL_CONTINUED,
+    }
+)
+
+
 def _primary(metric: Metric) -> MetricValueDefinition:
     spec = METRIC_SPECS[metric]
     # WER can legitimately exceed 100% when insertions outnumber reference
     # words. Only the instruction and workflow adherence rates are intrinsically
     # bounded.
-    maximum = 100.0 if metric in {Metric.INSTRUCTION_FOLLOWING, Metric.WORKFLOW_ADHERENCE} else None
+    maximum = 100.0 if metric in _BOUNDED_RATES else None
     return MetricValueDefinition(
         key="primary",
         unit=spec.units,
@@ -262,6 +296,9 @@ METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
         Metric.WORKFLOW_ADHERENCE,
         Metric.CHARACTER_ERROR_RATE,
         Metric.TOOL_CALL_COUNT,
+        Metric.INTERRUPTION_CUE_LANDED,
+        Metric.INTERRUPTION_YIELDED,
+        Metric.BACKCHANNEL_CONTINUED,
     )
 }
 METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
