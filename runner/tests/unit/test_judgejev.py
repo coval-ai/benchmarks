@@ -13,7 +13,6 @@ from coval_bench.config import Settings
 from coval_bench.metrics import compute_judgejev
 from coval_bench.metrics.judgejev import find_differences
 from coval_bench.registries import Metric
-from coval_bench.registries.metrics import MetricValueRole, validate_metric_values
 from coval_bench.runner.orchestrator import _item_rows
 
 _REF = "please cancel my card before the fifth"
@@ -48,9 +47,7 @@ async def test_only_differences_jev_confirms_are_counted() -> None:
     (request,) = jev.requests
     assert [c["reference_words"] for c in request["state"]["changes"]] == ["card", "the"]
     assert request["questions"].keys() == {"c0", "c1"}
-    assert (result.errors, result.strict_errors, result.lenient_errors) == (1, 2, 1)
-    assert result.expected_errors == pytest.approx(1.3)
-    assert (result.differences, result.reference_words) == (2, 7)
+    assert (result.errors, result.reference_words) == (1, 7)
     assert result.percentage == pytest.approx(100 / 7)
 
 
@@ -96,8 +93,4 @@ async def test_row_carries_the_counts_and_a_failed_request_is_skipped(
     (row,) = rows.results
     assert (row.metric_type, row.metric_units) == (Metric.JUDGE_JEV, "percent")
     assert row.metric_value == pytest.approx(100 / 7)
-    values = [("primary", "percent", row.metric_value, MetricValueRole.PRIMARY)] + [
-        (key, "count", count, MetricValueRole.COMPONENT)
-        for key, count in row.judgejev_counts.items()
-    ]
-    validate_metric_values(Metric.JUDGE_JEV, "v1", tuple(values))
+    assert (row.judgejev_errors, row.judgejev_reference_words) == (1, 7)

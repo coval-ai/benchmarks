@@ -22,6 +22,9 @@ from .conftest import apply_migrations, open_pool
 
 metric_pg = postgresql("pg_proc")
 
+# seeded codes the registry doesn't have; metric rows can't be deleted
+_RETIRED = {"SemDistMiniLM": "SemDist (MiniLM)"}
+
 _INSERT_BUCKET = """
 INSERT INTO benchmarks_v2.dashboard_rollups
 (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
@@ -40,7 +43,7 @@ def test_frozen_seeds_have_generated_ids_and_current_display_names(
     assert len(rows) == 21
     assert len({row[0] for row in rows}) == 21
     assert all(isinstance(row[0], int) and row[0] > 0 for row in rows)
-    assert {row[1]: row[2] for row in rows} == {
+    assert {row[1]: row[2] for row in rows} == _RETIRED | {
         metric.value: spec.display_name for metric, spec in METRIC_SPECS.items()
     }
     identity = metric_pg.execute(

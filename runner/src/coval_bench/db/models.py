@@ -326,8 +326,9 @@ class Result(BaseModel):
     # STT/TTS CharacterErrorRate only: the character counts behind metric_value.
     cer_errors: int | None = None
     cer_reference_chars: int | None = None
-    # JudgeJev only: the counts behind metric_value, keyed as in its value contract.
-    judgejev_counts: dict[str, float] | None = None
+    # JudgeJev only: the word counts behind metric_value.
+    judgejev_errors: int | None = None
+    judgejev_reference_words: int | None = None
 
 
 class VoteOutcome(StrEnum):

@@ -26,8 +26,6 @@ JEV_MODEL = "jev-1.14.0"
 
 # A difference counts as an error when Jev's probability of "yes" reaches the cutoff.
 ERROR_CUTOFF = 0.5
-LENIENT_CUTOFF = 0.7
-STRICT_CUTOFF = 0.3
 
 _CONTEXT_WORDS = 3
 _TIMEOUT_S = 10.0
@@ -87,10 +85,6 @@ class JudgeJevResult(BaseModel):
     rate: float
     percentage: float
     errors: int
-    strict_errors: int
-    lenient_errors: int
-    expected_errors: float
-    differences: int
     reference_words: int
 
 
@@ -165,22 +159,13 @@ def score(
     reference_words: int, differences: Sequence[Difference], probabilities: Sequence[float]
 ) -> JudgeJevResult:
     """Count the differences Jev called real, each at the word count WER gives it."""
-
-    def errors_at(cutoff: float) -> int:
-        return sum(d.weight for d, p in zip(differences, probabilities, strict=True) if p >= cutoff)
-
-    errors = errors_at(ERROR_CUTOFF)
+    errors = sum(
+        d.weight for d, p in zip(differences, probabilities, strict=True) if p >= ERROR_CUTOFF
+    )
     # An empty reference follows compute_wer: the count stands in for the rate.
     rate = errors / reference_words if reference_words else float(errors)
     return JudgeJevResult(
-        rate=rate,
-        percentage=rate * 100.0,
-        errors=errors,
-        strict_errors=errors_at(STRICT_CUTOFF),
-        lenient_errors=errors_at(LENIENT_CUTOFF),
-        expected_errors=sum(d.weight * p for d, p in zip(differences, probabilities, strict=True)),
-        differences=len(differences),
-        reference_words=reference_words,
+        rate=rate, percentage=rate * 100.0, errors=errors, reference_words=reference_words
     )
 
 

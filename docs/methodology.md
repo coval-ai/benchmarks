@@ -159,10 +159,8 @@ word count WER gives it, so the score is never above WER.
 Jev is not asked when the two texts match after normalization, and an empty
 transcript counts every reference word. `compute_judgejev` in
 `runner/src/coval_bench/metrics/judgejev.py` does the scoring. Each row stores
-the error counts at cutoffs of 0.3, 0.5 and 0.7, the probability-weighted
-count, the number of differences and the reference word count next to the
-percentage, so the metric can be pooled like WER and the cutoff revisited
-without asking Jev again. The Jev model version is pinned in code. Answers
+the judged error count and the reference word count next to the percentage,
+so the metric can be pooled like WER. The Jev model version is pinned in code. Answers
 are not perfectly repeatable: the same request can move a probability by a few
 hundredths, which flips the verdict on a small share of borderline
 differences.
@@ -180,21 +178,6 @@ in `runner/src/coval_bench/metrics/cer.py`. A near miss such as `bennet` for
 Each row stores the character error count and the reference character count
 next to the percentage, so the metric can be pooled across clips the way WER
 is. Dashboard aggregates currently average the per-clip percentage.
-
-### SemDist
-
-SemDist asks whether the hypothesis means the same thing as the reference,
-where WER and CER ask whether it uses the same words. Both normalized strings
-are embedded with a sentence-embedding model and the score is one minus the
-cosine similarity of the two vectors: 0 for identical text, around 1 for
-unrelated text. `compute_semdist` in `runner/src/coval_bench/metrics/semdist.py`
-does the scoring, and an empty transcript against a non-empty reference scores 1.
-
-`SemDistMiniLM` uses `all-MiniLM-L6-v2`, run with ONNX Runtime from a copy
-pinned into the runner image. Text past the model's 256-token window is cut
-off on both sides. Small embedding models are weak on negation and on single
-word swaps that flip the meaning, so this metric is collected alongside WER
-and CER and is not a replacement for either.
 
 ### Aggregation
 
