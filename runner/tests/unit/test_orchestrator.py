@@ -1228,6 +1228,9 @@ async def test_tts_http1_downgrade_nulls_ttfa_row(settings: Settings) -> None:
         assert ttfa_rows[0].metric_value is None
         assert "HTTP/1.1" in ttfa_rows[0].error
         assert _captured_transport(writer) == "HTTP/1.1"
+        (capture,) = writer.capture_results.call_args_list
+        artifacts = capture.kwargs["envelope"].payload["artifacts"]
+        assert {a["artifact_type"] for a in artifacts} >= {"provider_transcript", "generated_audio"}
 
         # A nulled TTFA writes no component rows either.
         assert not [
