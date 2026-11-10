@@ -21,14 +21,18 @@ from coval_bench.metrics.semantic_wer import (
     canonicalize_identifier_text,
     compute_semantic_wer,
 )
+from coval_bench.metrics.semdist import SemDistResult, compute_semdist, load_sentence_embedder
 from coval_bench.metrics.ttfa import compute_ttfa, first_audible_offset_ms
 from coval_bench.metrics.ttft import compute_rtf, compute_ttfs
 from coval_bench.metrics.wer import WERResult, compute_wer, normalize_text
 
 __all__ = [
     "CERResult",
+    "SemDistResult",
     "WERResult",
     "compute_cer",
+    "compute_semdist",
+    "load_sentence_embedder",
     "compute_wer",
     "normalize_text",
     "compute_ttfa",
