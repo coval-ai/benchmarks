@@ -70,6 +70,7 @@ class _ScenarioVersion(_Schedules, frozen=True):
     personas: dict[str, _Ref]
     judge: _Ref | None
     metric_ids: dict[str, _CovalId]
+    run_template_ids: dict[str, _CovalId] = {}
 
 
 def _newest_live(versions: dict[str, Any]) -> _ScenarioVersion | None:
@@ -180,15 +181,28 @@ def scenario_map_fields(raw: object) -> dict[str, Any]:
     }
 
 
-def with_scenario_map(settings: Settings) -> Settings:
-    """``settings`` with its Coval ids taken from the scenario map, when one is configured."""
-    uri = settings.s2s_scenario_map_uri.strip()
-    if not uri:
-        return settings
+def read_scenario_map(uri: str) -> object:
+    """The scenario map infra publishes at ``uri`` (``gs://bucket/key``)."""
     bucket, _, key = uri.removeprefix("gs://").partition("/")
     if not uri.startswith("gs://") or not bucket or not key:
         raise ValueError(f"s2s_scenario_map_uri {uri!r} is not a gs://bucket/key URI")
     raw = gcs.read_json(bucket, key)
     if raw is None:
         raise RuntimeError(f"scenario map {uri} not found")
+    return raw
+
+
+def daily_scenario(raw: object) -> _ScenarioVersion:
+    """The daily scenario's live version; its templates take their agents from the registry."""
+    if not isinstance(raw, dict):
+        raise ValueError("scenario map is not a JSON object")
+    return _live_version(_DAILY_SCENARIO, raw.get(_DAILY_SCENARIO))
+
+
+def with_scenario_map(settings: Settings) -> Settings:
+    """``settings`` with its Coval ids taken from the scenario map, when one is configured."""
+    uri = settings.s2s_scenario_map_uri.strip()
+    if not uri:
+        return settings
+    raw = read_scenario_map(uri)
     return Settings.model_validate({**settings.model_dump(), **scenario_map_fields(raw)})

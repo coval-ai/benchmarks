@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import psycopg
 import psycopg.errors
@@ -34,6 +34,9 @@ from coval_bench.registries.models import (
     Source,
     Voice,
 )
+
+if TYPE_CHECKING:
+    from coval_bench.config import Settings
 
 RegistryPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]
 
@@ -506,3 +509,16 @@ async def fetch_models(pool: RegistryPool) -> list[RegisteredModel]:
     ``/v1/providers`` serves per modality.
     """
     return [_registered(record) for record in await RegistryStore(pool).list_models()]
+
+
+def load_models(settings: Settings) -> list[RegisteredModel]:
+    """Every registered model, read through a short-lived pool, for a command-line job."""
+    import asyncio
+
+    from coval_bench.db.conn import lifespan_pool
+
+    async def _load() -> list[RegisteredModel]:
+        async with lifespan_pool(settings) as pool:
+            return await fetch_models(pool)
+
+    return asyncio.run(_load())
