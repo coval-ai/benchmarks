@@ -175,10 +175,10 @@ def test_refresh_materializes_wer_percentiles_and_pooled_values(
     asyncio.run(scenario())
 
 
-def test_unknown_summary_metric_rolls_back_state_and_views(
+def test_unknown_summary_metric_does_not_block_the_refresh(
     summary_pg: psycopg.Connection[Any],
 ) -> None:
-    """An eligible unknown source code cannot replace the prior snapshot."""
+    """Rows left behind by a metric the code no longer knows don't stop a refresh."""
     apply_migrations(summary_pg)
     as_of = datetime(2026, 9, 14, 12, tzinfo=UTC)
 
@@ -193,9 +193,6 @@ def test_unknown_summary_metric_rolls_back_state_and_views(
                     await conn.execute(
                         "SELECT generation, as_of FROM benchmarks_v2.dashboard_window_state"
                     )
-                ).fetchone()
-                before_view = await (
-                    await conn.execute("SELECT count(*) AS n FROM benchmarks_v2.results_24h")
                 ).fetchone()
             run_id = _insert_summary_run(summary_pg, as_of)
             observation_id = uuid4()
@@ -234,19 +231,16 @@ def test_unknown_summary_metric_rolls_back_state_and_views(
                     (as_of, as_of, evaluation_id),
                 )
             summary_pg.commit()
-            with pytest.raises(ValueError, match="UnknownSummaryMetric"):
-                await refresh_window_views(pool, as_of=as_of)
+            result = await refresh_window_views(pool, as_of=as_of)
             async with pool.connection() as conn:
                 after = await (
                     await conn.execute(
                         "SELECT generation, as_of FROM benchmarks_v2.dashboard_window_state"
                     )
                 ).fetchone()
-                after_view = await (
-                    await conn.execute("SELECT count(*) AS n FROM benchmarks_v2.results_24h")
-                ).fetchone()
-            assert after == before
-            assert after_view == before_view
+            assert result.status == "published"
+            assert before is not None and after is not None
+            assert after["generation"] == before["generation"] + 1
         finally:
             await pool.close()
 

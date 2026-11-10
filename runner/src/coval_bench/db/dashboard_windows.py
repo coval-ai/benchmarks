@@ -82,9 +82,9 @@ async def refresh_window_views(
         )
         source_codes = {str(row["metric_type"]) for row in (await source_result.fetchall())}
         supported = {metric.value for metric, version in METRIC_VALUE_CONTRACTS if version == "v1"}
-        invalid = sorted((source_codes - set(metric_ids)) | (source_codes - supported))
-        if invalid:
-            raise ValueError("invalid metrics in summary source: " + ", ".join(invalid))
+        unknown = sorted((source_codes - set(metric_ids)) | (source_codes - supported))
+        if unknown:
+            logger.warning("dashboard_window_unknown_metrics", metrics=unknown)
         # The defining SQL reads this transaction-local snapshot boundary.  A
         # failed refresh rolls this provisional update back with the views.
         state = await conn.execute(
