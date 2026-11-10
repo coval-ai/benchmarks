@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import Any, Self
@@ -18,8 +17,7 @@ from pydantic import BaseModel, SecretStr
 
 from coval_bench import scenarios
 from coval_bench.config import Settings, get_settings
-from coval_bench.db.conn import lifespan_pool
-from coval_bench.db.registry_store import fetch_models
+from coval_bench.db.registry_store import load_models
 from coval_bench.llm import benchmark
 from coval_bench.logging import configure_logging
 from coval_bench.platform_assets import COVAL_API_BASE, COVAL_API_KEY, CovalClient, SyncError, plan
@@ -154,11 +152,7 @@ def scheduled_run_body(run_name: str, run_template_id: str, *, enabled: bool) ->
 
 
 def load_llm_models(settings: Settings) -> list[RegisteredModel]:
-    async def _load() -> list[RegisteredModel]:
-        async with lifespan_pool(settings) as pool:
-            return benchmark.llm_models(await fetch_models(pool))
-
-    return asyncio.run(_load())
+    return benchmark.llm_models(load_models(settings))
 
 
 class CovalTextClient(CovalClient):
@@ -183,11 +177,6 @@ class CovalTextClient(CovalClient):
 
     def create_run_template(self, body: dict[str, Any]) -> dict[str, Any]:
         payload = self._request("POST", "/run-templates", body)
-        template = payload.get("run_template")
-        return template if isinstance(template, dict) else payload
-
-    def update_run_template(self, template_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        payload = self._request("PATCH", f"/run-templates/{template_id}", body)
         template = payload.get("run_template")
         return template if isinstance(template, dict) else payload
 

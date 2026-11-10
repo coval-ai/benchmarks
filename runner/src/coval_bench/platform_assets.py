@@ -846,6 +846,16 @@ class CovalClient(_JsonClient):
         agent = payload.get("agent")
         return agent if isinstance(agent, dict) else payload
 
+    def get_run_template(self, template_id: str) -> dict[str, Any]:
+        payload = self._request("GET", f"/run-templates/{template_id}")
+        template = payload.get("run_template")
+        return template if isinstance(template, dict) else payload
+
+    def update_run_template(self, template_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        payload = self._request("PATCH", f"/run-templates/{template_id}", body)
+        template = payload.get("run_template")
+        return template if isinstance(template, dict) else payload
+
     def launch_run(self, body: dict[str, Any]) -> dict[str, Any]:
         payload = self._request("POST", "/runs", body)
         run = payload.get("run")
