@@ -46,6 +46,7 @@ from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable, Hashable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime  # noqa: UP017 — UTC alias requires 3.11+, target is 3.12
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -606,6 +607,37 @@ class _ItemRows:
             wer_percentage=wer_result.wer_percentage,
         )
 
+    async def score_judgejev(
+        self, settings: Settings, reference: str, hypothesis: str, *, audio_filename: str | None
+    ) -> None:
+        """One JudgeJev row. Jev is our instrument: a failure is logged and skipped."""
+        api_key = settings.typesafe_api_key
+        if api_key is None:
+            return
+        from coval_bench.metrics import ask_jev, compute_judgejev
+
+        try:
+            result = await compute_judgejev(
+                reference, hypothesis, partial(ask_jev, api_key=api_key.get_secret_value())
+            )
+        except Exception as exc:
+            logger.warning(
+                "judgejev_failed",
+                provider=self.entry.provider,
+                model=self.entry.model,
+                exc_info=exc,
+            )
+            return
+        self.add(
+            Metric.JUDGE_JEV,
+            result.percentage,
+            status=self.result_status.SUCCESS,
+            audio_filename=audio_filename,
+            transcript=hypothesis,
+            judgejev_errors=result.errors,
+            judgejev_reference_words=result.reference_words,
+        )
+
     async def call_provider(
         self,
         kind: Literal["stt", "tts"],
@@ -857,6 +889,9 @@ async def _run_stt_item(
                 ok_event="stt_wer",
                 failed_event="wer_computation_failed",
             )
+            await rows.score_judgejev(
+                settings, transcript_ref, complete_transcript, audio_filename=audio_path.name
+            )
             rows.score_cer(transcript_ref, complete_transcript, audio_filename=audio_path.name)
 
     results = rows.finish("stt", audio_path.name)
@@ -1031,6 +1066,12 @@ async def _run_tts_item(
                         audio_filename=audio_path.name,
                         ok_event="tts_wer",
                         failed_event="tts_wer_computation_failed",
+                    )
+                    await rows.score_judgejev(
+                        settings,
+                        item.spoken_reference or transcript,
+                        whisper_transcript,
+                        audio_filename=audio_path.name,
                     )
                     rows.score_cer(
                         item.spoken_reference or transcript,

@@ -40,8 +40,8 @@ def test_frozen_seeds_have_generated_ids_and_current_display_names(
 ) -> None:
     apply_migrations(metric_pg)
     rows = metric_pg.execute("SELECT id, code, display_name FROM benchmarks_v2.metrics").fetchall()
-    assert len(rows) == 20
-    assert len({row[0] for row in rows}) == 20
+    assert len(rows) == 21
+    assert len({row[0] for row in rows}) == 21
     assert all(isinstance(row[0], int) and row[0] > 0 for row in rows)
     assert {row[1]: row[2] for row in rows} == _RETIRED | {
         metric.value: spec.display_name for metric, spec in METRIC_SPECS.items()
