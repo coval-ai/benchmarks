@@ -110,8 +110,9 @@ a canonical form, expands contractions, drops filler words, maps British
 spellings to American, and strips diacritics and punctuation.
 
 `normalize_text` adds a few rules of its own around it. Ellipses and other
-punctuation-only tokens are never scored as words. Initialisms lose their
-periods (`U.S.` and `US` match). A possessive `'s` drops its apostrophe rather
+punctuation-only tokens are never scored as words. Words inside parentheses
+are kept, where `EnglishTextNormalizer` alone would delete them. Initialisms
+lose their periods (`U.S.` and `US` match). A possessive `'s` drops its apostrophe rather
 than expanding to `is`; only `'s` after a pronoun-like word (`it's`, `that's`)
 is treated as a contraction. A contracted `is` after a noun (`John's going`)
 is therefore read as a possessive and will not match a reference that spells
@@ -120,7 +121,7 @@ normalizes (`9:40` and `nine forty`, `5:00` and `five o'clock`). Digits
 followed by a spelled-out number stay two numbers. A small table of equivalent
 spellings and compounds (`ok`/`okay`, `team work`/`teamwork`) is applied last.
 
-**Version constant.** `wer.NORM_VERSION` (currently `"3"`) is bumped on any
+**Version constant.** `wer.NORM_VERSION` (currently `"4"`) is bumped on any
 behavioural change to the pipeline. The constant is included on every
 `WERResult` as `norm_version` while the metric is computed, but is not
 persisted with the result row.

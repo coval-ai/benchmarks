@@ -151,7 +151,7 @@ class SemanticWERResult(BaseModel):
     unit_scores: list[SemanticUnitScore]
     wer: WERResult
     semantic_wer_version: Literal["0.1-draft"] = SEMANTIC_WER_VERSION
-    norm_version: Literal["3"] = NORM_VERSION
+    norm_version: Literal["4"] = NORM_VERSION
 
     def normalized_value_rows(self) -> list[SemanticValueRow]:
         """Return sufficient statistics for one benchmark observation."""
@@ -242,7 +242,7 @@ class SemanticWERAggregate(BaseModel):
     utterances: int
     outcome_counts_by_kind: dict[str, dict[str, int]]
     semantic_wer_version: Literal["0.1-draft"] = SEMANTIC_WER_VERSION
-    norm_version: Literal["3"] = NORM_VERSION
+    norm_version: Literal["4"] = NORM_VERSION
 
     def normalized_value_rows(self) -> list[SemanticValueRow]:
         """Return pooled values without exposing per-sample ratios as aggregates."""

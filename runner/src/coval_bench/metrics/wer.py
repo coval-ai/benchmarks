@@ -20,7 +20,7 @@ from whisper_normalizer.english import EnglishTextNormalizer
 # Bumped on any behavioural change to normalization; surfaced on ``WERResult``
 # so a result row can be attributed to the revision that produced it.
 # Documented in ``docs/methodology.md`` and ADR-021.
-NORM_VERSION: Literal["3"] = "3"
+NORM_VERSION: Literal["4"] = "4"
 
 # ---------------------------------------------------------------------------
 # Public data models
@@ -36,7 +36,7 @@ class WERResult(BaseModel):
     deletions: int
     insertions: int
     reference_words: int
-    norm_version: Literal["3"] = NORM_VERSION
+    norm_version: Literal["4"] = NORM_VERSION
 
     @property
     def error_counts(self) -> dict[str, int]:
@@ -54,6 +54,7 @@ class WERResult(BaseModel):
 
 _normalizer = EnglishTextNormalizer()
 
+_PARENTHESES = re.compile(r"[()]")
 _ELLIPSIS = re.compile(r"…|\.(?:\s*\.)+")
 _INITIALISM = re.compile(r"(?<![A-Za-z])(?:[A-Za-z]\.)+[A-Za-z]?(?![A-Za-z])")
 _APOSTROPHE_S = re.compile(r"\b([A-Za-z]+)'s\b(?!\s+(?:been|gone|got)\b)")
@@ -149,6 +150,7 @@ def _join_clock_time(match: re.Match[str]) -> str:
 def normalize_text(text: str) -> str:
     """Canonical normalization: ``EnglishTextNormalizer`` plus our cleanup rules."""
     text = text.replace("’", "'")
+    text = _PARENTHESES.sub(" ", text)
     text = _ELLIPSIS.sub(" ", text)
     text = _INITIALISM.sub(_join_initialism, text)
     text = _APOSTROPHE_S.sub(_drop_possessive_apostrophe, text)
