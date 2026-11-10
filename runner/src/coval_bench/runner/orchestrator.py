@@ -1012,8 +1012,8 @@ async def _run_tts_item(
             # WER via Whisper on the synthesized audio. Whisper is our instrument, not the
             # provider under test: a transcription failure is logged and skipped so a
             # Whisper outage doesn't drag the provider's run to PARTIAL.
+            whisper_transcript: str | None = None
             if item_error is None and audio_path is not None and audio_path.exists():
-                whisper_transcript: str | None = None
                 try:
                     whisper_transcript = await _transcribe_with_whisper(audio_path, settings)
                 except Exception as exc:
@@ -1055,6 +1055,7 @@ async def _run_tts_item(
                     provider_error=item_error,
                     captured_at=datetime.now(UTC),
                     voice=voice,
+                    transcript=whisper_transcript,
                     timing_events={"ttfa_ms": ttfa_ms},
                     audio_snapshot=(
                         snapshot_generated_audio(audio_path) if audio_path is not None else None
