@@ -38,8 +38,15 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger("coval_bench.probe")
 
-_STT_METRICS = (Metric.TTFS, Metric.TTFT, Metric.AUDIO_TO_FINAL, Metric.RTF, Metric.WER)
-_TTS_METRICS = (Metric.TTFA, Metric.WER)
+_STT_METRICS = (
+    Metric.TTFS,
+    Metric.TTFT,
+    Metric.AUDIO_TO_FINAL,
+    Metric.RTF,
+    Metric.WER,
+    Metric.CHARACTER_ERROR_RATE,
+)
+_TTS_METRICS = (Metric.TTFA, Metric.WER, Metric.CHARACTER_ERROR_RATE)
 # Fixed seed so repeated probes draw the same sample for run-to-run comparability.
 _SEED = 0
 

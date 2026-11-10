@@ -143,6 +143,17 @@ same time or initialism normalizing differently depending on how it was
 written. WER drops for models that emit punctuated, formatted transcripts, so
 values before and after the change are not directly comparable.
 
+### Character Error Rate
+
+Every clip that gets a WER row also gets a `CharacterErrorRate` row, scored on
+the same normalized reference and hypothesis. It is the character-level edit
+distance over the reference length, spaces included, computed by `compute_cer`
+in `runner/src/coval_bench/metrics/cer.py`. A near miss such as `bennet` for
+`bennett` costs one character out of seven here and a whole word under WER.
+Each row stores the character error count and the reference character count
+next to the percentage, so the metric can be pooled across clips the way WER
+is. Dashboard aggregates currently average the per-clip percentage.
+
 ### Aggregation
 
 The headline WER for a model is corpus-level: the sum of substitutions,

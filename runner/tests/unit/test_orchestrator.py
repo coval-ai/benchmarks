@@ -657,7 +657,7 @@ async def test_non_finalizing_models_excluded_from_ttfs(
 
     metric_types = {r.metric_type for r in _recorded_rows(writer)}
     assert "TTFS" not in metric_types
-    assert metric_types == {"TTFT", "AudioToFinal", "RTF", "WER"}
+    assert metric_types == {"TTFT", "AudioToFinal", "RTF", "WER", "CharacterErrorRate"}
 
 
 @pytest.mark.asyncio
@@ -694,6 +694,7 @@ async def test_flux_models_included_in_ttfs(
         "RTF",
         "TTFS",
         "WER",
+        "CharacterErrorRate",
     }
 
 
@@ -741,7 +742,7 @@ async def test_non_streaming_models_excluded_from_ttft(
 
     metric_types = {r.metric_type for r in _recorded_rows(writer)}
     assert "TTFT" not in metric_types
-    assert metric_types == {"AudioToFinal", "RTF", "TTFS", "WER"}
+    assert metric_types == {"AudioToFinal", "RTF", "TTFS", "WER", "CharacterErrorRate"}
 
 
 # ---------------------------------------------------------------------------
