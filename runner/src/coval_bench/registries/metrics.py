@@ -65,6 +65,10 @@ class MetricSpec(BaseModel, frozen=True):
     direction: MetricDirection | None
     decimals: int
     benchmarks: frozenset[Benchmark]
+    # Scored on transcript text rather than on timing.
+    scored_from_text: bool = False
+    # Set on a row that's one part of another metric's value.
+    component_of: Metric | None = None
 
 
 class MetricValueDefinition(BaseModel, frozen=True):
@@ -103,6 +107,7 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=1,
         benchmarks=frozenset({Benchmark.STT, Benchmark.TTS}),
+        scored_from_text=True,
     ),
     Metric.TTFT: MetricSpec(
         display_name="Time to First Token",
@@ -134,6 +139,7 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=0,
         benchmarks=frozenset({Benchmark.TTS}),
+        component_of=Metric.TTFA,
     ),
     Metric.TTFA_LEADING_SILENCE: MetricSpec(
         display_name="TTFA Leading Silence",
@@ -141,6 +147,7 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=0,
         benchmarks=frozenset({Benchmark.TTS}),
+        component_of=Metric.TTFA,
     ),
     Metric.RTF: MetricSpec(
         display_name="Real-Time Factor",
@@ -211,6 +218,7 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=1,
         benchmarks=frozenset({Benchmark.STT, Benchmark.TTS, Benchmark.S2S}),
+        scored_from_text=True,
     ),
     Metric.TOOL_CALL_COUNT: MetricSpec(
         display_name="Tool Call Count",
@@ -256,6 +264,15 @@ _BOUNDED_RATES = frozenset(
         Metric.BACKCHANNEL_CONTINUED,
     }
 )
+
+
+def headline_metrics(benchmark: Benchmark) -> tuple[Metric, ...]:
+    """Metrics a benchmark reports in their own right, in registry order."""
+    return tuple(
+        metric
+        for metric, spec in METRIC_SPECS.items()
+        if benchmark in spec.benchmarks and spec.component_of is None
+    )
 
 
 def _primary(metric: Metric) -> MetricValueDefinition:

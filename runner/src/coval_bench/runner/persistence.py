@@ -41,7 +41,7 @@ from coval_bench.observation_artifacts import (
     prepare_timing_events,
     upload_prepared_observation_artifact,
 )
-from coval_bench.registries import Benchmark, Metric
+from coval_bench.registries import METRIC_SPECS, Benchmark, Metric
 from coval_bench.runner import capture as capture_store
 from coval_bench.runner.capture import (
     CaptureEnvelope,
@@ -220,8 +220,14 @@ def _frozen_values(metric: str, rows: Sequence[Result], primary: Result) -> list
     return values
 
 
+_TEXT_SCORED = frozenset(str(m) for m, spec in METRIC_SPECS.items() if spec.scored_from_text)
+_COMPONENT_PARENTS = {
+    str(m): str(spec.component_of) for m, spec in METRIC_SPECS.items() if spec.component_of
+}
+
+
 def _frozen_inputs(metric: str, benchmark: str, available: set[str]) -> list[FrozenInput]:
-    scores_text = metric in {str(Metric.WER), str(Metric.CHARACTER_ERROR_RATE)}
+    scores_text = metric in _TEXT_SCORED
     if benchmark == "STT":
         wanted = [("transcript", "raw")] if scores_text else [("timing", "timing")]
     elif scores_text:
@@ -322,8 +328,7 @@ def prepare_capture_envelope(
     grouped: dict[str, list[Result]] = {}
     for row in results:
         metric = str(row.metric_type)
-        if metric in (str(Metric.TTFA_ROUNDTRIP), str(Metric.TTFA_LEADING_SILENCE)):
-            metric = str(Metric.TTFA)
+        metric = _COMPONENT_PARENTS.get(metric, metric)
         grouped.setdefault(metric, []).append(row)
     available_artifacts = {artifact.name for artifact in frozen_artifacts}
     evaluations: list[FrozenEvaluation] = []

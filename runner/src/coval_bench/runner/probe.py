@@ -24,6 +24,7 @@ from coval_bench.datasets.suite import DEFAULT_STT_DATASET
 from coval_bench.db.models import ResultStatus
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.registries import METRIC_SPECS, Benchmark, Metric
+from coval_bench.registries.metrics import headline_metrics
 from coval_bench.runner.gate import ModelGate
 from coval_bench.runner.orchestrator import (
     _get_stt_providers,
@@ -38,15 +39,6 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger("coval_bench.probe")
 
-_STT_METRICS = (
-    Metric.TTFS,
-    Metric.TTFT,
-    Metric.AUDIO_TO_FINAL,
-    Metric.RTF,
-    Metric.WER,
-    Metric.CHARACTER_ERROR_RATE,
-)
-_TTS_METRICS = (Metric.TTFA, Metric.WER, Metric.CHARACTER_ERROR_RATE)
 # Fixed seed so repeated probes draw the same sample for run-to-run comparability.
 _SEED = 0
 
@@ -189,7 +181,7 @@ async def _run(
                 entry=entry,
                 items=list(ds.items),
                 runner=_run_stt_item,
-                metrics=_STT_METRICS,
+                metrics=headline_metrics(Benchmark.STT),
                 gate=gate,
                 settings=settings,
             )
@@ -205,7 +197,7 @@ async def _run(
                 entry=entry,
                 items=list(ds_tts.items),
                 runner=_run_tts_item,
-                metrics=_TTS_METRICS,
+                metrics=headline_metrics(Benchmark.TTS),
                 gate=gate,
                 settings=settings,
             )

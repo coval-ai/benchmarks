@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from coval_bench.db.models import Benchmark
 from coval_bench.registries import METRIC_SPECS, Metric, MetricDirection
-from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS
+from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS, headline_metrics
 
 
 def test_every_metric_has_a_spec() -> None:
@@ -122,3 +122,23 @@ def test_adherence_rates_are_capped_at_100_percent() -> None:
     ):
         (primary,) = METRIC_VALUE_CONTRACTS[(metric, "v1")].values
         assert (primary.minimum, primary.maximum) == (0.0, 100.0)
+
+
+def test_headline_metrics_come_from_the_specs() -> None:
+    assert set(headline_metrics(Benchmark.STT)) == {
+        Metric.WER,
+        Metric.TTFT,
+        Metric.TTFS,
+        Metric.RTF,
+        Metric.AUDIO_TO_FINAL,
+        Metric.CHARACTER_ERROR_RATE,
+    }
+    assert set(headline_metrics(Benchmark.TTS)) == {
+        Metric.WER,
+        Metric.TTFA,
+        Metric.CHARACTER_ERROR_RATE,
+    }
+    assert {m for m, spec in METRIC_SPECS.items() if spec.scored_from_text} == {
+        Metric.WER,
+        Metric.CHARACTER_ERROR_RATE,
+    }
