@@ -14,7 +14,7 @@ audio is unchanged. Affected manifests moved from 1.0.0 to 1.1.0:
 
 | Manifest | Transcripts corrected | Clips dropped | Clips now |
 |---|---|---|---|
-| `stt-v3` | 49 | 15 | 882 |
+| `stt-v3` | 44 | 20 | 877 |
 | `stt-wildasr-*` (all six, same clips) | 40 | 7 | 277 |
 | `stt-wildasr-accent` | 2 | 1 | 844 |
 

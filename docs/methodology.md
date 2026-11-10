@@ -15,7 +15,7 @@ four. This document describes each one and where it lives.
   [LibriSpeech `test-clean`](https://www.openslr.org/12/) (`CC-BY-4.0`):
   studio-quality read English speech, speaker-balanced per ADR-020. The easy
   tier: most providers train on LibriSpeech, so absolute WER runs low.
-- `stt-v3` — 882 conversational clips from
+- `stt-v3` — 877 conversational clips from
   [pipecat-ai/stt-benchmark-data](https://huggingface.co/datasets/pipecat-ai/stt-benchmark-data):
   spontaneous voice-agent speech (fragments, fillers, prompted turns) with
   model-generated reference transcripts. The hard tier.
@@ -26,6 +26,12 @@ rules, provenance, and licenses are documented in
 `runner/src/coval_bench/datasets/manifests/README.md`. Runs recorded between
 2026-07-08 and 2026-07-13 used `stt-v2` (WildASR `fleurs_clean_en`), and runs
 before that used `stt-v1` alone.
+
+**Reference transcripts.** A reference is what the speaker says in the
+recording, not the script they were reading from. Misspoken or mispronounced
+words are written as spoken, and repeated words are kept. A clip that stops
+mid-sentence is kept as long as it ends on a whole word. A clip that ends on a
+cut-off word is dropped, since no transcript of it is fair to score against.
 
 **TTS benchmark.** Text prompts from the manifest named by `TTS_DATASET_ID`
 (default `tts-v1`, a 30-prompt set of short inputs). Source and selection rules

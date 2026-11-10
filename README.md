@@ -45,7 +45,7 @@ Most STT providers train on clean studio speech, so nearly all of them look good
 | `farfield` | Mic at a distance |
 | `clipping` | Peak distortion |
 | `phonecodec` | Telephony compression |
-| `stt-v3` | 882 spontaneous voice-agent turns, with fragments and fillers |
+| `stt-v3` | 877 spontaneous voice-agent turns, with fragments and fillers |
 | `tts-v1` | 30 short customer-service prompts: order tracking, appointments, account verification, tech support |
 
 Every clip is loudness-normalized to −20 dBFS RMS and **pinned to a SHA-256 hash**. If the audio changes, the runner refuses to score it.

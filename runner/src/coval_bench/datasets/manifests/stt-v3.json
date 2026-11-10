@@ -2278,14 +2278,6 @@
       "sample_id": "32773e53-5bbc-d88f-da94-aa1ca43f3ec6"
     },
     {
-      "path": "audio/0288.wav",
-      "sha256": "6c4c31d8f94f5166a9d90c9d6207d52469b28960c1fbfcebabbb3a57ce0ed2bb",
-      "transcript": "I want to learn how to play the ukulela. Can you suggest a good online resource or a mobile application for an absolute beginner with no prior musical instrument experience?",
-      "duration_sec": 11.036687,
-      "speech_end_offset_ms": 10308.0,
-      "sample_id": "969bfeb8-d95b-6050-2801-de67cf2d21e9"
-    },
-    {
       "path": "audio/0289.wav",
       "sha256": "40ce6fcf1276d1e083c8b92f07d60d0957fa9574342d40c62817df8b401e0bce",
       "transcript": "I want to learn much more about the ancient Roman city of Pompeii, including its daily life, the long history of its excavation, and what the archaeological findings have revealed about its society.",
@@ -5286,14 +5278,6 @@
       "sample_id": "04466e04-72b1-5d62-aef9-6671364ef519"
     },
     {
-      "path": "audio/0665.wav",
-      "sha256": "9cfcbb875884d879c85afd122fa94db0d0a0200a1f5e63d4a1216d7035b74787",
-      "transcript": "That being said, there were a couple times where I was like, holy crap, this spicy tuna roll paired",
-      "duration_sec": 4.287,
-      "speech_end_offset_ms": 4287.0,
-      "sample_id": "ca2f2a84-30fb-37f1-9f2a-4af0ca73410a"
-    },
-    {
       "path": "audio/0666.wav",
       "sha256": "99aab095ad4f5f71d247a13c2bdd026faaf30fcf5a81d466bd16b46578ed91d8",
       "transcript": "That'd be amazing I didn't think I could get anything done today with two",
@@ -6446,14 +6430,6 @@
       "sample_id": "88bb72d0-0b55-7021-bc40-4cca5d314726"
     },
     {
-      "path": "audio/0815.wav",
-      "sha256": "48467fb283dbaf90e54beeae55da0dc6a201034316fcd741ad27263264da11d2",
-      "transcript": "You'll have peace of mind knowing Ralph is covered for both acts.",
-      "duration_sec": 3.635,
-      "speech_end_offset_ms": 3635.0,
-      "sample_id": "96cb7d51-a59e-a54d-6776-f94a1404457a"
-    },
-    {
       "path": "audio/0816.wav",
       "sha256": "fba86326446ab86c398226fbe838dee7acb931b91e47d6c05a6fe9fcbcd8b720",
       "transcript": "Your cancellation policy states something that seems like",
@@ -6830,14 +6806,6 @@
       "sample_id": "edb0dc28-7b87-1fb6-99ba-b63311d5bf53"
     },
     {
-      "path": "audio/0867.wav",
-      "sha256": "7b927c6906a308c87ebbbdacb931ae23e140616e013400e44297a29623c3790b",
-      "transcript": "react to that new thing. And a lot of comics and shows",
-      "duration_sec": 3.346,
-      "speech_end_offset_ms": 3346.0,
-      "sample_id": "035025c0-d31f-a917-bdaf-ec2b8aa1e6ae"
-    },
-    {
       "path": "audio/0868.wav",
       "sha256": "1bdcbd06ac646587c1326d04192ac3061cca6f61ac2505ce6129d98999852548",
       "transcript": "really good base layer of skin care so that anything you put on on",
@@ -6900,14 +6868,6 @@
       "duration_sec": 3.194,
       "speech_end_offset_ms": 3194.0,
       "sample_id": "6044817a-551d-1807-5640-cfc546485173"
-    },
-    {
-      "path": "audio/0876.wav",
-      "sha256": "0d3431e2f93b53f67aaa91ae5ac59a7ecfc411b915d5c80745a65a5bf9a51d62",
-      "transcript": "Ship fee to keep your access to backup power available.",
-      "duration_sec": 3.386,
-      "speech_end_offset_ms": 3386.0,
-      "sample_id": "11519378-0408-b9fe-efa0-592e995766f1"
     },
     {
       "path": "audio/0877.wav",
