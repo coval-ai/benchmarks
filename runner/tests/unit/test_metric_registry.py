@@ -31,7 +31,6 @@ def test_metric_values_match_stored_strings() -> None:
         "ExpectedBehaviorAdherence",
         "WorkflowAdherence",
         "CharacterErrorRate",
-        "SemDistMiniLM",
         "ToolCallCount",
         "InterruptionCueLanded",
         "InterruptionYielded",
@@ -57,7 +56,6 @@ def test_units_match_stored_strings() -> None:
         Metric.EXPECTED_BEHAVIOR_ADHERENCE: "percent",
         Metric.WORKFLOW_ADHERENCE: "percent",
         Metric.CHARACTER_ERROR_RATE: "percent",
-        Metric.SEMDIST_MINILM: "ratio",
         Metric.TOOL_CALL_COUNT: "count",
         Metric.INTERRUPTION_CUE_LANDED: "count",
         Metric.INTERRUPTION_YIELDED: "percent",
@@ -134,16 +132,13 @@ def test_headline_metrics_come_from_the_specs() -> None:
         Metric.RTF,
         Metric.AUDIO_TO_FINAL,
         Metric.CHARACTER_ERROR_RATE,
-        Metric.SEMDIST_MINILM,
     }
     assert set(headline_metrics(Benchmark.TTS)) == {
         Metric.WER,
         Metric.TTFA,
         Metric.CHARACTER_ERROR_RATE,
-        Metric.SEMDIST_MINILM,
     }
     assert {m for m, spec in METRIC_SPECS.items() if spec.scored_from_text} == {
         Metric.WER,
         Metric.CHARACTER_ERROR_RATE,
-        Metric.SEMDIST_MINILM,
     }
