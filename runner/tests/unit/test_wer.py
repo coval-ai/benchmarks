@@ -136,8 +136,8 @@ def test_wer_percentage_approx() -> None:
 
 
 def test_norm_version() -> None:
-    assert NORM_VERSION == "3"
-    assert compute_wer("hello", "hello").norm_version == "3"
+    assert NORM_VERSION == "4"
+    assert compute_wer("hello", "hello").norm_version == "4"
 
 
 @pytest.mark.parametrize(
@@ -154,6 +154,7 @@ def test_norm_version() -> None:
         ("the performers hat", "The performer's hat."),
         ("it is okay", "It's OK."),
         ("teamwork", "team work"),
+        ("eighty kilometers fifty miles inland", "80 kilometers (50 miles) inland."),
     ],
 )
 def test_formatting_variants_score_zero(ref: str, hyp: str) -> None:
