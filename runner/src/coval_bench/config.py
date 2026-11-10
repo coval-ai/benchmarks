@@ -429,10 +429,6 @@ class Settings(BaseSettings):
     # The default is the fixed aud on gcloud user identity tokens.
     admin_google_audiences: list[str] = ["32555940559.apps.googleusercontent.com"]
 
-    # --- SemDist ---
-    # Directory holding model.onnx and tokenizer.json. Unset skips the metric.
-    semdist_minilm_dir: Path | None = None
-
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None
     arena_audio_dir: Path = Path("arena-audio")

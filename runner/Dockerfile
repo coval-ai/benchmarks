@@ -31,15 +31,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 COPY pyproject.toml uv.lock README.md ./
 
 # Install production dependencies (no dev) into /app/.venv
-RUN uv sync --frozen --no-dev --extra google-stt --extra google-tts --extra hume-tts --extra semdist
-
-# SemDist sentence-embedding model, pinned by revision and checksum
-ARG MINILM_URL=https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/1110a243fdf4706b3f48f1d95db1a4f5529b4d41
-RUN mkdir -p models/all-MiniLM-L6-v2 && cd models/all-MiniLM-L6-v2 \
-    && curl -fsSL "$MINILM_URL/onnx/model.onnx" -o model.onnx \
-    && curl -fsSL "$MINILM_URL/tokenizer.json" -o tokenizer.json \
-    && echo "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452  model.onnx" | sha256sum -c - \
-    && echo "be50c3628f2bf5bb5e3a7f17b1f74611b2561a3a27eeab05e5aa30f411572037  tokenizer.json" | sha256sum -c -
+RUN uv sync --frozen --no-dev --extra google-stt --extra google-tts --extra hume-tts
 
 # Copy source tree + alembic config (db/cli.py reads /app/alembic.ini)
 COPY src/ ./src/
@@ -77,8 +69,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     PATH="/app/.venv/bin:$PATH" \
-    XDG_CACHE_HOME=/tmp \
-    SEMDIST_MINILM_DIR=/app/models/all-MiniLM-L6-v2
+    XDG_CACHE_HOME=/tmp
 
 COPY --from=build --chown=65532:65532 /app /app
 

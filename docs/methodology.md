@@ -155,21 +155,6 @@ Each row stores the character error count and the reference character count
 next to the percentage, so the metric can be pooled across clips the way WER
 is. Dashboard aggregates currently average the per-clip percentage.
 
-### SemDist
-
-SemDist asks whether the hypothesis means the same thing as the reference,
-where WER and CER ask whether it uses the same words. Both normalized strings
-are embedded with a sentence-embedding model and the score is one minus the
-cosine similarity of the two vectors: 0 for identical text, around 1 for
-unrelated text. `compute_semdist` in `runner/src/coval_bench/metrics/semdist.py`
-does the scoring, and an empty transcript against a non-empty reference scores 1.
-
-`SemDistMiniLM` uses `all-MiniLM-L6-v2`, run with ONNX Runtime from a copy
-pinned into the runner image. Text past the model's 256-token window is cut
-off on both sides. Small embedding models are weak on negation and on single
-word swaps that flip the meaning, so this metric is collected alongside WER
-and CER and is not a replacement for either.
-
 ### Aggregation
 
 The headline WER for a model is corpus-level: the sum of substitutions,

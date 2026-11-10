@@ -563,33 +563,6 @@ class _ItemRows:
             cer_reference_chars=cer_result.reference_chars,
         )
 
-    def score_semdist(
-        self, settings: Settings, reference: str, hypothesis: str, *, audio_filename: str | None
-    ) -> None:
-        """One SemDist row. The embedder is our instrument: a failure is logged and skipped."""
-        if settings.semdist_minilm_dir is None:
-            return
-        from coval_bench.metrics import compute_semdist, load_sentence_embedder
-
-        try:
-            embedder = load_sentence_embedder(settings.semdist_minilm_dir)
-            distance = compute_semdist(reference, hypothesis, embedder).distance
-        except Exception as exc:
-            logger.warning(
-                "semdist_computation_failed",
-                provider=self.entry.provider,
-                model=self.entry.model,
-                exc_info=exc,
-            )
-            return
-        self.add(
-            Metric.SEMDIST_MINILM,
-            distance,
-            status=self.result_status.SUCCESS,
-            audio_filename=audio_filename,
-            transcript=hypothesis,
-        )
-
     def score_wer(
         self,
         compute_wer: Any,
@@ -885,9 +858,6 @@ async def _run_stt_item(
                 failed_event="wer_computation_failed",
             )
             rows.score_cer(transcript_ref, complete_transcript, audio_filename=audio_path.name)
-            rows.score_semdist(
-                settings, transcript_ref, complete_transcript, audio_filename=audio_path.name
-            )
 
     results = rows.finish("stt", audio_path.name)
     if writer is not None and artifact_client is not None:
@@ -1063,12 +1033,6 @@ async def _run_tts_item(
                         failed_event="tts_wer_computation_failed",
                     )
                     rows.score_cer(
-                        item.spoken_reference or transcript,
-                        whisper_transcript,
-                        audio_filename=audio_path.name,
-                    )
-                    rows.score_semdist(
-                        settings,
                         item.spoken_reference or transcript,
                         whisper_transcript,
                         audio_filename=audio_path.name,

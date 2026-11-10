@@ -60,7 +60,6 @@ google-stt = ["google-cloud-speech>=2.27"]
 google-tts = ["google-cloud-texttospeech>=2.29"]  # >=2.29 for Gemini-TTS streaming
 hume-tts = ["hume>=0.7"]
 hf-parquet = ["pyarrow>=17"]  # build-time only: parquet fallback for unconverted HF datasets
-semdist = ["onnxruntime>=1.20", "tokenizers>=0.20"]  # runner image only: SemDist sentence embeddings
 livekit = ["livekit-agents[deepgram,openai,elevenlabs,silero]~=1.6"]  # the LiveKit agent image only
 
 [project.scripts]
@@ -126,10 +125,6 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "whisper_normalizer.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["onnxruntime.*", "tokenizers.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
