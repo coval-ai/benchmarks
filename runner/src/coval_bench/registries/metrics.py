@@ -204,12 +204,13 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
     ),
     Metric.CHARACTER_ERROR_RATE: MetricSpec(
         display_name="Character Error Rate",
-        # Coval reports edits over the right value's length as a 0-1 fraction;
-        # stored as a percentage like WER, and like WER it can exceed 100%.
+        # S2S: Coval reports edits over the right value's length as a 0-1 fraction.
+        # STT/TTS: character edits over the normalized reference transcript.
+        # Stored as a percentage like WER, and like WER it can exceed 100%.
         units="percent",
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=1,
-        benchmarks=frozenset({Benchmark.S2S}),
+        benchmarks=frozenset({Benchmark.STT, Benchmark.TTS, Benchmark.S2S}),
     ),
     Metric.TOOL_CALL_COUNT: MetricSpec(
         display_name="Tool Call Count",
@@ -294,13 +295,22 @@ METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
         Metric.CALL_LENGTH,
         Metric.EXPECTED_BEHAVIOR_ADHERENCE,
         Metric.WORKFLOW_ADHERENCE,
-        Metric.CHARACTER_ERROR_RATE,
         Metric.TOOL_CALL_COUNT,
         Metric.INTERRUPTION_CUE_LANDED,
         Metric.INTERRUPTION_YIELDED,
         Metric.BACKCHANNEL_CONTINUED,
     )
 }
+METRIC_VALUE_CONTRACTS[(Metric.CHARACTER_ERROR_RATE, "v1")] = MetricValueContract(
+    metric=Metric.CHARACTER_ERROR_RATE,
+    version="v1",
+    values=(
+        _primary(Metric.CHARACTER_ERROR_RATE),
+        MetricValueDefinition(key="error_chars", unit="count", minimum=0.0, required=False),
+        MetricValueDefinition(key="reference_chars", unit="count", minimum=0.0, required=False),
+    ),
+    optional_all_or_none=(frozenset({"error_chars", "reference_chars"}),),
+)
 METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
     metric=Metric.WER,
     version="v1",

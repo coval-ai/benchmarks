@@ -75,7 +75,11 @@ def test_benchmark_coverage() -> None:
     assert METRIC_SPECS[Metric.INSTRUCTION_FOLLOWING].benchmarks == {Benchmark.S2S, Benchmark.LLM}
     assert METRIC_SPECS[Metric.EXPECTED_BEHAVIOR_ADHERENCE].benchmarks == {Benchmark.S2S}
     assert METRIC_SPECS[Metric.WORKFLOW_ADHERENCE].benchmarks == {Benchmark.S2S}
-    assert METRIC_SPECS[Metric.CHARACTER_ERROR_RATE].benchmarks == {Benchmark.S2S}
+    assert METRIC_SPECS[Metric.CHARACTER_ERROR_RATE].benchmarks == {
+        Benchmark.STT,
+        Benchmark.TTS,
+        Benchmark.S2S,
+    }
     assert METRIC_SPECS[Metric.TOOL_CALL_COUNT].benchmarks == {Benchmark.S2S}
     for metric in (
         Metric.INTERRUPTION_CUE_LANDED,

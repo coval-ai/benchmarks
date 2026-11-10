@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Public API for coval_bench metrics."""
 
+from coval_bench.metrics.cer import CERResult, compute_cer
 from coval_bench.metrics.semantic_wer import (
     LEVEL_WEIGHTS,
     SEMANTIC_WER_VERSION,
@@ -25,7 +26,9 @@ from coval_bench.metrics.ttft import compute_rtf, compute_ttfs
 from coval_bench.metrics.wer import WERResult, compute_wer, normalize_text
 
 __all__ = [
+    "CERResult",
     "WERResult",
+    "compute_cer",
     "compute_wer",
     "normalize_text",
     "compute_ttfa",

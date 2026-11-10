@@ -189,6 +189,18 @@ def _frozen_values(metric: str, rows: Sequence[Result], primary: Result) -> list
                 FrozenValue(value_key=key, unit="count", value=float(count), value_role="component")
                 for key, count in counts
             )
+    if (
+        metric == str(Metric.CHARACTER_ERROR_RATE)
+        and primary.cer_errors is not None
+        and primary.cer_reference_chars is not None
+    ):
+        values.extend(
+            FrozenValue(value_key=key, unit="count", value=float(count), value_role="component")
+            for key, count in (
+                ("error_chars", primary.cer_errors),
+                ("reference_chars", primary.cer_reference_chars),
+            )
+        )
     if metric == str(Metric.TTFA):
         components = {str(row.metric_type): row for row in rows}
         for metric_type, key in (
@@ -209,9 +221,10 @@ def _frozen_values(metric: str, rows: Sequence[Result], primary: Result) -> list
 
 
 def _frozen_inputs(metric: str, benchmark: str, available: set[str]) -> list[FrozenInput]:
+    scores_text = metric in {str(Metric.WER), str(Metric.CHARACTER_ERROR_RATE)}
     if benchmark == "STT":
-        wanted = [("transcript", "raw")] if metric == str(Metric.WER) else [("timing", "timing")]
-    elif metric == str(Metric.WER):
+        wanted = [("transcript", "raw")] if scores_text else [("timing", "timing")]
+    elif scores_text:
         wanted = [("audio", "raw")]
     elif metric == str(Metric.TTFA):
         wanted = [("timing", "timing"), ("audio", "raw")]

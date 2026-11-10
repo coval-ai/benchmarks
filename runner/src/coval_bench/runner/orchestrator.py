@@ -549,6 +549,20 @@ class _ItemRows:
             )
         return status
 
+    def score_cer(self, reference: str, hypothesis: str, *, audio_filename: str | None) -> None:
+        from coval_bench.metrics import compute_cer
+
+        cer_result = compute_cer(reference, hypothesis)
+        self.add(
+            Metric.CHARACTER_ERROR_RATE,
+            cer_result.cer_percentage,
+            status=self.result_status.SUCCESS,
+            audio_filename=audio_filename,
+            transcript=hypothesis,
+            cer_errors=cer_result.errors,
+            cer_reference_chars=cer_result.reference_chars,
+        )
+
     def score_wer(
         self,
         compute_wer: Any,
@@ -843,6 +857,7 @@ async def _run_stt_item(
                 ok_event="stt_wer",
                 failed_event="wer_computation_failed",
             )
+            rows.score_cer(transcript_ref, complete_transcript, audio_filename=audio_path.name)
 
     results = rows.finish("stt", audio_path.name)
     if writer is not None and artifact_client is not None:
@@ -1016,6 +1031,11 @@ async def _run_tts_item(
                         audio_filename=audio_path.name,
                         ok_event="tts_wer",
                         failed_event="tts_wer_computation_failed",
+                    )
+                    rows.score_cer(
+                        item.spoken_reference or transcript,
+                        whisper_transcript,
+                        audio_filename=audio_path.name,
                     )
             if writer is not None and artifact_client is not None:
                 from coval_bench.observation_artifacts import snapshot_generated_audio

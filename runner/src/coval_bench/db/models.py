@@ -323,6 +323,9 @@ class Result(BaseModel):
     wer_deletions: int | None = None
     wer_insertions: int | None = None
     wer_reference_words: int | None = None
+    # STT/TTS CharacterErrorRate only: the character counts behind metric_value.
+    cer_errors: int | None = None
+    cer_reference_chars: int | None = None
 
 
 class VoteOutcome(StrEnum):
