@@ -25,11 +25,9 @@ def _probe(**fields: Any) -> ProbeResult:
         "benchmark": "TTS",
         "provider": "acme",
         "model": "fast-1",
-        "input_id": "tts-probe-v1",
         "scheduled_at": _TICK,
         "sent_at": _TICK,
         "ttfa_ms": 180.0,
-        "total_ms": 900.0,
     }
     return ProbeResult(**{**defaults, **fields})
 
@@ -82,7 +80,7 @@ def test_a_failure_needs_an_error_and_an_origin(pg_conn: Any) -> None:
         pg_conn.execute(
             """
             INSERT INTO benchmarks_v2.probe_results
-              (benchmark, provider, model, input_id, scheduled_at, sent_at, status)
-            VALUES ('STT', 'acme', 'fast-1', 'stt-probe-v1', now(), now(), 'failed')
+              (benchmark, provider, model, scheduled_at, sent_at, status)
+            VALUES ('STT', 'acme', 'fast-1', now(), now(), 'failed')
             """
         )

@@ -32,20 +32,17 @@ def upgrade() -> None:
             provider     TEXT NOT NULL CHECK (provider <> ''),
             model        TEXT NOT NULL CHECK (model <> ''),
             voice        TEXT CHECK (voice IS NULL OR voice <> ''),
-            input_id     TEXT NOT NULL CHECK (input_id <> ''),
             scheduled_at TIMESTAMPTZ NOT NULL,
             sent_at      TIMESTAMPTZ NOT NULL,
             ttft_ms      DOUBLE PRECISION CHECK (ttft_ms >= 0 AND ttft_ms <> 'Infinity'::float8),
             ttfs_ms      DOUBLE PRECISION CHECK (ttfs_ms <> 'NaN'::float8 AND abs(ttfs_ms) <> 'Infinity'::float8),
             ttfa_ms      DOUBLE PRECISION CHECK (ttfa_ms >= 0 AND ttfa_ms <> 'Infinity'::float8),
-            total_ms     DOUBLE PRECISION CHECK (total_ms >= 0 AND total_ms <> 'Infinity'::float8),
             status       TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
             error        TEXT,
             failure_origin TEXT CHECK (failure_origin IN ('provider', 'runner')),
             CHECK ((status = 'succeeded' AND error IS NULL AND failure_origin IS NULL) OR (status = 'failed' AND error IS NOT NULL AND error <> '' AND failure_origin IS NOT NULL)),
             UNIQUE (benchmark, provider, model, scheduled_at)
         );
-        CREATE INDEX probe_results_scheduled_at ON benchmarks_v2.probe_results (scheduled_at);
         """
     )
 

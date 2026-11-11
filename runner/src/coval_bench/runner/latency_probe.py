@@ -11,7 +11,6 @@ model, with no retry, and stores the timings (or the failure) in
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -51,7 +50,6 @@ if TYPE_CHECKING:
 logger = structlog.get_logger("coval_bench.latency_probe")
 
 STT_PROBE_DATASET = "stt-probe-v1"
-TTS_PROBE_INPUT_ID = "tts-probe-v1"
 TTS_PROBE_TEXT = "Hello world."
 
 Origin = Literal["provider", "runner"]
@@ -68,29 +66,27 @@ async def _call(
     build: Callable[[], Any],
     request: Callable[[Any], Awaitable[Any]],
     timeout_s: float,
-) -> tuple[Any | None, str | None, Origin | None, float]:
-    """One provider call with no retry: (result, error, origin, total_ms)."""
-    started = time.monotonic()
+) -> tuple[Any | None, str | None, Origin | None]:
+    """One provider call with no retry: (result, error, origin)."""
     try:
         provider = build()
     except Exception as exc:
-        return None, _truncate(str(exc) or type(exc).__name__), "runner", 0.0
+        return None, _truncate(str(exc) or type(exc).__name__), "runner"
     try:
         result = await asyncio.wait_for(request(provider), timeout=timeout_s)
     except TimeoutError:
-        return None, f"timed out after {timeout_s}s", "provider", _elapsed_ms(started)
+        return None, f"timed out after {timeout_s}s", "provider"
     except Exception as exc:
-        error = _truncate(str(exc) or type(exc).__name__)
-        return None, error, "provider", _elapsed_ms(started)
-    return result, None, None, _elapsed_ms(started)
-
-
-def _elapsed_ms(started: float) -> float:
-    return (time.monotonic() - started) * 1000.0
+        return None, _truncate(str(exc) or type(exc).__name__), "provider"
+    return result, None, None
 
 
 def _excluded(entry: RegisteredModel, metric: Metric) -> bool:
     return (entry.provider, entry.model) in METRIC_EXCLUSIONS[metric]
+
+
+def _to_ms(seconds: float | None) -> float | None:
+    return None if seconds is None else seconds * 1000.0
 
 
 async def _probe_stt(
@@ -106,25 +102,22 @@ async def _probe_stt(
         _read_pcm16(item.path), item.duration_sec, item.speech_end_offset_ms
     )
 
-    def failed(sent_at: datetime, error: str, origin: Origin, total_ms: float) -> ProbeResult:
+    def row(sent_at: datetime, **fields: Any) -> ProbeResult:  # noqa: ANN401
         return ProbeResult(
             benchmark="STT",
             provider=entry.provider,
             model=entry.model,
-            input_id=STT_PROBE_DATASET,
             scheduled_at=scheduled_at,
             sent_at=sent_at,
-            total_ms=total_ms or None,
-            error=error,
-            failure_origin=origin,
+            **fields,
         )
 
     if provider_cls is None:
-        return failed(datetime.now(UTC), "unknown STT provider", "runner", 0.0)
+        return row(datetime.now(UTC), error="unknown STT provider", failure_origin="runner")
 
     async with gate.slot(_gate_key(entry, provider_cls)):
         sent_at = datetime.now(UTC)
-        result, error, origin, total_ms = await _call(
+        result, error, origin = await _call(
             lambda: provider_cls(settings, entry.model),
             lambda provider: provider.measure_ttft(pcm, 1, 2, 16000, 0.1),
             _STT_TIMEOUT_S,
@@ -133,7 +126,7 @@ async def _probe_stt(
         error = result.error or _stt_silent_failure(result)
         origin = "provider" if error else None
     if result is None or error is not None:
-        return failed(sent_at, error or "no result", origin or "provider", total_ms)
+        return row(sent_at, error=error or "no result", failure_origin=origin or "provider")
 
     ttft_ms = None if _excluded(entry, Metric.TTFT) else _to_ms(result.ttft_seconds)
     ttfs_ms: float | None = None
@@ -144,21 +137,7 @@ async def _probe_stt(
         and not _excluded(entry, Metric.TTFS)
     ):
         ttfs_ms = compute_ttfs(result.audio_to_final_seconds, offset_ms / 1000.0) * 1000.0
-    return ProbeResult(
-        benchmark="STT",
-        provider=entry.provider,
-        model=entry.model,
-        input_id=STT_PROBE_DATASET,
-        scheduled_at=scheduled_at,
-        sent_at=sent_at,
-        ttft_ms=ttft_ms,
-        ttfs_ms=ttfs_ms,
-        total_ms=total_ms,
-    )
-
-
-def _to_ms(seconds: float | None) -> float | None:
-    return None if seconds is None else seconds * 1000.0
+    return row(sent_at, ttft_ms=ttft_ms, ttfs_ms=ttfs_ms)
 
 
 async def _probe_tts(
@@ -177,7 +156,6 @@ async def _probe_tts(
             provider=entry.provider,
             model=entry.model,
             voice=voice,
-            input_id=TTS_PROBE_INPUT_ID,
             scheduled_at=scheduled_at,
             sent_at=sent_at,
             **fields,
@@ -188,7 +166,7 @@ async def _probe_tts(
 
     async with gate.slot(_gate_key(entry, provider_cls)):
         sent_at = datetime.now(UTC)
-        result, error, origin, total_ms = await _call(
+        result, error, origin = await _call(
             lambda: provider_cls(settings=settings, model=entry.model, voice=voice),
             lambda provider: provider.synthesize(TTS_PROBE_TEXT),
             _TTS_TIMEOUT_S,
@@ -205,13 +183,8 @@ async def _probe_tts(
             error = _ttfa_transport_gate(result)
             origin = "runner" if error else None
     if result is None or error is not None:
-        return row(
-            sent_at,
-            total_ms=total_ms or None,
-            error=error or "no result",
-            failure_origin=origin or "provider",
-        )
-    return row(sent_at, ttfa_ms=result.ttfa_ms, total_ms=total_ms)
+        return row(sent_at, error=error or "no result", failure_origin=origin or "provider")
+    return row(sent_at, ttfa_ms=result.ttfa_ms)
 
 
 async def run_latency_probes(

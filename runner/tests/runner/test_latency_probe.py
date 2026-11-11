@@ -93,9 +93,7 @@ async def test_tts_probe_stores_ttfa_for_hello_world(monkeypatch: pytest.MonkeyP
 
     assert calls == [{"model": "fast-1", "voice": "f-1", "text": "Hello world."}]
     assert (result.status, result.ttfa_ms, result.voice) == ("succeeded", 180.0, "f-1")
-    assert result.input_id == "tts-probe-v1"
     assert result.scheduled_at == _TICK
-    assert result.total_ms is not None
 
 
 async def test_tts_probe_records_a_provider_error_without_retrying(
@@ -197,7 +195,6 @@ async def test_stt_probe_stores_ttft_and_ttfs_in_ms(
     assert result.status == "succeeded"
     assert result.ttft_ms == pytest.approx(250.0)
     assert result.ttfs_ms == pytest.approx(300.0)
-    assert result.input_id == "stt-probe-v1"
 
 
 async def test_stt_probe_records_a_reported_error(
