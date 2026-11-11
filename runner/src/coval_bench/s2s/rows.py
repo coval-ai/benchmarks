@@ -125,11 +125,9 @@ def s2s_rows(
     """Map one metric's per-conversation values to Result rows."""
     to_row = VALUE_MAPPERS[metric]
     rows: list[Result] = []
-    unscored = 0
     for i, v in enumerate(values):
         mapped = to_row(v.get("value"))
         if mapped is None:
-            unscored += 1
             continue
         metric_value, status = mapped
         sim_id = v.get("simulation_output_id")
@@ -145,15 +143,6 @@ def s2s_rows(
                 audio_filename=f"{coval_run_id}/{sim_id}" if sim_id else f"{coval_run_id}/{i}",
                 status=status,
             )
-        )
-    if unscored:
-        logger.info(
-            "verdicts_unscored",
-            provider=spec.provider,
-            model=spec.model,
-            metric=metric.value,
-            coval_run_id=coval_run_id,
-            count=unscored,
         )
     return rows
 

@@ -3421,3 +3421,47 @@ async def test_fetch_and_write_fetches_corral_agents_for_the_interruption_suites
         Metric.INTERRUPTION_CUE_LANDED: "GATE",
         Metric.INTERRUPTION_YIELDED: "YIELD",
     }
+
+
+@pytest.mark.asyncio
+async def test_fetch_marks_a_failed_corral_lookup_failed_and_skips_retired_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    yield_ids = ScenarioCovalIds(
+        test_set_id="TSY",
+        personas={"clean": "CUE"},
+        metric_ids={"InterruptionCueLanded": "GATE", "InterruptionYielded": "YIELD"},
+        workspace_id="WS",
+    )
+    settings = _settings(
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_scenarios={"interruption-yield": yield_ids},
+    )
+    rows = [
+        m.model_copy(update={"collected": False}) if m.provider == "xai" else m
+        for m in _every_s2s_row()
+    ]
+    looked_up: list[str] = []
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    async def _find(_client: Any, customer_agent_id: str, *, workspace_id: str) -> str | None:
+        looked_up.append(customer_agent_id)
+        if customer_agent_id == "google-gemini-live--sdk--WS":
+            raise httpx.ConnectError("down")
+        return None
+
+    monkeypatch.setattr(fetch_v2v, "s2s_specs", lambda _s: ())
+    monkeypatch.setattr(fetch_v2v, "fetch_models", AsyncMock(return_value=rows))
+    monkeypatch.setattr(specs, "find_agent_id", _find)
+    monkeypatch.setattr(fetch_v2v, "coval_client", lambda _settings: _fake_client({}, {}))
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: _stub_writer())
+
+    statuses = await fetch_v2v.fetch_and_write_v2v(settings)
+
+    assert statuses == {"s2s-interruption-yield:google:gemini-live": RunStatus.FAILED}
+    assert looked_up
+    assert not any(agent.startswith("xai-") for agent in looked_up)

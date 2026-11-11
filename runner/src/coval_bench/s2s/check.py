@@ -17,7 +17,7 @@ from google.auth.exceptions import GoogleAuthError
 
 from coval_bench.config import Settings
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.s2s.conditions import HARNESS_SLUGS, PLATFORM_SLUGS
+from coval_bench.s2s.conditions import HARNESS_SLUGS, PLATFORM_SLUGS, scenario_family
 from coval_bench.s2s.coval_runs import coval_client, recent_completed_runs
 from coval_bench.s2s.fetch_v2v import validate_fetch_settings
 from coval_bench.s2s.identity import (
@@ -44,10 +44,7 @@ class ModelRuns:
 
 
 async def check_scenarios(
-    settings: Settings,
-    client: httpx.AsyncClient,
-    *,
-    window_seconds: int | None = None,
+    settings: Settings, client: httpx.AsyncClient, *, window_seconds: int | None = None
 ) -> tuple[list[ModelRuns], list[str]]:
     """Count each scenario model's recent runs per condition and flag what the fetch would miss."""
     validate_fetch_settings(settings, s2s_specs(settings), Benchmark.S2S)
@@ -55,6 +52,11 @@ async def check_scenarios(
     found: list[ModelRuns] = []
     flags: list[str] = []
     unmapped: dict[str, set[str]] = {}
+    harness, harness_failed = await harness_specs(client, settings, SCENARIO_MODELS)
+    flags.extend(
+        f"{spec.family}/{spec.model}: the agent lookup failed, the fetch marks it FAILED"
+        for spec in harness_failed
+    )
     for slug, ids in settings.coval_s2s_scenarios.items():
         only_this = settings.model_copy(update={"coval_s2s_scenarios": {slug: ids}})
         if slug in PLATFORM_SLUGS:
@@ -68,7 +70,7 @@ async def check_scenarios(
                 for key, agent_id in ids.agents.items()
             ]
         elif slug in HARNESS_SLUGS:
-            specs = list(await harness_specs(client, only_this, SCENARIO_MODELS))
+            specs = [s for s in harness if s.family == scenario_family(slug)]
         else:
             specs = [s for s in scenario_specs(only_this) if s.agent_id]
         if not specs:

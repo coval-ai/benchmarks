@@ -127,10 +127,6 @@ async def resolve_import_generation(
         return claim, generation
 
 
-def _is_positive(raw: object) -> bool:
-    return isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw > 0
-
-
 def _writable_metrics(
     *,
     spec: AgentSpec,
@@ -185,7 +181,9 @@ def _writable_metrics(
                 continue
         if condition.optional_only_where_anchor_positive:
             landed = {
-                v.get("simulation_output_id") for v in anchor_values if _is_positive(v.get("value"))
+                v.get("simulation_output_id")
+                for v in anchor_values
+                if (cue := VALUE_MAPPERS[anchor](v.get("value"))) and (cue[0] or 0) > 0
             }
             kept = [v for v in values if v.get("simulation_output_id") in landed]
             if len(kept) < len(values):

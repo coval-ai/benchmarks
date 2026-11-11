@@ -51,10 +51,11 @@ async def test_harness_specs_keep_only_models_corral_has_an_agent_for() -> None:
     agents = {"google-gemini-3.8-live--sdk--WS": "AG"}
 
     async with _client(agents, seen) as client:
-        found = await specs.harness_specs(
+        found, failed = await specs.harness_specs(
             client, settings, [("google", "gemini-3.8-live"), ("rime", "prism")]
         )
 
+    assert failed == ()
     assert found == (
         AgentSpec(
             agent_id="AG",
@@ -88,7 +89,7 @@ async def test_harness_specs_look_each_agent_up_once_across_suites() -> None:
     seen: list[httpx.Request] = []
 
     async with _client({"xai-grok-voice-3.0--sdk--WS": "AX"}, seen) as client:
-        found = await specs.harness_specs(client, settings, [("xai", "grok-voice-3.0")])
+        found, _ = await specs.harness_specs(client, settings, [("xai", "grok-voice-3.0")])
 
     assert [(s.family, s.test_set_id) for s in found] == [
         ("s2s-interruption-yield", "TSY"),
@@ -101,7 +102,10 @@ async def test_harness_specs_look_each_agent_up_once_across_suites() -> None:
 async def test_no_harness_suite_means_no_lookups() -> None:
     seen: list[httpx.Request] = []
     async with _client({}, seen) as client:
-        assert await specs.harness_specs(client, Settings(), [("xai", "grok-voice-3.0")]) == ()
+        assert await specs.harness_specs(client, Settings(), [("xai", "grok-voice-3.0")]) == (
+            (),
+            (),
+        )
     assert seen == []
 
 
@@ -124,15 +128,28 @@ def test_each_suite_is_one_clean_dataset_anchored_on_the_cue(slug: str, judge: M
 
 
 @pytest.mark.asyncio
-async def test_a_failed_agent_lookup_skips_that_model_without_stopping_the_fetch() -> None:
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(503),
+        httpx.Response(200, text="<html>maintenance</html>"),
+        httpx.Response(
+            200, json={"agents": [{"customer_agent_id": "google-gemini-3.8-live--sdk--WS"}]}
+        ),
+    ],
+)
+async def test_a_failed_agent_lookup_is_reported_without_stopping_the_fetch(
+    response: httpx.Response,
+) -> None:
     settings = Settings(coval_s2s_scenarios={"interruption-yield": YIELD})
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(503)
-
-    transport = httpx.MockTransport(handler)
+    transport = httpx.MockTransport(lambda _request: response)
     async with httpx.AsyncClient(base_url="https://api.test/v1", transport=transport) as client:
-        assert await specs.harness_specs(client, settings, [("google", "gemini-3.8-live")]) == ()
+        found, failed = await specs.harness_specs(client, settings, [("google", "gemini-3.8-live")])
+
+    assert found == ()
+    assert [(s.family, s.provider, s.model, s.agent_id) for s in failed] == [
+        ("s2s-interruption-yield", "google", "gemini-3.8-live", None)
+    ]
 
 
 def _judged(cue_values: list[object], *, only_where_anchor_positive: bool = True) -> list[str]:
@@ -175,3 +192,9 @@ def test_both_suites_filter_on_the_cue(slug: str) -> None:
     dataset_id = dataset_id_for(f"s2s-{slug}", Condition.CLEAN)
     assert dataset_id is not None
     assert condition_for(dataset_id).optional_only_where_anchor_positive
+
+
+@pytest.mark.parametrize("workspace_id", ["WS x", 'WS"', ""])
+def test_a_workspace_id_that_could_break_a_coval_filter_is_rejected(workspace_id: str) -> None:
+    with pytest.raises(ValueError):
+        YIELD.model_validate({**YIELD.model_dump(), "workspace_id": workspace_id})

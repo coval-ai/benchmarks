@@ -154,12 +154,14 @@ def _platform_ids(name: str, assets: _ScenarioVersion) -> ScenarioCovalIds:
 
 
 def _harness_ids(name: str, versions: dict[str, Any]) -> ScenarioCovalIds:
-    """A Corral suite's ids from its newest version. Corral starts these runs, so they
-    have no schedule; its agents are found at fetch time, so none are listed here."""
-    if not versions:
-        raise ValueError(f"scenario map {name!r} has no versions")
-    newest = max(versions, key=lambda version: int(version.removeprefix("v")))
-    assets = _ScenarioVersion.model_validate(versions[newest])
+    """A Corral suite's v1 ids, matching its v1 dataset. Corral starts these runs, so
+    they have no schedule; its agents are found at fetch time, so none are listed here."""
+    if "v1" not in versions:
+        raise ValueError(f"scenario map {name!r} has no v1")
+    newer = sorted(version for version in versions if version != "v1")
+    if newer:
+        logger.warning("harness_newer_version_unread", scenario=name, versions=newer)
+    assets = _ScenarioVersion.model_validate(versions["v1"])
     if len(assets.personas) != 1:
         raise ValueError(f"scenario map {name!r} needs exactly one caller persona")
     if not assets.workspace_id:

@@ -418,11 +418,11 @@ def test_harness_suite_without_its_judge_is_skipped_and_workflow_bank_still_load
     assert any(log["event"] == "harness_scenario_invalid" for log in logs)
 
 
-def test_harness_suite_reads_its_newest_version() -> None:
+def test_harness_suite_stays_on_v1_while_its_dataset_is_v1() -> None:
     newer = _harness_version()
     newer["test_set_id"] = "TSY2"
     raw = _map(**{"interruption-yield": {"v1": _harness_version(), "v2": newer}})
 
     assert scenario_map_fields(raw)["coval_s2s_scenarios"]["interruption-yield"].test_set_id == (
-        "TSY2"
+        "TSY"
     )

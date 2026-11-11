@@ -45,7 +45,7 @@ class ScenarioCovalIds(BaseModel, frozen=True, extra="forbid"):
     # and the scenario's own metric ids by metric type.
     variant_ids: dict[str, str] = Field(default_factory=dict)
     metric_ids: dict[str, str] = Field(default_factory=dict)
-    workspace_id: str | None = Field(default=None, min_length=1)
+    workspace_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]+$")
 
     @field_validator("test_set_id", "instruction_metric_id", "workflow_metric_id", mode="before")
     @classmethod
