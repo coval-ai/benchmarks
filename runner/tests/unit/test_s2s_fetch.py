@@ -1219,6 +1219,35 @@ def test_platform_rooms_land_in_their_own_datasets() -> None:
     ) == ("s2s-id-roulette-office-desk-v1", "TSR:PO")
 
 
+def test_a_platform_call_without_latency_keeps_its_cer_and_tool_calls() -> None:
+    condition = condition_for("s2s-id-roulette-quiet-room-v1")
+    calls = ("s0", "s1")
+    metrics = {
+        "LAT": {"values": [{"simulation_output_id": "s0", "value": 1.2}]},
+        "CER": {"values": [{"simulation_output_id": sid, "value": 0.5} for sid in calls]},
+        "TOOLS": {"values": [{"simulation_output_id": sid, "value": 1} for sid in calls]},
+    }
+
+    writable = ingest._writable_metrics(
+        spec=AgentSpec(provider="vapi", model="pinned"),
+        coval_run=CovalRun(run_id="RUN", create_time=None),
+        metrics=metrics,
+        anchor=condition.required,
+        anchor_values=[{"simulation_output_id": sid, "value": 30.0} for sid in calls],
+        condition=condition,
+        pending=condition.fetched,
+        metric_ids={
+            Metric.V2V: "LAT",
+            Metric.CHARACTER_ERROR_RATE: "CER",
+            Metric.TOOL_CALL_COUNT: "TOOLS",
+        },
+    )
+
+    assert [v["simulation_output_id"] for v in writable[Metric.V2V]] == ["s0"]
+    for metric in (Metric.CHARACTER_ERROR_RATE, Metric.TOOL_CALL_COUNT):
+        assert [v["simulation_output_id"] for v in writable[metric]] == list(calls)
+
+
 @pytest.mark.asyncio
 async def test_ingest_run_stores_the_platform_variant(monkeypatch: pytest.MonkeyPatch) -> None:
     extras: list[Any] = []
