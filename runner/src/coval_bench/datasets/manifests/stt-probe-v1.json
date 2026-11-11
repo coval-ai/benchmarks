@@ -1,0 +1,17 @@
+{
+  "_license": "Apache-2.0",
+  "id": "stt-probe-v1",
+  "version": "1.0.0",
+  "license": "Public domain (US government work)",
+  "source": "President Obama's remarks on the 50th anniversary of the Selma marches, 2015-03-07, White House recording via Wikimedia Commons",
+  "items": [
+    {
+      "path": "audio/obama-selma-we.wav",
+      "sha256": "59b911a5020b8728b643c334976a79980bedc4cac0528639ae629a6b019dde51",
+      "transcript": "Because the single most powerful word in our democracy is the word we.",
+      "duration_sec": 6.65,
+      "speech_end_offset_ms": 5732.0,
+      "sample_id": "obama-selma-we"
+    }
+  ]
+}

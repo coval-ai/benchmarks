@@ -265,6 +265,19 @@ the pipecat set above).
 
 License: `Apache-2.0` (WildASR); audio derived from FLEURS (`CC-BY-4.0`).
 
+### `stt-probe-v1.json`
+
+**Not a benchmark set.** One clip that the latency probe
+(`coval-bench probe-latency --kind stt`) sends to every STT model each tick. It
+is never scored for quality and stays out of the scheduled mix.
+
+The clip is one line from President Obama's 2015 remarks on the 50th anniversary
+of the Selma marches: "Because the single most powerful word in our democracy is
+the word we." It's a White House recording in the public domain, taken from
+Wikimedia Commons and converted to 16 kHz mono 16-bit PCM. The source is quiet,
+so the clip's volume is raised to a normal speech level. `speech_end_offset_ms`
+is the SileroVAD offset, like the other sets.
+
 ### `stt-v1.json`
 
 **In the scheduled mix** as the easy set alongside `stt-v3` (it was retired in
