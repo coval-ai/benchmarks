@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID
 
+import psycopg.errors
 import psycopg.rows
 from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg_pool import AsyncConnectionPool
@@ -30,6 +31,8 @@ from coval_bench.config import Settings
 router = APIRouter(tags=["results"])
 
 _CURSOR_VERSION = 1
+_STATEMENT_TIMEOUT = "10s"
+_RETRY_AFTER_SECONDS = "30"
 _DefaultEvaluationVariant = Literal["default"]
 _SucceededEvaluationStatus = Literal["succeeded"]
 _AllowedRunStatus = Literal["succeeded", "partial"]
@@ -265,10 +268,18 @@ async def list_results(
         ) components ON %(include_components)s
         ORDER BY p.captured_at DESC, p.evaluation_id DESC
     """  # noqa: S608
-    async with pool.connection() as conn:
-        conn.row_factory = psycopg.rows.dict_row
-        result = await conn.execute(page_sql, params)
-        rows = await result.fetchall()
+    try:
+        async with pool.connection() as conn, conn.transaction():
+            conn.row_factory = psycopg.rows.dict_row
+            await conn.execute(f"SET LOCAL statement_timeout = '{_STATEMENT_TIMEOUT}'")
+            result = await conn.execute(page_sql, params)
+            rows = await result.fetchall()
+    except psycopg.errors.QueryCanceled as exc:
+        raise HTTPException(
+            503,
+            "results query took too long; narrow the filters or lower limit",
+            headers={"Retry-After": _RETRY_AFTER_SECONDS},
+        ) from exc
     has_more = len(rows) > limit
     rows = rows[:limit]
     response_rows: list[ResultV2Out] = []

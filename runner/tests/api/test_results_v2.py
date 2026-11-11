@@ -563,6 +563,19 @@ async def test_missing_or_invalid_cursor_key_fails_before_pool_dependency() -> N
 
 
 @pytest.mark.asyncio
+async def test_slow_query_times_out_with_retry_after(client: AsyncClient, postgresql: Any) -> None:
+    with (
+        psycopg.connect(_make_db_url(postgresql)) as blocker,
+        patch("coval_bench.api.routers.results_v2._STATEMENT_TIMEOUT", "100ms"),
+    ):
+        blocker.execute("LOCK TABLE benchmarks_v2.metric_evaluations IN ACCESS EXCLUSIVE MODE")
+        response = await client.get("/v2/results")
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "30"
+    assert (await client.get("/v2/results")).status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_same_observation_ties_and_cursor_are_stable_across_detail_and_limit(
     client: AsyncClient, postgresql: Any
 ) -> None:
