@@ -635,6 +635,7 @@ class _ItemRows:
             audio_filename=audio_filename,
             transcript=hypothesis,
             judgejev_weighted_errors=result.weighted_errors,
+            judgejev_cutoff_errors=result.cutoff_errors,
             judgejev_reference_words=result.reference_words,
         )
 

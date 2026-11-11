@@ -162,7 +162,10 @@ Jev is not asked when the two texts match after normalization, and an empty
 transcript counts every reference word. `compute_judgejev` in
 `runner/src/coval_bench/metrics/judgejev.py` does the scoring. Each row stores
 the weighted error count and the reference word count next to the percentage,
-so the metric can be pooled like WER. The Jev model version is pinned in code.
+so the metric can be pooled like WER. It also stores the count a 0.5 cutoff
+would give, where a difference at or above 0.5 costs its full word count and
+anything below costs nothing, so the two ways of counting can be compared on
+the same answers. The Jev model version is pinned in code.
 Answers are not perfectly repeatable: the same request can move a probability
 by a few hundredths.
 

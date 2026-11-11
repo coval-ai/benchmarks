@@ -48,7 +48,7 @@ async def test_differences_count_by_jevs_probability() -> None:
     assert [c["reference_words"] for c in request["state"]["changes"]] == ["card", "the"]
     assert request["questions"].keys() == {"c0", "c1"}
     assert result.weighted_errors == pytest.approx(1.3)
-    assert result.reference_words == 7
+    assert (result.cutoff_errors, result.reference_words) == (1, 7)
     assert result.percentage == pytest.approx(130 / 7)
 
 
@@ -95,4 +95,4 @@ async def test_row_carries_the_counts_and_a_failed_request_is_skipped(
     assert (row.metric_type, row.metric_units) == (Metric.JUDGE_JEV, "percent")
     assert row.metric_value == pytest.approx(130 / 7)
     assert row.judgejev_weighted_errors == pytest.approx(1.3)
-    assert row.judgejev_reference_words == 7
+    assert (row.judgejev_cutoff_errors, row.judgejev_reference_words) == (1, 7)

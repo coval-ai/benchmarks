@@ -24,6 +24,9 @@ JEV_URL = "https://api.typesafe.ai/v1/systemone"
 # Pinned: a floating alias would move scores without a code change.
 JEV_MODEL = "jev-1.14.0"
 
+# Kept next to the weighted count so the two can be compared on real data.
+ERROR_CUTOFF = 0.5
+
 _CONTEXT_WORDS = 3
 _TIMEOUT_S = 10.0
 _ATTEMPTS = 2
@@ -83,6 +86,8 @@ class JudgeJevResult(BaseModel):
     percentage: float
     # Each difference's word count times Jev's probability that it matters.
     weighted_errors: float
+    # Words in differences Jev put at ERROR_CUTOFF or above.
+    cutoff_errors: int
     reference_words: int
 
 
@@ -161,7 +166,13 @@ def score(
     # An empty reference follows compute_wer: the count stands in for the rate.
     rate = errors / reference_words if reference_words else errors
     return JudgeJevResult(
-        rate=rate, percentage=rate * 100.0, weighted_errors=errors, reference_words=reference_words
+        rate=rate,
+        percentage=rate * 100.0,
+        weighted_errors=errors,
+        cutoff_errors=sum(
+            d.weight for d, p in zip(differences, probabilities, strict=True) if p >= ERROR_CUTOFF
+        ),
+        reference_words=reference_words,
     )
 
 

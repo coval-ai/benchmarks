@@ -344,9 +344,10 @@ METRIC_VALUE_CONTRACTS[(Metric.JUDGE_JEV, "v1")] = MetricValueContract(
     values=(
         _primary(Metric.JUDGE_JEV),
         MetricValueDefinition(key="weighted_errors", unit="count", minimum=0.0, required=False),
+        MetricValueDefinition(key="cutoff_errors", unit="count", minimum=0.0, required=False),
         MetricValueDefinition(key="reference_words", unit="count", minimum=0.0, required=False),
     ),
-    optional_all_or_none=(frozenset({"weighted_errors", "reference_words"}),),
+    optional_all_or_none=(frozenset({"weighted_errors", "cutoff_errors", "reference_words"}),),
 )
 METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
     metric=Metric.WER,
