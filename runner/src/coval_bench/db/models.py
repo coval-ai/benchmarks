@@ -327,7 +327,8 @@ class Result(BaseModel):
     cer_errors: int | None = None
     cer_reference_chars: int | None = None
     # JudgeJev only: the word counts behind metric_value.
-    judgejev_errors: int | None = None
+    judgejev_weighted_errors: float | None = None
+    judgejev_cutoff_errors: int | None = None
     judgejev_reference_words: int | None = None
 
 

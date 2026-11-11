@@ -147,23 +147,27 @@ values before and after the change are not directly comparable.
 ### JudgeJev
 
 WER charges the same for a dropped `the` as for a dropped `not`. JudgeJev
-counts only the differences that would change how a voice agent understands or
-responds to the speaker. It starts from the same normalized text and word
+weighs each difference by how likely it is to change how a voice agent
+understands or responds to the speaker. It starts from the same normalized text and word
 alignment as WER and merges adjacent edits into one difference. A single
 request to TypeSafe's Jev model then asks one yes/no question per difference,
 with the full reference and transcript as context: would an agent acting on
 the transcript do or say something different because of this? Jev answers each
-with a probability. A difference at 0.5 or above is an error and costs the
-word count WER gives it, so the score is never above WER.
+with a probability, and the difference costs that probability times the word
+count WER gives it. There is no cutoff: a difference Jev is unsure about counts
+as a partial error, and one it is confident is harmless still adds a little.
+The score is never above WER.
 
 Jev is not asked when the two texts match after normalization, and an empty
 transcript counts every reference word. `compute_judgejev` in
 `runner/src/coval_bench/metrics/judgejev.py` does the scoring. Each row stores
-the judged error count and the reference word count next to the percentage,
-so the metric can be pooled like WER. The Jev model version is pinned in code. Answers
-are not perfectly repeatable: the same request can move a probability by a few
-hundredths, which flips the verdict on a small share of borderline
-differences.
+the weighted error count and the reference word count next to the percentage,
+so the metric can be pooled like WER. It also stores the count a 0.5 cutoff
+would give, where a difference at or above 0.5 costs its full word count and
+anything below costs nothing, so the two ways of counting can be compared on
+the same answers. The Jev model version is pinned in code.
+Answers are not perfectly repeatable: the same request can move a probability
+by a few hundredths.
 
 The metric is collected only when a TypeSafe API key is configured, and a
 failed request is logged and skipped without failing the provider's row.
