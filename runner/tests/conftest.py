@@ -6,14 +6,26 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 import pytest
 import structlog
 
 from coval_bench.config import Settings
 
+_structlog_configure = structlog.configure
+
+
+def _configure_uncached(*args: Any, **kwargs: Any) -> None:
+    # A cached logger keeps its processors for good, so capture_logs() in a
+    # later test wouldn't see anything it logs.
+    kwargs["cache_logger_on_first_use"] = False
+    _structlog_configure(*args, **kwargs)
+
 
 def pytest_configure(config: pytest.Config) -> None:
+    structlog.configure = _configure_uncached
+
     # Before collection, so module-level Settings never read a developer's .env either.
     Settings.model_config["env_file"] = None
     # A key exported in the shell would send test transcripts to Jev.
