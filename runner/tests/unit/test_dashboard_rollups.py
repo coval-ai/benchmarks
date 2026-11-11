@@ -19,7 +19,7 @@ from coval_bench.db.dashboard_rollups import (
 )
 from coval_bench.db.models import MetricValue, RunStatus
 from coval_bench.db.writer import RunWriter
-from coval_bench.registries import Benchmark
+from coval_bench.registries import Benchmark, Metric, MetricValueRole
 from coval_bench.s2s.conditions import (
     PLATFORM_SLUGS,
     ROOMS,
@@ -285,6 +285,52 @@ async def test_fill_sums_wer_word_counts_and_leaves_uncounted_clips_out(
             5.0,
             50.0,
         )
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_fill_keeps_word_sums_off_metrics_that_only_store_reference_words(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    apply_migrations(pg_conn)
+    pool = await storage._pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        run_id, observation = await storage._observation(writer, sample="a")
+        evaluation = await storage._evaluation(writer, observation, metric=Metric.JUDGE_JEV)
+        evaluation_id = storage._required(evaluation.id)
+        values = [
+            MetricValue(
+                metric_evaluation_id=evaluation_id,
+                value_key="primary",
+                unit="percent",
+                value=0,
+                value_role=MetricValueRole.PRIMARY,
+            ),
+            *(
+                MetricValue(
+                    metric_evaluation_id=evaluation_id, value_key=key, unit="count", value=v
+                )
+                for key, v in (
+                    ("weighted_errors", 0.0),
+                    ("cutoff_errors", 0.0),
+                    ("reference_words", 54.0),
+                )
+            ),
+        ]
+        await writer.complete_metric_evaluation(
+            evaluation_id, values=values, finished_at=storage._NOW
+        )
+        await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
+        await writer.rebuild_run_rollup(run_id)
+        [row] = await _rows(
+            pool,
+            """SELECT wer_error_words, wer_reference_words
+               FROM benchmarks_v2.dashboard_rollups
+               WHERE grain = 'run' AND dataset_id = '__all__'""",
+        )
+        assert (row["wer_error_words"], row["wer_reference_words"]) == (None, None)
     finally:
         await pool.close()
 

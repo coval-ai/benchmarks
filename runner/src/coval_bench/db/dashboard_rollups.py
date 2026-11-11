@@ -76,8 +76,11 @@ WITH evaluations AS (
   SELECT o.provider, o.model, o.benchmark, o.dataset_id,
          e.metric_id, e.metric_version, e.evaluation_variant,
          e.value, e.roundtrip, e.leading_silence,
-         e.substitution_count + e.deletion_count + e.insertion_count AS error_words,
-         e.reference_words, run.scheduled_at,
+         CASE WHEN e.metric_type = 'WER'
+              THEN e.substitution_count + e.deletion_count + e.insertion_count
+         END AS error_words,
+         CASE WHEN e.metric_type = 'WER' THEN e.reference_words END AS reference_words,
+         run.scheduled_at,
          benchmarks_v2.pooled_dataset_id(o.benchmark, o.dataset_id) AS pool_id
   FROM benchmarks_v2.dashboard_metric_values e
   JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
