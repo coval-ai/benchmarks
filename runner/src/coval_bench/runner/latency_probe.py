@@ -128,16 +128,26 @@ async def _probe_stt(
     if result is None or error is not None:
         return row(sent_at, error=error or "no result", failure_origin=origin or "provider")
 
-    ttft_ms = None if _excluded(entry, Metric.TTFT) else _to_ms(result.ttft_seconds)
-    ttfs_ms: float | None = None
+    measured: dict[str, float | None] = {}
+    if not _excluded(entry, Metric.TTFT):
+        measured["ttft_ms"] = _to_ms(result.ttft_seconds)
     offset_ms = item.speech_end_offset_ms
-    if (
-        result.audio_to_final_seconds is not None
-        and offset_ms is not None
-        and not _excluded(entry, Metric.TTFS)
-    ):
-        ttfs_ms = compute_ttfs(result.audio_to_final_seconds, offset_ms / 1000.0) * 1000.0
-    return row(sent_at, ttft_ms=ttft_ms, ttfs_ms=ttfs_ms)
+    if not _excluded(entry, Metric.TTFS) and offset_ms is not None:
+        final = result.audio_to_final_seconds
+        measured["ttfs_ms"] = (
+            None if final is None else compute_ttfs(final, offset_ms / 1000.0) * 1000.0
+        )
+    missing = [
+        name.removesuffix("_ms").upper() for name, value in measured.items() if value is None
+    ]
+    if missing:
+        return row(
+            sent_at,
+            **measured,
+            error=f"no {' or '.join(missing)} produced",
+            failure_origin="provider",
+        )
+    return row(sent_at, **measured)
 
 
 async def _probe_tts(

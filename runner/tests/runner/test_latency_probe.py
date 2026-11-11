@@ -21,7 +21,7 @@ import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TranscriptionResult, TTSResult
-from coval_bench.registries import Benchmark, RegisteredModel
+from coval_bench.registries import METRIC_EXCLUSIONS, Benchmark, Metric, RegisteredModel
 from coval_bench.registries.models import Voice
 from coval_bench.runner import latency_probe
 from coval_bench.runner.gate import ModelGate
@@ -194,6 +194,36 @@ async def test_stt_probe_stores_ttft_and_ttfs_in_ms(
 
     assert result.status == "succeeded"
     assert result.ttft_ms == pytest.approx(250.0)
+    assert result.ttfs_ms == pytest.approx(300.0)
+
+
+async def test_stt_probe_without_a_final_is_a_failure_that_keeps_ttft(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    transcription = TranscriptionResult(
+        provider="acme", ttft_seconds=0.25, partial_transcripts=["hello"]
+    )
+
+    result = await _probe_stt(monkeypatch, tmp_path, transcription)
+
+    assert (result.status, result.failure_origin) == ("failed", "provider")
+    assert result.error == "no TTFS produced"
+    assert result.ttft_ms == pytest.approx(250.0)
+    assert result.ttfs_ms is None
+
+
+async def test_stt_probe_skips_a_metric_the_model_is_excluded_from(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setitem(METRIC_EXCLUSIONS, Metric.TTFT, {("acme", "fast-1")})
+    transcription = TranscriptionResult(
+        provider="acme", audio_to_final_seconds=0.9, complete_transcript="hello world"
+    )
+
+    result = await _probe_stt(monkeypatch, tmp_path, transcription)
+
+    assert result.status == "succeeded"
+    assert result.ttft_ms is None
     assert result.ttfs_ms == pytest.approx(300.0)
 
 
