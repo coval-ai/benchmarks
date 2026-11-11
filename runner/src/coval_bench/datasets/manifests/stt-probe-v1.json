@@ -1,0 +1,17 @@
+{
+  "_license": "Apache-2.0",
+  "id": "stt-probe-v1",
+  "version": "1.0.0",
+  "license": "Synthetic speech we generated; no third-party audio",
+  "source": "OpenAI gpt-4o-mini-tts, voice alloy, input \"Hello world.\"",
+  "items": [
+    {
+      "path": "audio/hello-world.wav",
+      "sha256": "5e37ded2781765d86d4e8636dfc22adbc0a2adbce909d25108183d5e7fa58eb3",
+      "transcript": "Hello world.",
+      "duration_sec": 1.25,
+      "speech_end_offset_ms": 920.0,
+      "sample_id": "hello-world"
+    }
+  ]
+}

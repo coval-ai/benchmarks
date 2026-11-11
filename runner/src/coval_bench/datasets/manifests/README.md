@@ -265,6 +265,17 @@ the pipecat set above).
 
 License: `Apache-2.0` (WildASR); audio derived from FLEURS (`CC-BY-4.0`).
 
+### `stt-probe-v1.json`
+
+**Not a benchmark set.** One clip of "Hello world." that the latency probe
+(`coval-bench probe-latency --kind stt`) sends to every STT model each tick. It
+is never scored for quality and stays out of the scheduled mix.
+
+The audio is synthetic: OpenAI `gpt-4o-mini-tts`, voice `alloy`, converted to
+16 kHz mono 16-bit PCM. OpenAI isn't one of the TTS or STT providers we
+benchmark. `speech_end_offset_ms` is where the energy drops to silence, not a
+SileroVAD offset like the other sets.
+
 ### `stt-v1.json`
 
 **In the scheduled mix** as the easy set alongside `stt-v3` (it was retired in

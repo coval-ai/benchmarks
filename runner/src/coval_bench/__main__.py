@@ -266,6 +266,45 @@ def probe(selectors: tuple[str, ...], samples: int, concurrency: int) -> None:
     click.echo(json.dumps({"event": "probe_results", "samples": samples, "results": results}))
 
 
+@cli.command(name="probe-latency")
+@click.option("--kind", type=click.Choice(["stt", "tts"]), required=True)
+@click.option(
+    "--only",
+    "selectors",
+    multiple=True,
+    help="provider/model to probe (repeatable). Defaults to every collected shared model.",
+)
+def probe_latency(kind: str, selectors: tuple[str, ...]) -> None:
+    """Send every model the same short input once and store the timings.
+
+    One provider call per model with no retry, written to probe_results. A
+    provider failing is recorded and doesn't fail the command.
+    """
+    from coval_bench.config import get_settings
+    from coval_bench.runner.latency_probe import run_latency_probes
+
+    summary = asyncio.run(
+        run_latency_probes(
+            settings=get_settings(),
+            kind=kind,  # type: ignore[arg-type]
+            only=frozenset(selectors) or None,
+        )
+    )
+    click.echo(
+        json.dumps(
+            {
+                "event": "latency_probes",
+                "kind": kind,
+                "scheduled_at": summary.scheduled_at.isoformat(),
+                "probed": summary.probed,
+                "failed": summary.failed,
+            }
+        )
+    )
+    if summary.probed == 0:
+        raise click.ClickException("no models to probe")
+
+
 @cli.command(name="stt-smoke")
 @click.option("--provider", required=True, help="STT provider name (e.g. deepgram, baseten).")
 @click.option("--model", required=True, help="Model ID for the provider (e.g. nova-3).")
