@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import httpx
 import structlog
 
 from coval_bench import scenarios
@@ -19,9 +21,11 @@ from coval_bench.s2s.conditions import (
     ADHERENCE_SLUGS,
     FAMILY_DENTAL,
     FAMILY_MULTITURN,
+    HARNESS_SLUGS,
     PLATFORM_SLUGS,
     scenario_family,
 )
+from coval_bench.s2s.coval_runs import find_agent_id
 
 if TYPE_CHECKING:
     from coval_bench.config import Settings
@@ -60,6 +64,7 @@ class AgentSpec:
     uses_shared_metrics: bool = True
     # The platform variant the agent runs, stored with each conversation.
     variant_id: str | None = None
+    workspace_id: str | None = None
 
 
 # Model strings are display labels. Every agent runs the dental test set: the
@@ -224,6 +229,65 @@ def platform_specs(settings: Settings, models: Iterable[RegisteredModel]) -> tup
                     metric_ids=metric_ids,
                     uses_shared_metrics=False,
                     variant_id=ids.variant_ids.get(key),
+                )
+            )
+    return tuple(specs)
+
+
+def corral_customer_agent_id(provider: str, model: str, workspace_id: str) -> str:
+    """The id Corral files a native model's agent under, built exactly as Corral builds it."""
+    slug = re.sub(r"[^a-z0-9.]+", "-", f"{provider}-{model}".lower())
+    return f"{slug}--sdk--{workspace_id}"
+
+
+async def harness_specs(
+    client: httpx.AsyncClient, settings: Settings, models: Iterable[tuple[str, str]]
+) -> tuple[AgentSpec, ...]:
+    """One spec per (Corral suite, native (provider, model) Corral holds an agent for).
+
+    Corral creates its own agents, so the map names none: each model's agent is looked
+    up by the id Corral gives it. A model Corral has never run is skipped.
+    """
+    native = list(models)
+    agent_ids: dict[tuple[str, str, str], str | None] = {}
+    specs: list[AgentSpec] = []
+    for slug in HARNESS_SLUGS:
+        ids = settings.coval_s2s_scenarios.get(slug)
+        if ids is None or ids.workspace_id is None:
+            continue
+        metric_ids = {Metric(metric): ident for metric, ident in ids.metric_ids.items()}
+        for provider, model in native:
+            key = (provider, model, ids.workspace_id)
+            if key not in agent_ids:
+                try:
+                    agent_ids[key] = await find_agent_id(
+                        client,
+                        corral_customer_agent_id(*key),
+                        workspace_id=ids.workspace_id,
+                    )
+                except httpx.HTTPError as exc:
+                    logger.error(
+                        "harness_agent_lookup_failed",
+                        scenario=slug,
+                        provider=provider,
+                        model=model,
+                        error=type(exc).__name__,
+                    )
+                    agent_ids[key] = None
+            agent_id = agent_ids[key]
+            if agent_id is None:
+                continue
+            specs.append(
+                AgentSpec(
+                    agent_id=agent_id,
+                    provider=provider,
+                    model=model,
+                    test_set_id=ids.test_set_id,
+                    family=scenario_family(slug),
+                    publish_samples=False,
+                    metric_ids=metric_ids,
+                    uses_shared_metrics=False,
+                    workspace_id=ids.workspace_id,
                 )
             )
     return tuple(specs)

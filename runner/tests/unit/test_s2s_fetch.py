@@ -3369,3 +3369,55 @@ def test_numeric_value_maps_scale_and_rounding() -> None:
     for metric in (Metric.V2V, Metric.CHARACTER_ERROR_RATE, Metric.TOOL_CALL_COUNT):
         assert VALUE_MAPPERS[metric](None) == (None, ResultStatus.FAILED)
         assert VALUE_MAPPERS[metric](True) == (None, ResultStatus.FAILED)
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_write_fetches_corral_agents_for_the_interruption_suites(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    yield_ids = ScenarioCovalIds(
+        test_set_id="TSY",
+        personas={"clean": "CUE"},
+        metric_ids={"InterruptionCueLanded": "GATE", "InterruptionYielded": "YIELD"},
+        workspace_id="WS",
+    )
+    settings = _settings(
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_scenarios={"interruption-yield": yield_ids},
+    )
+    writer = _stub_writer()
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    async def _find(_client: Any, customer_agent_id: str, *, workspace_id: str) -> str | None:
+        return "AG" if customer_agent_id == "google-gemini-live--sdk--WS" else None
+
+    fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
+    monkeypatch.setattr(fetch_v2v, "s2s_specs", lambda _s: ())
+    monkeypatch.setattr(
+        fetch_v2v,
+        "fetch_models",
+        AsyncMock(return_value=[*_every_s2s_row(), _platform_row("vapi")]),
+    )
+    monkeypatch.setattr(specs, "find_agent_id", _find)
+    monkeypatch.setattr(fetch_v2v, "coval_client", lambda _settings: _fake_client({}, {}))
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: writer)
+    monkeypatch.setattr(fetch_v2v, "_fetch_one_provider", fetch_one)
+
+    statuses = await fetch_v2v.fetch_and_write_v2v(settings)
+
+    assert statuses == {"s2s-interruption-yield:google:gemini-live": RunStatus.SUCCEEDED}
+    assert fetch_one.await_args is not None
+    kwargs = fetch_one.await_args.kwargs
+    assert (kwargs["agent_id"], kwargs["test_set_id"], kwargs["workspace_id"]) == (
+        "AG",
+        "TSY",
+        "WS",
+    )
+    assert kwargs["metric_ids"] == {
+        Metric.INTERRUPTION_CUE_LANDED: "GATE",
+        Metric.INTERRUPTION_YIELDED: "YIELD",
+    }

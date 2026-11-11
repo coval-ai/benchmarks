@@ -47,6 +47,25 @@ def coval_client(settings: Settings) -> httpx.AsyncClient:
     )
 
 
+async def find_agent_id(
+    client: httpx.AsyncClient, customer_agent_id: str, *, workspace_id: str
+) -> str | None:
+    """The id of the agent Coval holds under *customer_agent_id*, or None when there is none.
+
+    Only the id is read: an agent record can carry provider keys.
+    """
+    resp = await client.get(
+        "/agents",
+        params={"filter": f'customer_agent_id="{customer_agent_id}"', "page_size": 1},
+        headers={"X-Coval-Workspace-Id": workspace_id},
+    )
+    resp.raise_for_status()
+    for agent in cast("list[dict[str, Any]]", resp.json().get("agents") or []):
+        if agent.get("customer_agent_id") == customer_agent_id:
+            return str(agent["id"])
+    return None
+
+
 def parse_time(raw: object) -> datetime | None:
     if not isinstance(raw, str):
         return None

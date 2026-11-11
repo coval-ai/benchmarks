@@ -32,6 +32,7 @@ from coval_bench.db.registry_store import fetch_models
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import Metric
 from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.registries.models import Orchestration
 from coval_bench.runner.capture import ImportRunClaim, ImportRunIdentity
 from coval_bench.s2s.conditions import (
     DATASET_ID,
@@ -65,7 +66,13 @@ from coval_bench.s2s.ingest import (
 from coval_bench.s2s.rows import VALUE_MAPPERS, ingestable_metrics
 from coval_bench.s2s.samples import SampleRun, model_labels, publish_tick_sample
 from coval_bench.s2s.scenario_map import with_scenario_map
-from coval_bench.s2s.specs import AgentSpec, llm_specs, platform_specs, s2s_specs
+from coval_bench.s2s.specs import (
+    AgentSpec,
+    harness_specs,
+    llm_specs,
+    platform_specs,
+    s2s_specs,
+)
 
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 
@@ -517,7 +524,20 @@ async def fetch_and_write_v2v(
             specs = llm_specs(models, llm_agent_ids)
             _require_family_test_sets(settings, specs)
         elif benchmark is Benchmark.S2S:
-            specs = (*specs, *platform_specs(settings, models))
+            specs = (
+                *specs,
+                *platform_specs(settings, models),
+                *await harness_specs(
+                    client,
+                    settings,
+                    (
+                        (m.provider, m.model)
+                        for m in models
+                        if m.benchmark is Benchmark.S2S
+                        and m.orchestration is not Orchestration.PLATFORM
+                    ),
+                ),
+            )
         registered = frozenset((m.provider, m.model) for m in models)
         retired = frozenset((m.provider, m.model) for m in models if not m.collected)
         writer = RunWriter(pool)
@@ -559,7 +579,7 @@ async def fetch_and_write_v2v(
             if spec.test_set_id_attr and not spec_test_set:
                 logger.warning("test_set_unset", provider=spec.provider, attr=spec.test_set_id_attr)
                 continue
-            spec_workspace_id = (
+            spec_workspace_id = spec.workspace_id or (
                 (getattr(settings, spec.workspace_id_attr) or "").strip() or None
                 if spec.workspace_id_attr
                 else None

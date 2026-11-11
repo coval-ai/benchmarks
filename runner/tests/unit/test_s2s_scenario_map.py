@@ -375,3 +375,54 @@ def test_workflow_bank_still_needs_its_judge() -> None:
 
     with pytest.raises(ValueError, match="'workflow-bank' has no judge"):
         scenario_map_fields(_map(**{"workflow-bank": {"v1": version}}))
+
+
+def _harness_version(metric_ids: dict[str, str] | None = None) -> dict[str, Any]:
+    return {
+        "workspace_id": "WS",
+        "test_set_id": "TSY",
+        "agents": {
+            "openai/gpt-realtime-2": {
+                "id": "PROMPT",
+                "provider": "openai",
+                "model": "gpt-realtime-2",
+                "registry_model": "gpt-realtime-2",
+            }
+        },
+        "personas": {"cue_caller": {"id": "CUE", "version": "v1"}},
+        "judge": None,
+        "metric_ids": metric_ids or {"gate": "GATE", "yielded": "YIELD", "stop_latency": "STOP"},
+        "schedules": {},
+    }
+
+
+def test_harness_suite_loads_without_a_schedule_or_agents() -> None:
+    fields = scenario_map_fields(_map(**{"interruption-yield": {"v1": _harness_version()}}))
+
+    assert fields["coval_s2s_scenarios"]["interruption-yield"] == ScenarioCovalIds(
+        test_set_id="TSY",
+        personas={"clean": "CUE"},
+        metric_ids={"InterruptionCueLanded": "GATE", "InterruptionYielded": "YIELD"},
+        workspace_id="WS",
+    )
+
+
+def test_harness_suite_without_its_judge_is_skipped_and_workflow_bank_still_loads() -> None:
+    raw = _map(**{"interruption-yield": {"v1": _harness_version({"gate": "GATE"})}})
+
+    with capture_logs() as logs:
+        fields = scenario_map_fields(raw)
+
+    assert "interruption-yield" not in fields["coval_s2s_scenarios"]
+    assert "workflow-bank" in fields["coval_s2s_scenarios"]
+    assert any(log["event"] == "harness_scenario_invalid" for log in logs)
+
+
+def test_harness_suite_reads_its_newest_version() -> None:
+    newer = _harness_version()
+    newer["test_set_id"] = "TSY2"
+    raw = _map(**{"interruption-yield": {"v1": _harness_version(), "v2": newer}})
+
+    assert scenario_map_fields(raw)["coval_s2s_scenarios"]["interruption-yield"].test_set_id == (
+        "TSY2"
+    )

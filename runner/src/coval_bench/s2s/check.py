@@ -17,7 +17,7 @@ from google.auth.exceptions import GoogleAuthError
 
 from coval_bench.config import Settings
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.s2s.conditions import PLATFORM_SLUGS
+from coval_bench.s2s.conditions import HARNESS_SLUGS, PLATFORM_SLUGS
 from coval_bench.s2s.coval_runs import coval_client, recent_completed_runs
 from coval_bench.s2s.fetch_v2v import validate_fetch_settings
 from coval_bench.s2s.identity import (
@@ -27,7 +27,13 @@ from coval_bench.s2s.identity import (
     parse_persona_conditions,
 )
 from coval_bench.s2s.scenario_map import with_scenario_map
-from coval_bench.s2s.specs import AgentSpec, s2s_specs, scenario_specs
+from coval_bench.s2s.specs import (
+    SCENARIO_MODELS,
+    AgentSpec,
+    harness_specs,
+    s2s_specs,
+    scenario_specs,
+)
 
 
 @dataclass(frozen=True)
@@ -38,7 +44,10 @@ class ModelRuns:
 
 
 async def check_scenarios(
-    settings: Settings, client: httpx.AsyncClient, *, window_seconds: int | None = None
+    settings: Settings,
+    client: httpx.AsyncClient,
+    *,
+    window_seconds: int | None = None,
 ) -> tuple[list[ModelRuns], list[str]]:
     """Count each scenario model's recent runs per condition and flag what the fetch would miss."""
     validate_fetch_settings(settings, s2s_specs(settings), Benchmark.S2S)
@@ -58,6 +67,8 @@ async def check_scenarios(
                 )
                 for key, agent_id in ids.agents.items()
             ]
+        elif slug in HARNESS_SLUGS:
+            specs = list(await harness_specs(client, only_this, SCENARIO_MODELS))
         else:
             specs = [s for s in scenario_specs(only_this) if s.agent_id]
         if not specs:
@@ -76,6 +87,7 @@ async def check_scenarios(
                 period_seconds=settings.s2s_fetch_period_seconds,
                 test_set_id=spec.test_set_id,
                 window_seconds=window_seconds,
+                workspace_id=spec.workspace_id,
             )
             counts = dict.fromkeys(ids.personas, 0)
             for run in runs:

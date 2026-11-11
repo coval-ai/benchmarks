@@ -45,6 +45,7 @@ class ScenarioCovalIds(BaseModel, frozen=True, extra="forbid"):
     # and the scenario's own metric ids by metric type.
     variant_ids: dict[str, str] = Field(default_factory=dict)
     metric_ids: dict[str, str] = Field(default_factory=dict)
+    workspace_id: str | None = Field(default=None, min_length=1)
 
     @field_validator("test_set_id", "instruction_metric_id", "workflow_metric_id", mode="before")
     @classmethod
@@ -123,9 +124,9 @@ class Settings(BaseSettings):
     def _known_scenario_slugs(
         cls, value: dict[str, ScenarioCovalIds]
     ) -> dict[str, ScenarioCovalIds]:
-        from coval_bench.s2s.conditions import PLATFORM_SLUGS, SCENARIO_SLUGS
+        from coval_bench.s2s.conditions import HARNESS_SLUGS, PLATFORM_SLUGS, SCENARIO_SLUGS
 
-        known = [*SCENARIO_SLUGS, *PLATFORM_SLUGS]
+        known = [*SCENARIO_SLUGS, *PLATFORM_SLUGS, *HARNESS_SLUGS]
         unknown = sorted(set(value) - set(known))
         if unknown:
             raise ValueError(f"coval_s2s_scenarios slug(s) {unknown} not in {known}")

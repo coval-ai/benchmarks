@@ -127,6 +127,10 @@ async def resolve_import_generation(
         return claim, generation
 
 
+def _is_positive(raw: object) -> bool:
+    return isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw > 0
+
+
 def _writable_metrics(
     *,
     spec: AgentSpec,
@@ -177,6 +181,22 @@ def _writable_metrics(
                 continue
             anchor_ids = {sid for v in anchor_values if (sid := v.get("simulation_output_id"))}
             values = [v for v in values if v.get("simulation_output_id") in anchor_ids]
+            if not values:
+                continue
+        if condition.optional_only_where_anchor_positive:
+            landed = {
+                v.get("simulation_output_id") for v in anchor_values if _is_positive(v.get("value"))
+            }
+            kept = [v for v in values if v.get("simulation_output_id") in landed]
+            if len(kept) < len(values):
+                logger.info(
+                    "optional_without_positive_anchor",
+                    provider=spec.provider,
+                    coval_run_id=coval_run.run_id,
+                    metric=metric.value,
+                    dropped=len(values) - len(kept),
+                )
+            values = kept
             if not values:
                 continue
         writable[metric] = values

@@ -17,7 +17,7 @@ from pydantic import BaseModel, StringConstraints
 from coval_bench import gcs
 from coval_bench.config import ScenarioCovalIds, Settings
 from coval_bench.registries import Metric
-from coval_bench.s2s.conditions import PLATFORM_SLUGS
+from coval_bench.s2s.conditions import HARNESS_SLUGS, PLATFORM_SLUGS
 
 logger = structlog.get_logger("coval_bench.s2s.scenario_map")
 
@@ -39,6 +39,11 @@ _PLATFORM_METRICS = {
     "call_length": Metric.CALL_LENGTH,
     "character_error_rate": Metric.CHARACTER_ERROR_RATE,
     "tool_call_count": Metric.TOOL_CALL_COUNT,
+}
+_HARNESS_METRICS = {
+    "gate": Metric.INTERRUPTION_CUE_LANDED,
+    "yielded": Metric.INTERRUPTION_YIELDED,
+    "continued": Metric.BACKCHANNEL_CONTINUED,
 }
 
 # Coval ids go into run filters as agent_id="…", so quotes or spaces must never pass.
@@ -71,6 +76,7 @@ class _ScenarioVersion(_Schedules, frozen=True):
     judge: _Ref | None
     metric_ids: dict[str, _CovalId]
     run_template_ids: dict[str, _CovalId] = {}
+    workspace_id: _CovalId | None = None
 
 
 def _newest_live(versions: dict[str, Any]) -> _ScenarioVersion | None:
@@ -147,6 +153,36 @@ def _platform_ids(name: str, assets: _ScenarioVersion) -> ScenarioCovalIds:
     )
 
 
+def _harness_ids(name: str, versions: dict[str, Any]) -> ScenarioCovalIds:
+    """A Corral suite's ids from its newest version. Corral starts these runs, so they
+    have no schedule; its agents are found at fetch time, so none are listed here."""
+    if not versions:
+        raise ValueError(f"scenario map {name!r} has no versions")
+    newest = max(versions, key=lambda version: int(version.removeprefix("v")))
+    assets = _ScenarioVersion.model_validate(versions[newest])
+    if len(assets.personas) != 1:
+        raise ValueError(f"scenario map {name!r} needs exactly one caller persona")
+    if not assets.workspace_id:
+        raise ValueError(f"scenario map {name!r} has no workspace id")
+    metric_ids = {
+        metric.value: assets.metric_ids[key]
+        for key, metric in _HARNESS_METRICS.items()
+        if assets.metric_ids.get(key)
+    }
+    needed = {Metric.INTERRUPTION_CUE_LANDED.value, HARNESS_SLUGS[name].value}
+    if not needed <= metric_ids.keys():
+        raise ValueError(
+            f"scenario map {name!r} has no metric id for {sorted(needed - metric_ids.keys())}"
+        )
+    (persona,) = assets.personas.values()
+    return ScenarioCovalIds(
+        test_set_id=assets.test_set_id,
+        personas={"clean": persona.id},
+        metric_ids=metric_ids,
+        workspace_id=assets.workspace_id,
+    )
+
+
 def scenario_map_fields(raw: object) -> dict[str, Any]:
     """The Settings fields the fetch reads, built from a parsed scenario map."""
     if not isinstance(raw, dict):
@@ -163,6 +199,15 @@ def scenario_map_fields(raw: object) -> dict[str, Any]:
             scenarios[name] = _platform_ids(name, assets)
         except ValueError as exc:
             logger.error("platform_scenario_invalid", scenario=name, error=str(exc))
+    for name in HARNESS_SLUGS:
+        versions = raw.get(name)
+        if not isinstance(versions, dict):
+            logger.info("harness_scenario_absent", scenario=name)
+            continue
+        try:
+            scenarios[name] = _harness_ids(name, versions)
+        except ValueError as exc:
+            logger.error("harness_scenario_invalid", scenario=name, error=str(exc))
     daily = live[_DAILY_SCENARIO]
     missing = sorted(
         key
