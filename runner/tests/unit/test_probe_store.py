@@ -64,8 +64,8 @@ async def test_a_retried_tick_keeps_the_first_row(pg_conn: Any) -> None:
     apply_migrations(pg_conn)
     pool = await open_pool(pg_conn)
     try:
-        await insert_probe_result(pool, _probe(ttfa_ms=180.0))
-        await insert_probe_result(pool, _probe(ttfa_ms=950.0))
+        assert await insert_probe_result(pool, _probe(ttfa_ms=180.0)) is True
+        assert await insert_probe_result(pool, _probe(ttfa_ms=950.0)) is False
     finally:
         await pool.close()
 
@@ -83,4 +83,18 @@ def test_a_failure_needs_an_error_and_an_origin(pg_conn: Any) -> None:
               (benchmark, provider, model, scheduled_at, sent_at, status)
             VALUES ('STT', 'acme', 'fast-1', now(), now(), 'failed')
             """
+        )
+
+
+@pytest.mark.parametrize("column", ["ttft_ms", "ttfs_ms", "ttfa_ms"])
+def test_a_timing_cannot_be_nan(pg_conn: Any, column: str) -> None:
+    apply_migrations(pg_conn)
+    pg_conn.autocommit = True
+    with pytest.raises(psycopg.errors.CheckViolation):
+        pg_conn.execute(
+            f"""
+            INSERT INTO benchmarks_v2.probe_results
+              (benchmark, provider, model, scheduled_at, sent_at, status, {column})
+            VALUES ('STT', 'acme', 'fast-1', now(), now(), 'succeeded', 'NaN')
+            """  # noqa: S608
         )

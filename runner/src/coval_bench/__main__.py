@@ -278,7 +278,8 @@ def probe_latency(kind: str, selectors: tuple[str, ...]) -> None:
     """Send every model the same short input once and store the timings.
 
     One provider call per model with no retry, written to probe_results. A
-    provider failing is recorded and doesn't fail the command.
+    provider failing is recorded and doesn't fail the command. It fails only
+    when there was nothing to probe or nothing could be stored.
     """
     from coval_bench.config import get_settings
     from coval_bench.runner.latency_probe import run_latency_probes
@@ -297,12 +298,17 @@ def probe_latency(kind: str, selectors: tuple[str, ...]) -> None:
                 "kind": kind,
                 "scheduled_at": summary.scheduled_at.isoformat(),
                 "probed": summary.probed,
+                "stored": summary.stored,
                 "failed": summary.failed,
+                "skipped": summary.skipped,
+                "errored": summary.errored,
             }
         )
     )
     if summary.probed == 0:
         raise click.ClickException("no models to probe")
+    if summary.stored == 0 and summary.skipped == 0:
+        raise click.ClickException("no probe result was stored")
 
 
 @cli.command(name="stt-smoke")

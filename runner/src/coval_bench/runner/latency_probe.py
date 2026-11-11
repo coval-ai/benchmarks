@@ -6,6 +6,9 @@
 Unlike a benchmark run this scores nothing. It makes one provider call per
 model, with no retry, and stores the timings (or the failure) in
 ``probe_results``. A failed call is a data point, not something to hide.
+
+Models are probed one at a time so nothing on our side competes with the call
+being timed.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 
+from coval_bench.arena.provider_health import classify_failure
 from coval_bench.datasets.loader import load_stt_dataset
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.probe_store import ProbeResult, insert_probe_result
@@ -25,13 +29,10 @@ from coval_bench.db.registry_store import fetch_models
 from coval_bench.metrics import compute_ttfs
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.registries import METRIC_EXCLUSIONS, Benchmark, Metric
-from coval_bench.runner.gate import ModelGate
 from coval_bench.runner.orchestrator import (
-    _CONCURRENCY_CAP,
     _STT_TIMEOUT_S,
     _TTS_TIMEOUT_S,
     _current_tick,
-    _gate_key,
     _get_stt_providers,
     _get_tts_providers,
     _read_pcm16,
@@ -50,7 +51,7 @@ if TYPE_CHECKING:
 logger = structlog.get_logger("coval_bench.latency_probe")
 
 STT_PROBE_DATASET = "stt-probe-v1"
-TTS_PROBE_TEXT = "Hello world."
+TTS_PROBE_TEXT = "Because the single most powerful word in our democracy is the word we."
 
 Origin = Literal["provider", "runner"]
 
@@ -58,8 +59,16 @@ Origin = Literal["provider", "runner"]
 @dataclass(frozen=True)
 class ProbeSummary:
     scheduled_at: datetime
-    probed: int
-    failed: int
+    probed: int  # models attempted
+    stored: int  # rows written
+    failed: int  # stored rows that record a failure
+    skipped: int  # the tick already had a row for the model
+    errored: int  # the probe or its write raised
+
+
+def _origin(error: str | None, status_code: int | None = None) -> Origin:
+    """A bad key, spent credits or a rate limit is our problem, not the provider's."""
+    return "runner" if classify_failure(status_code, error) is not None else "provider"
 
 
 async def _call(
@@ -72,12 +81,15 @@ async def _call(
         provider = build()
     except Exception as exc:
         return None, _truncate(str(exc) or type(exc).__name__), "runner"
+    deadline = asyncio.timeout(timeout_s)
     try:
-        result = await asyncio.wait_for(request(provider), timeout=timeout_s)
-    except TimeoutError:
-        return None, f"timed out after {timeout_s}s", "provider"
+        async with deadline:
+            result = await request(provider)
     except Exception as exc:
-        return None, _truncate(str(exc) or type(exc).__name__), "provider"
+        if deadline.expired():
+            return None, f"timed out after {timeout_s}s", "provider"
+        error = _truncate(str(exc) or type(exc).__name__)
+        return None, error, _origin(error)
     return result, None, None
 
 
@@ -94,7 +106,6 @@ async def _probe_stt(
     item: Any,  # noqa: ANN401 — DatasetItem
     *,
     settings: Settings,
-    gate: ModelGate,
     scheduled_at: datetime,
 ) -> ProbeResult:
     provider_cls = _get_stt_providers().get(entry.provider)
@@ -115,16 +126,15 @@ async def _probe_stt(
     if provider_cls is None:
         return row(datetime.now(UTC), error="unknown STT provider", failure_origin="runner")
 
-    async with gate.slot(_gate_key(entry, provider_cls)):
-        sent_at = datetime.now(UTC)
-        result, error, origin = await _call(
-            lambda: provider_cls(settings, entry.model),
-            lambda provider: provider.measure_ttft(pcm, 1, 2, 16000, 0.1),
-            _STT_TIMEOUT_S,
-        )
+    sent_at = datetime.now(UTC)
+    result, error, origin = await _call(
+        lambda: provider_cls(settings, entry.model),
+        lambda provider: provider.measure_ttft(pcm, 1, 2, 16000, 0.1),
+        _STT_TIMEOUT_S,
+    )
     if result is not None:
         error = result.error or _stt_silent_failure(result)
-        origin = "provider" if error else None
+        origin = _origin(error) if error else None
     if result is None or error is not None:
         return row(sent_at, error=error or "no result", failure_origin=origin or "provider")
 
@@ -154,7 +164,6 @@ async def _probe_tts(
     entry: RegisteredModel,
     *,
     settings: Settings,
-    gate: ModelGate,
     scheduled_at: datetime,
 ) -> ProbeResult:
     provider_cls = _get_tts_providers().get(entry.provider)
@@ -174,18 +183,17 @@ async def _probe_tts(
     if provider_cls is None:
         return row(datetime.now(UTC), error="unknown TTS provider", failure_origin="runner")
 
-    async with gate.slot(_gate_key(entry, provider_cls)):
-        sent_at = datetime.now(UTC)
-        result, error, origin = await _call(
-            lambda: provider_cls(settings=settings, model=entry.model, voice=voice),
-            lambda provider: provider.synthesize(TTS_PROBE_TEXT),
-            _TTS_TIMEOUT_S,
-        )
+    sent_at = datetime.now(UTC)
+    result, error, origin = await _call(
+        lambda: provider_cls(settings=settings, model=entry.model, voice=voice),
+        lambda provider: provider.synthesize(TTS_PROBE_TEXT),
+        _TTS_TIMEOUT_S,
+    )
     if result is not None:
         if result.audio_path is not None:
             result.audio_path.unlink(missing_ok=True)
         if result.error:
-            error, origin = result.error, "provider"
+            error, origin = result.error, _origin(result.error, result.status_code)
         elif result.ttfa_ms is None:
             error, origin = "no TTFA produced", "provider"
         else:
@@ -205,6 +213,7 @@ async def run_latency_probes(
 ) -> ProbeSummary:
     """Probe every collected shared *kind* model once and store each outcome."""
     scheduled_at = _current_tick(settings)
+    stored = failed = skipped = errored = 0
     async with lifespan_pool(settings) as pool:
         roster = await fetch_models(pool)
         stt_models, tts_models = _select_models(
@@ -215,7 +224,6 @@ async def run_latency_probes(
             only=only,
         )
         models = stt_models if kind == "stt" else tts_models
-        gate = ModelGate(_CONCURRENCY_CAP)
         item = (
             load_stt_dataset(STT_PROBE_DATASET, settings=settings, sample_size=1).items[0]
             if kind == "stt" and models
@@ -224,34 +232,44 @@ async def run_latency_probes(
 
         async def probe(entry: RegisteredModel) -> ProbeResult:
             if kind == "stt":
-                result = await _probe_stt(
-                    entry, item, settings=settings, gate=gate, scheduled_at=scheduled_at
-                )
-            else:
-                result = await _probe_tts(
-                    entry, settings=settings, gate=gate, scheduled_at=scheduled_at
-                )
-            await insert_probe_result(pool, result)
-            logger.info(
-                "latency_probe",
-                benchmark=result.benchmark,
-                provider=result.provider,
-                model=result.model,
-                status=result.status,
-                ttft_ms=result.ttft_ms,
-                ttfs_ms=result.ttfs_ms,
-                ttfa_ms=result.ttfa_ms,
-                error=result.error,
-            )
-            return result
+                return await _probe_stt(entry, item, settings=settings, scheduled_at=scheduled_at)
+            return await _probe_tts(entry, settings=settings, scheduled_at=scheduled_at)
 
         try:
             await _warmup(models, settings)
-            results = await asyncio.gather(*(probe(entry) for entry in models))
+            for entry in models:
+                log = logger.bind(
+                    benchmark=kind.upper(), provider=entry.provider, model=entry.model
+                )
+                try:
+                    result = await probe(entry)
+                    was_stored = await insert_probe_result(pool, result)
+                except Exception:
+                    errored += 1
+                    log.exception("latency_probe_errored")
+                    continue
+                if not was_stored:
+                    skipped += 1
+                    log.warning("latency_probe_skipped", reason="tick already has a row")
+                    continue
+                stored += 1
+                failed += result.error is not None
+                log.info(
+                    "latency_probe",
+                    status=result.status,
+                    ttft_ms=result.ttft_ms,
+                    ttfs_ms=result.ttfs_ms,
+                    ttfa_ms=result.ttfa_ms,
+                    error=result.error,
+                    failure_origin=result.failure_origin,
+                )
         finally:
             await _close_http_clients()
     return ProbeSummary(
         scheduled_at=scheduled_at,
-        probed=len(results),
-        failed=sum(result.error is not None for result in results),
+        probed=len(models),
+        stored=stored,
+        failed=failed,
+        skipped=skipped,
+        errored=errored,
     )

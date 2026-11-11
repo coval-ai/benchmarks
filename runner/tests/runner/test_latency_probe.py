@@ -24,7 +24,6 @@ from coval_bench.providers.base import TranscriptionResult, TTSResult
 from coval_bench.registries import METRIC_EXCLUSIONS, Benchmark, Metric, RegisteredModel
 from coval_bench.registries.models import Voice
 from coval_bench.runner import latency_probe
-from coval_bench.runner.gate import ModelGate
 
 _TICK = datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
 _SETTINGS = cast(Settings, SimpleNamespace(schedule_period_seconds=1800))
@@ -81,17 +80,18 @@ async def _probe_tts(
     result = await latency_probe._probe_tts(
         _model(Benchmark.TTS, **model_fields),
         settings=_SETTINGS,
-        gate=ModelGate(1),
         scheduled_at=_TICK,
     )
     return result, calls
 
 
-async def test_tts_probe_stores_ttfa_for_hello_world(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_tts_probe_stores_ttfa_for_the_probe_sentence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     voices = (Voice(id="f-1", gender="female"), Voice(id="m-1", gender="male"))
     result, calls = await _probe_tts(monkeypatch, _tts_result(), voice="fallback", voices=voices)
 
-    assert calls == [{"model": "fast-1", "voice": "f-1", "text": "Hello world."}]
+    assert calls == [{"model": "fast-1", "voice": "f-1", "text": latency_probe.TTS_PROBE_TEXT}]
     assert (result.status, result.ttfa_ms, result.voice) == ("succeeded", 180.0, "f-1")
     assert result.scheduled_at == _TICK
 
@@ -144,7 +144,7 @@ async def test_unknown_provider_is_our_failure(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(latency_probe, "_get_tts_providers", dict)
 
     result = await latency_probe._probe_tts(
-        _model(Benchmark.TTS), settings=_SETTINGS, gate=ModelGate(1), scheduled_at=_TICK
+        _model(Benchmark.TTS), settings=_SETTINGS, scheduled_at=_TICK
     )
 
     assert (result.status, result.failure_origin) == ("failed", "runner")
@@ -175,7 +175,6 @@ async def _probe_stt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, outcome: A
         _model(Benchmark.STT),
         _stt_item(tmp_path),
         settings=_SETTINGS,
-        gate=ModelGate(1),
         scheduled_at=_TICK,
     )
 
@@ -265,8 +264,9 @@ async def test_run_probes_every_collected_model_and_stores_each(
     async def fake_fetch(_pool: Any) -> list[RegisteredModel]:
         return roster
 
-    async def fake_insert(_pool: Any, result: Any) -> None:
+    async def fake_insert(_pool: Any, result: Any) -> bool:
         stored.append(result)
+        return True
 
     async def fake_close() -> None:
         closed.append(True)
@@ -291,9 +291,127 @@ async def test_run_probes_every_collected_model_and_stores_each(
 
     summary = await latency_probe.run_latency_probes(settings=_SETTINGS, kind="tts")
 
-    assert (summary.scheduled_at, summary.probed, summary.failed) == (_TICK, 2, 1)
+    assert (summary.scheduled_at, summary.probed, summary.stored) == (_TICK, 2, 2)
+    assert (summary.failed, summary.skipped, summary.errored) == (1, 0, 0)
     assert {(r.provider, r.model, r.status) for r in stored} == {
         ("acme", "fast-1", "succeeded"),
         ("down", "tts-2", "failed"),
     }
     assert closed == [True]
+
+
+def _wire_run(monkeypatch: pytest.MonkeyPatch, insert: Any) -> None:
+    roster = [
+        _model(Benchmark.TTS),
+        RegisteredModel(
+            benchmark=Benchmark.TTS, provider="acme", model="fast-2", collected=True, published=True
+        ),
+    ]
+
+    @asynccontextmanager
+    async def fake_pool(_settings: Any) -> Any:
+        yield object()
+
+    async def fake_fetch(_pool: Any) -> list[RegisteredModel]:
+        return roster
+
+    async def nothing(*_: Any) -> None:
+        return None
+
+    monkeypatch.setattr(latency_probe, "lifespan_pool", fake_pool)
+    monkeypatch.setattr(latency_probe, "fetch_models", fake_fetch)
+    monkeypatch.setattr(latency_probe, "insert_probe_result", insert)
+    monkeypatch.setattr(latency_probe, "_close_http_clients", nothing)
+    monkeypatch.setattr(latency_probe, "_warmup", nothing)
+    monkeypatch.setattr(latency_probe, "_current_tick", lambda _settings: _TICK)
+    monkeypatch.setattr(
+        latency_probe, "_get_tts_providers", lambda: {"acme": _tts_provider(_tts_result(), [])}
+    )
+
+
+async def test_one_failed_write_does_not_stop_the_other_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored: list[str] = []
+
+    async def flaky_insert(_pool: Any, result: Any) -> bool:
+        if result.model == "fast-1":
+            raise RuntimeError("permission denied for table probe_results")
+        stored.append(result.model)
+        return True
+
+    _wire_run(monkeypatch, flaky_insert)
+
+    summary = await latency_probe.run_latency_probes(settings=_SETTINGS, kind="tts")
+
+    assert stored == ["fast-2"]
+    assert (summary.probed, summary.stored, summary.errored) == (2, 1, 1)
+
+
+async def test_a_probe_the_tick_already_has_is_counted_as_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def already_there(_pool: Any, _result: Any) -> bool:
+        return False
+
+    _wire_run(monkeypatch, already_there)
+
+    summary = await latency_probe.run_latency_probes(settings=_SETTINGS, kind="tts")
+
+    assert (summary.probed, summary.stored, summary.skipped) == (2, 0, 2)
+
+
+async def test_models_are_probed_one_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    running = 0
+    peak = 0
+
+    async def slow() -> TTSResult:
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0.01)
+        running -= 1
+        return _tts_result()
+
+    async def insert(_pool: Any, _result: Any) -> bool:
+        return True
+
+    _wire_run(monkeypatch, insert)
+    monkeypatch.setattr(
+        latency_probe, "_get_tts_providers", lambda: {"acme": _tts_provider(slow, [])}
+    )
+
+    await latency_probe.run_latency_probes(settings=_SETTINGS, kind="tts")
+
+    assert peak == 1
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "server rejected WebSocket connection: HTTP 401",
+        "task_failed: [1008] insufficient balance",
+        "429 Too Many Requests",
+    ],
+)
+async def test_a_key_problem_is_our_failure(monkeypatch: pytest.MonkeyPatch, error: str) -> None:
+    result, _ = await _probe_tts(monkeypatch, RuntimeError(error))
+
+    assert (result.status, result.failure_origin, result.error) == ("failed", "runner", error)
+
+
+async def test_a_reported_401_is_our_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    outcome = _tts_result(ttfa_ms=None, error="request failed", status_code=401)
+
+    result, _ = await _probe_tts(monkeypatch, outcome)
+
+    assert (result.status, result.failure_origin) == ("failed", "runner")
+
+
+async def test_a_providers_own_timeout_is_not_reported_as_ours(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, _ = await _probe_tts(monkeypatch, TimeoutError("timed out during opening handshake"))
+
+    assert result.error == "timed out during opening handshake"
+    assert result.failure_origin == "provider"

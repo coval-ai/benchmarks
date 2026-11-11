@@ -42,10 +42,12 @@ _INSERT = """
        %(ttft_ms)s, %(ttfs_ms)s, %(ttfa_ms)s, %(status)s,
        %(error)s, %(failure_origin)s)
     ON CONFLICT (benchmark, provider, model, scheduled_at) DO NOTHING
+    RETURNING id
 """
 
 
-async def insert_probe_result(pool: AsyncConnectionPool[Any], result: ProbeResult) -> None:
-    """Store *result*. A retried job keeps the tick's first row for a model."""
+async def insert_probe_result(pool: AsyncConnectionPool[Any], result: ProbeResult) -> bool:
+    """Store *result*. False when the tick already has a row for the model, which is kept."""
     async with pool.connection() as conn:
-        await conn.execute(_INSERT, {**asdict(result), "status": result.status})
+        cursor = await conn.execute(_INSERT, {**asdict(result), "status": result.status})
+        return await cursor.fetchone() is not None
