@@ -5,10 +5,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import httpx
 import structlog
 
 from coval_bench import scenarios
@@ -19,9 +22,11 @@ from coval_bench.s2s.conditions import (
     ADHERENCE_SLUGS,
     FAMILY_DENTAL,
     FAMILY_MULTITURN,
+    HARNESS_SLUGS,
     PLATFORM_SLUGS,
     scenario_family,
 )
+from coval_bench.s2s.coval_runs import find_agent_id
 
 if TYPE_CHECKING:
     from coval_bench.config import Settings
@@ -48,9 +53,6 @@ class AgentSpec:
     # Whether this agent's recordings may reach the public samples card.
     publish_samples: bool = True
     benchmark: Benchmark = Benchmark.S2S
-    # Settings attr holding the Coval workspace id this agent lives in. None
-    # means the workspace coval_api_key defaults to (the existing behavior).
-    workspace_id_attr: str | None = None
     # Settings attr holding this agent's own instruction-adherence metric id,
     # overriding the global coval_s2s_instruction_metric_id. None uses the
     # global one.
@@ -60,6 +62,9 @@ class AgentSpec:
     uses_shared_metrics: bool = True
     # The platform variant the agent runs, stored with each conversation.
     variant_id: str | None = None
+    # The Coval workspace this agent lives in. None means the workspace
+    # coval_api_key defaults to.
+    workspace_id: str | None = None
 
 
 # Model strings are display labels. Every agent runs the dental test set: the
@@ -227,6 +232,76 @@ def platform_specs(settings: Settings, models: Iterable[RegisteredModel]) -> tup
                 )
             )
     return tuple(specs)
+
+
+def corral_customer_agent_id(provider: str, model: str, workspace_id: str) -> str:
+    """The id Corral files a native model's agent under, built exactly as Corral builds it."""
+    slug = re.sub(r"[^a-z0-9.]+", "-", f"{provider}-{model}".lower())
+    return f"{slug}--sdk--{workspace_id}"
+
+
+async def _find_harness_agent(
+    client: httpx.AsyncClient, key: tuple[str, str, str]
+) -> tuple[bool, str | None]:
+    """(lookup worked, agent id or None when Corral has no agent for the model)."""
+    provider, model, workspace_id = key
+    try:
+        agent_id = await find_agent_id(
+            client, corral_customer_agent_id(*key), workspace_id=workspace_id
+        )
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        logger.error(
+            "harness_agent_lookup_failed",
+            provider=provider,
+            model=model,
+            error=type(exc).__name__,
+        )
+        return False, None
+    return True, agent_id
+
+
+async def harness_specs(
+    client: httpx.AsyncClient, settings: Settings, models: Iterable[tuple[str, str]]
+) -> tuple[tuple[AgentSpec, ...], tuple[AgentSpec, ...]]:
+    """(specs to fetch, specs whose agent lookup failed), one per Corral suite and model.
+
+    Corral creates its own agents, so the map names none: each model's agent is looked
+    up by the id Corral gives it. A model Corral has never run is skipped.
+    """
+    native = list(models)
+    suites = [
+        (slug, ids, ids.workspace_id)
+        for slug in HARNESS_SLUGS
+        if (ids := settings.coval_s2s_scenarios.get(slug)) and ids.workspace_id
+    ]
+    keys = sorted({(p, m, workspace_id) for _, _, workspace_id in suites for p, m in native})
+    lookups = dict(
+        zip(
+            keys, await asyncio.gather(*(_find_harness_agent(client, k) for k in keys)), strict=True
+        )
+    )
+    found: list[AgentSpec] = []
+    failed: list[AgentSpec] = []
+    for slug, ids, workspace_id in suites:
+        metric_ids = {Metric(metric): ident for metric, ident in ids.metric_ids.items()}
+        for provider, model in native:
+            ok, agent_id = lookups[(provider, model, workspace_id)]
+            spec = AgentSpec(
+                agent_id=agent_id,
+                provider=provider,
+                model=model,
+                test_set_id=ids.test_set_id,
+                family=scenario_family(slug),
+                publish_samples=False,
+                metric_ids=metric_ids,
+                uses_shared_metrics=False,
+                workspace_id=workspace_id,
+            )
+            if not ok:
+                failed.append(spec)
+            elif agent_id:
+                found.append(spec)
+    return tuple(found), tuple(failed)
 
 
 def llm_specs(

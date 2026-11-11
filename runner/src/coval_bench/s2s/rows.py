@@ -108,6 +108,9 @@ VALUE_MAPPERS: dict[Metric, ValueMapper] = {
     Metric.WORKFLOW_ADHERENCE: instruction_value,
     Metric.CHARACTER_ERROR_RATE: numeric_value(100),
     Metric.TOOL_CALL_COUNT: numeric_value(),
+    Metric.INTERRUPTION_CUE_LANDED: numeric_value(),
+    Metric.INTERRUPTION_YIELDED: instruction_value,
+    Metric.BACKCHANNEL_CONTINUED: instruction_value,
 }
 
 

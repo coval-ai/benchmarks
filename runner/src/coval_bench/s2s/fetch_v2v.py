@@ -65,7 +65,14 @@ from coval_bench.s2s.ingest import (
 from coval_bench.s2s.rows import VALUE_MAPPERS, ingestable_metrics
 from coval_bench.s2s.samples import SampleRun, model_labels, publish_tick_sample
 from coval_bench.s2s.scenario_map import with_scenario_map
-from coval_bench.s2s.specs import AgentSpec, llm_specs, platform_specs, s2s_specs
+from coval_bench.s2s.specs import (
+    SCENARIO_MODELS,
+    AgentSpec,
+    harness_specs,
+    llm_specs,
+    platform_specs,
+    s2s_specs,
+)
 
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 
@@ -516,10 +523,20 @@ async def fetch_and_write_v2v(
         if benchmark is Benchmark.LLM:
             specs = llm_specs(models, llm_agent_ids)
             _require_family_test_sets(settings, specs)
-        elif benchmark is Benchmark.S2S:
-            specs = (*specs, *platform_specs(settings, models))
         registered = frozenset((m.provider, m.model) for m in models)
         retired = frozenset((m.provider, m.model) for m in models if not m.collected)
+        harness_failed: tuple[AgentSpec, ...] = ()
+        if benchmark is Benchmark.S2S:
+            harness, harness_failed = await harness_specs(
+                client,
+                settings,
+                (
+                    key
+                    for key in SCENARIO_MODELS
+                    if key in registered and (only_run_ids is not None or key not in retired)
+                ),
+            )
+            specs = (*specs, *platform_specs(settings, models), *harness)
         writer = RunWriter(pool)
         from coval_bench.runner.capture import preflight_capture_storage
 
@@ -527,7 +544,10 @@ async def fetch_and_write_v2v(
         artifact_client = storage.Client()
         await asyncio.to_thread(preflight_capture_storage, artifact_client, artifact_bucket)
         await writer.preflight_required_capture_schema()
-        statuses: dict[str, RunStatus] = {}
+        statuses: dict[str, RunStatus] = {
+            f"{spec.family}:{spec.provider}:{spec.model}": RunStatus.FAILED
+            for spec in harness_failed
+        }
         total_ingested = 0
         matched_run_ids: set[str] = set()
         unmapped_personas: dict[str, int] = {}
@@ -559,16 +579,7 @@ async def fetch_and_write_v2v(
             if spec.test_set_id_attr and not spec_test_set:
                 logger.warning("test_set_unset", provider=spec.provider, attr=spec.test_set_id_attr)
                 continue
-            spec_workspace_id = (
-                (getattr(settings, spec.workspace_id_attr) or "").strip() or None
-                if spec.workspace_id_attr
-                else None
-            )
-            if spec.workspace_id_attr and not spec_workspace_id:
-                logger.warning(
-                    "workspace_id_unset", provider=spec.provider, attr=spec.workspace_id_attr
-                )
-                continue
+            spec_workspace_id = spec.workspace_id
             spec_metric_ids = metric_ids
             if spec.instruction_metric_id_attr:
                 spec_instruction_metric_id = (

@@ -44,6 +44,7 @@ __all__ = [
     "FAMILY_LLM_BANK",
     "FAMILY_LLM_DENTAL",
     "FAMILY_MULTITURN",
+    "HARNESS_SLUGS",
     "PLATFORM_SLUGS",
     "ROOMS",
     "SCENARIO_SLUGS",
@@ -116,6 +117,10 @@ TIERS: tuple[Condition, ...] = (
 # The voice orchestration platforms' scenarios. They have no clean caller: each room
 # the caller rings from is its own condition, quiet-room the baseline.
 PLATFORM_SLUGS: tuple[str, ...] = ("id-roulette",)
+HARNESS_SLUGS: dict[str, Metric] = {
+    "interruption-yield": Metric.INTERRUPTION_YIELDED,
+    "interruption-backchannel": Metric.BACKCHANNEL_CONTINUED,
+}
 ROOMS: tuple[Condition, ...] = (
     Condition.QUIET_ROOM,
     Condition.OFFICE_DESK,
@@ -202,6 +207,14 @@ DATASET_IDS: dict[tuple[str, Condition], str | None] = {
         for condition in Condition
         if condition is not Condition.SKIP
     },
+    **{
+        (scenario_family(slug), condition): (
+            scenario_dataset_id(slug, condition) if condition is Condition.CLEAN else None
+        )
+        for slug in HARNESS_SLUGS
+        for condition in Condition
+        if condition is not Condition.SKIP
+    },
 }
 
 
@@ -226,6 +239,7 @@ class DatasetMetrics(BaseModel, frozen=True):
     required: Metric
     optional: frozenset[Metric] = frozenset()
     local: frozenset[Metric] = frozenset()
+    optional_only_where_anchor_positive: bool = False
 
     @property
     def fetched(self) -> frozenset[Metric]:
@@ -357,6 +371,14 @@ CONDITIONS: dict[str, DatasetMetrics] = {
         required=Metric.INSTRUCTION_FOLLOWING,
         local=frozenset({Metric.TTFT}),
     ),
+    **{
+        _ingested_id(slug, Condition.CLEAN): DatasetMetrics(
+            required=Metric.INTERRUPTION_CUE_LANDED,
+            optional=frozenset({judge}),
+            optional_only_where_anchor_positive=True,
+        )
+        for slug, judge in HARNESS_SLUGS.items()
+    },
 }
 
 # Pre-scoping behaviour, for any dataset without an entry above.
