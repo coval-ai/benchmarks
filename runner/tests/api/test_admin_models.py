@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import psycopg
 import pytest
+from fastapi import FastAPI
 from httpx import AsyncClient
 from psycopg.types.json import Jsonb
 
@@ -574,3 +576,101 @@ async def test_tag_creation_is_coval_gated(client: AsyncClient) -> None:
     assert created.json() == body
     assert (await client.post("/v1/tags", json=body, headers=_admin_headers())).status_code == 409
     assert (await client.get("/v1/tags")).json() == {"tags": [body]}
+
+
+_SYNC_JOB = "projects/p/locations/r/jobs/s2s-sync"
+
+
+@pytest.fixture
+def sync_starts(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    started: list[str] = []
+    app.state.settings = app.state.settings.model_copy(update={"s2s_sync_job": _SYNC_JOB})
+
+    def _start(job: str) -> bool:
+        started.append(job)
+        return True
+
+    monkeypatch.setattr(admin_models, "start_s2s_sync", _start)
+    return started
+
+
+async def _post_s2s(client: AsyncClient, **overrides: Any) -> Any:
+    return await _post_model(
+        client,
+        modality="S2S",
+        provider="anyone",
+        model="s2s-1",
+        architecture="speech-to-speech",
+        **overrides,
+    )
+
+
+async def test_creating_a_collected_s2s_model_starts_the_sync(
+    client: AsyncClient, sync_starts: list[str]
+) -> None:
+    assert (await _post_s2s(client)).status_code == 201
+    assert sync_starts == [_SYNC_JOB]
+
+
+async def test_creating_an_uncollected_s2s_model_does_not(
+    client: AsyncClient, sync_starts: list[str]
+) -> None:
+    assert (await _post_s2s(client, collected=False)).status_code == 201
+    assert sync_starts == []
+
+
+async def test_flipping_s2s_collected_starts_the_sync(
+    client: AsyncClient, sync_starts: list[str]
+) -> None:
+    created = (await _post_s2s(client, collected=False)).json()
+    response = await _patch(client, created["id"], created["updated_at"], {"collected": True})
+    assert response.status_code == 200
+    assert response.json()["warnings"] == []
+    assert sync_starts == [_SYNC_JOB]
+
+
+async def test_other_edits_do_not_start_the_sync(
+    client: AsyncClient, sync_starts: list[str]
+) -> None:
+    s2s = (await _post_s2s(client)).json()
+    stt = (await _post_model(client)).json()
+    sync_starts.clear()
+    published = (await _patch(client, s2s["id"], s2s["updated_at"], {"published": True})).json()
+    stamp = published["model"]["updated_at"]
+    await _patch(client, s2s["id"], stamp, {"model": "s2s-renamed"})
+    await _patch(client, stt["id"], stt["updated_at"], {"collected": False})
+    assert sync_starts == []
+
+
+async def test_a_sync_that_cannot_start_is_a_warning(
+    client: AsyncClient, sync_starts: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = (await _post_s2s(client)).json()
+    monkeypatch.setattr(admin_models, "start_s2s_sync", lambda job: False)
+    response = await _patch(client, created["id"], created["updated_at"], {"collected": False})
+    assert response.status_code == 200
+    assert response.json()["warnings"] == [admin_models._SYNC_NOT_STARTED]
+
+
+async def test_a_sync_that_hangs_is_a_warning(
+    client: AsyncClient, sync_starts: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = (await _post_s2s(client)).json()
+    monkeypatch.setattr(admin_models, "_SYNC_START_TIMEOUT_S", 0.01)
+
+    def _hang(job: str) -> bool:
+        time.sleep(0.2)
+        return True
+
+    monkeypatch.setattr(admin_models, "start_s2s_sync", _hang)
+    response = await _patch(client, created["id"], created["updated_at"], {"collected": False})
+    assert response.status_code == 200
+    assert response.json()["warnings"] == [admin_models._SYNC_NOT_STARTED]
+
+
+async def test_the_job_name_is_trimmed(
+    client: AsyncClient, app: FastAPI, sync_starts: list[str]
+) -> None:
+    app.state.settings = app.state.settings.model_copy(update={"s2s_sync_job": f" {_SYNC_JOB}\n"})
+    assert (await _post_s2s(client)).status_code == 201
+    assert sync_starts == [_SYNC_JOB]

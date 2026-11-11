@@ -348,6 +348,7 @@ class Settings(BaseSettings):
     # Public bucket for per-tick sample recordings; empty disables sampling.
     s2s_samples_bucket: str = ""
     alerts_topic: str = ""
+    s2s_sync_job: str = ""
 
     # --- Analytics ---
     posthog_project_token: str = ""

@@ -17,6 +17,7 @@ a voice, and a non-empty voice pool is exactly one female and one male voice.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -24,7 +25,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.api.clerk import CovalAdmin
-from coval_bench.api.deps import get_pool, require_coval_admin
+from coval_bench.api.deps import get_pool, get_settings, require_coval_admin
 from coval_bench.api.internal import _RETIRED_BOARD_KEYS, never_shared
 from coval_bench.api.schemas import (
     AdminChangeOut,
@@ -34,6 +35,7 @@ from coval_bench.api.schemas import (
     AdminModelsResponse,
     AdminModelUpdateResponse,
 )
+from coval_bench.config import Settings
 from coval_bench.db.pricing_store import PricingStore
 from coval_bench.db.registry_store import (
     DuplicateKey,
@@ -46,6 +48,7 @@ from coval_bench.db.registry_store import (
 from coval_bench.registries import Benchmark, Gender
 from coval_bench.registries.metrics import METRIC_EXCLUSIONS
 from coval_bench.registries.provider_keys import provider_names
+from coval_bench.s2s.sync_trigger import start_s2s_sync
 
 router = APIRouter(tags=["admin"], dependencies=[Depends(require_coval_admin)])
 
@@ -53,6 +56,11 @@ router = APIRouter(tags=["admin"], dependencies=[Depends(require_coval_admin)])
 _NULLABLE_FIELDS = frozenset(
     {"voice", "creator", "region", "color", "display_name", "architecture", "orchestration"}
 )
+
+_SYNC_NOT_STARTED = (
+    "the S2S daily runs were not updated now; the next daily sync will pick this change up"
+)
+_SYNC_START_TIMEOUT_S = 15.0
 
 
 def _model_out(record: ModelRecord, history: list[ModelChange]) -> AdminModelOut:
@@ -158,6 +166,7 @@ async def create_admin_model(
     response: Response,
     admin: CovalAdmin = Depends(require_coval_admin),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    settings: Settings = Depends(get_settings),
 ) -> AdminModelOut:
     """Create a model. It starts collecting immediately; nothing is public yet."""
     never_shared(response)
@@ -171,7 +180,31 @@ async def create_admin_model(
     except DuplicateKey as exc:
         raise HTTPException(409, str(exc)) from exc
     response.headers["ETag"] = _etag(record)
+    if _changes_daily_s2s(None, record):
+        await _start_sync(settings)
     return _model_out(record, await store.history(record.id))
+
+
+def _changes_daily_s2s(before: ModelRecord | None, after: ModelRecord) -> bool:
+    """Whether this write changes who the S2S daily templates should run."""
+    if after.modality is not Benchmark.S2S:
+        return False
+    if before is None:
+        return after.collected
+    return before.collected != after.collected
+
+
+async def _start_sync(settings: Settings) -> bool:
+    """Start the s2s-sync job; True when there is none to start (local and tests)."""
+    job = settings.s2s_sync_job.strip()
+    if not job:
+        return True
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(start_s2s_sync, job), timeout=_SYNC_START_TIMEOUT_S
+        )
+    except TimeoutError:
+        return False
 
 
 def _etag(record: ModelRecord) -> str:
@@ -188,6 +221,7 @@ async def update_admin_model(
     if_match: str | None = Header(default=None),
     admin: CovalAdmin = Depends(require_coval_admin),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    settings: Settings = Depends(get_settings),
 ) -> AdminModelUpdateResponse:
     """Partially update a model; the history's ``old`` is what the editor saw."""
     never_shared(response)
@@ -237,6 +271,8 @@ async def update_admin_model(
     history = await store.history(model_id)
     warnings = _rename_warnings(before, after)
     warnings.extend(await _pricing_rename_warnings(before, after, pool))
+    if _changes_daily_s2s(before, after) and not await _start_sync(settings):
+        warnings.append(_SYNC_NOT_STARTED)
     return AdminModelUpdateResponse(model=_model_out(after, history), warnings=warnings)
 
 
