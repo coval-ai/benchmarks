@@ -252,7 +252,7 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
     ),
     Metric.JUDGE_JEV: MetricSpec(
         display_name="JudgeJev",
-        # Word errors a voice agent would act on, over reference words. Never above WER.
+        # Word errors weighted by how likely a voice agent would act on them. Never above WER.
         units="percent",
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=1,
@@ -343,10 +343,10 @@ METRIC_VALUE_CONTRACTS[(Metric.JUDGE_JEV, "v1")] = MetricValueContract(
     version="v1",
     values=(
         _primary(Metric.JUDGE_JEV),
-        MetricValueDefinition(key="judged_errors", unit="count", minimum=0.0, required=False),
+        MetricValueDefinition(key="weighted_errors", unit="count", minimum=0.0, required=False),
         MetricValueDefinition(key="reference_words", unit="count", minimum=0.0, required=False),
     ),
-    optional_all_or_none=(frozenset({"judged_errors", "reference_words"}),),
+    optional_all_or_none=(frozenset({"weighted_errors", "reference_words"}),),
 )
 METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
     metric=Metric.WER,

@@ -4,8 +4,8 @@
 
 The normalizer and alignment WER uses find every place the transcript differs
 from the reference. TypeSafe's Jev model then answers one yes/no question per
-difference, and the ones it says yes to are counted over the reference words.
-Jev never produces a score: it only says which differences matter.
+difference, and each difference counts by how likely Jev thinks it matters, over
+the reference words. Jev never produces a score: it only weighs the differences.
 """
 
 from __future__ import annotations
@@ -23,9 +23,6 @@ from coval_bench.metrics.wer import normalize_text
 JEV_URL = "https://api.typesafe.ai/v1/systemone"
 # Pinned: a floating alias would move scores without a code change.
 JEV_MODEL = "jev-1.14.0"
-
-# A difference counts as an error when Jev's probability of "yes" reaches the cutoff.
-ERROR_CUTOFF = 0.5
 
 _CONTEXT_WORDS = 3
 _TIMEOUT_S = 10.0
@@ -84,7 +81,8 @@ class Difference(BaseModel):
 class JudgeJevResult(BaseModel):
     rate: float
     percentage: float
-    errors: int
+    # Each difference's word count times Jev's probability that it matters.
+    weighted_errors: float
     reference_words: int
 
 
@@ -158,14 +156,12 @@ def build_request(
 def score(
     reference_words: int, differences: Sequence[Difference], probabilities: Sequence[float]
 ) -> JudgeJevResult:
-    """Count the differences Jev called real, each at the word count WER gives it."""
-    errors = sum(
-        d.weight for d, p in zip(differences, probabilities, strict=True) if p >= ERROR_CUTOFF
-    )
+    """Weigh each difference by Jev's probability, at the word count WER gives it."""
+    errors = sum(d.weight * p for d, p in zip(differences, probabilities, strict=True))
     # An empty reference follows compute_wer: the count stands in for the rate.
-    rate = errors / reference_words if reference_words else float(errors)
+    rate = errors / reference_words if reference_words else errors
     return JudgeJevResult(
-        rate=rate, percentage=rate * 100.0, errors=errors, reference_words=reference_words
+        rate=rate, percentage=rate * 100.0, weighted_errors=errors, reference_words=reference_words
     )
 
 

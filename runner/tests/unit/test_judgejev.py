@@ -41,14 +41,15 @@ def test_adjacent_edits_merge_into_one_difference() -> None:
     assert differences[0].where_in_reference == "the [butterfly] flew off"
 
 
-async def test_only_differences_jev_confirms_are_counted() -> None:
+async def test_differences_count_by_jevs_probability() -> None:
     jev = _Jev(0.9, 0.4)
     result = await compute_judgejev(_REF, _HYP, jev)
     (request,) = jev.requests
     assert [c["reference_words"] for c in request["state"]["changes"]] == ["card", "the"]
     assert request["questions"].keys() == {"c0", "c1"}
-    assert (result.errors, result.reference_words) == (1, 7)
-    assert result.percentage == pytest.approx(100 / 7)
+    assert result.weighted_errors == pytest.approx(1.3)
+    assert result.reference_words == 7
+    assert result.percentage == pytest.approx(130 / 7)
 
 
 @pytest.mark.parametrize(
@@ -59,7 +60,7 @@ async def test_jev_is_not_asked_without_two_texts_to_compare(
     ref: str, hyp: str, errors: int
 ) -> None:
     jev = _Jev()
-    assert (await compute_judgejev(ref, hyp, jev)).errors == errors
+    assert (await compute_judgejev(ref, hyp, jev)).weighted_errors == errors
     assert jev.requests == []
 
 
@@ -92,5 +93,6 @@ async def test_row_carries_the_counts_and_a_failed_request_is_skipped(
     await rows.score_judgejev(settings, _REF, _HYP, audio_filename="a.wav")
     (row,) = rows.results
     assert (row.metric_type, row.metric_units) == (Metric.JUDGE_JEV, "percent")
-    assert row.metric_value == pytest.approx(100 / 7)
-    assert (row.judgejev_errors, row.judgejev_reference_words) == (1, 7)
+    assert row.metric_value == pytest.approx(130 / 7)
+    assert row.judgejev_weighted_errors == pytest.approx(1.3)
+    assert row.judgejev_reference_words == 7

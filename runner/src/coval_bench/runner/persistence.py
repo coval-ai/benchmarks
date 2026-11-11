@@ -203,13 +203,13 @@ def _frozen_values(metric: str, rows: Sequence[Result], primary: Result) -> list
         )
     if (
         metric == str(Metric.JUDGE_JEV)
-        and primary.judgejev_errors is not None
+        and primary.judgejev_weighted_errors is not None
         and primary.judgejev_reference_words is not None
     ):
         values.extend(
             FrozenValue(value_key=key, unit="count", value=float(count), value_role="component")
             for key, count in (
-                ("judged_errors", primary.judgejev_errors),
+                ("weighted_errors", primary.judgejev_weighted_errors),
                 ("reference_words", primary.judgejev_reference_words),
             )
         )
