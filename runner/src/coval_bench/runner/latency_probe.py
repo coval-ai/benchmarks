@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 logger = structlog.get_logger("coval_bench.latency_probe")
 
 STT_PROBE_DATASET = "stt-probe-v1"
-TTS_PROBE_TEXT = "Because the single most powerful word in our democracy is the word we."
+TTS_PROBE_TEXT = "That's one small step for man, one giant leap for mankind."
 
 Origin = Literal["provider", "runner"]
 
