@@ -332,9 +332,8 @@ def sweep(kind: str, selectors: tuple[str, ...], max_minutes: float) -> None:
     """Run every dataset item through each model once per model version.
 
     Opens a sweep for each model version and dataset that has none and queues
-    its items. For STT it then sends the queued items to the provider and stores
-    the results; TTS sweeps are only opened and queued. Safe to stop and rerun:
-    an item with a result is never run again.
+    its items, then sends the queued items to the provider and stores the
+    results. Safe to stop and rerun: an item with a result is never run again.
     """
     from dataclasses import asdict
 

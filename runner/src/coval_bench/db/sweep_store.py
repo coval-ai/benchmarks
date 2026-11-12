@@ -54,15 +54,15 @@ _UNFINISHED = """
 """
 
 _INSERT_RESULT = """
-    INSERT INTO benchmarks_v2.sweep_results (sweep_id, sample_id, transcript, timings)
-    VALUES (%(sweep_id)s, %(sample_id)s, %(transcript)s, %(timings)s)
-    ON CONFLICT (sweep_id, sample_id) DO NOTHING
+    INSERT INTO benchmarks_v2.sweep_results (sweep_id, sample_id, voice, transcript, timings)
+    VALUES (%(sweep_id)s, %(sample_id)s, %(voice)s, %(transcript)s, %(timings)s)
+    ON CONFLICT (sweep_id, sample_id, voice) DO NOTHING
     RETURNING id
 """
 
 _DEQUEUE = """
     DELETE FROM benchmarks_v2.sweep_queue
-    WHERE sweep_id = %(sweep_id)s AND sample_id = %(sample_id)s
+    WHERE sweep_id = %(sweep_id)s AND sample_id = %(sample_id)s AND voice = %(voice)s
 """
 
 _INSERT_SCORE = """
@@ -115,12 +115,15 @@ async def unfinished_sweeps(pool: Pool, model_ids: Sequence[int]) -> list[Sweep]
     return [Sweep(**row) for row in rows]
 
 
-async def queued_samples(pool: Pool, sweep_id: int) -> set[str]:
-    """The sample ids a sweep still has to run and has tries left for."""
-    sql = "SELECT sample_id FROM benchmarks_v2.sweep_queue WHERE sweep_id = %s AND tries_left > 0"
+async def queued_items(pool: Pool, sweep_id: int) -> set[tuple[str, str]]:
+    """The (sample id, voice) items a sweep still has to run and has tries left for."""
+    sql = """
+        SELECT sample_id, voice FROM benchmarks_v2.sweep_queue
+        WHERE sweep_id = %s AND tries_left > 0
+    """
     async with pool.connection() as conn:
         rows = await (await conn.execute(sql, (sweep_id,))).fetchall()
-    return {row["sample_id"] for row in rows}
+    return {(row["sample_id"], row["voice"]) for row in rows}
 
 
 async def store_result(
@@ -128,6 +131,7 @@ async def store_result(
     *,
     sweep_id: int,
     sample_id: str,
+    voice: str,
     transcript: str | None,
     timings: Mapping[str, Any],
 ) -> int | None:
@@ -138,6 +142,7 @@ async def store_result(
     params = {
         "sweep_id": sweep_id,
         "sample_id": sample_id,
+        "voice": voice,
         "transcript": transcript,
         "timings": Jsonb(dict(timings)),
     }
@@ -147,14 +152,16 @@ async def store_result(
     return None if row is None else row["id"]
 
 
-async def record_failure(pool: Pool, *, sweep_id: int, sample_id: str, error: str) -> None:
+async def record_failure(
+    pool: Pool, *, sweep_id: int, sample_id: str, voice: str, error: str
+) -> None:
     """Use up one of a queued item's tries and note why."""
     sql = """
         UPDATE benchmarks_v2.sweep_queue SET tries_left = tries_left - 1, last_error = %s
-        WHERE sweep_id = %s AND sample_id = %s AND tries_left > 0
+        WHERE sweep_id = %s AND sample_id = %s AND voice = %s AND tries_left > 0
     """
     async with pool.connection() as conn:
-        await conn.execute(sql, (error, sweep_id, sample_id))
+        await conn.execute(sql, (error, sweep_id, sample_id, voice))
 
 
 async def store_score(pool: Pool, result_id: int, score: Score) -> None:
