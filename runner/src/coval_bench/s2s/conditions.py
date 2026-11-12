@@ -349,15 +349,16 @@ CONDITIONS: dict[str, DatasetMetrics] = {
         for slug, metric in ADHERENCE_SLUGS.items()
         for condition in (Condition.CLEAN, *TIERS)
     },
-    # The platforms have no judge, so latency anchors every room; Coval measures it
-    # on all three.
+    # The platforms have no judge, so call length anchors every room: every call
+    # that connected has one, while latency is missing on some calls and anchoring
+    # on it dropped their CER and tool calls.
     **{
         room_dataset_id(slug, room): DatasetMetrics(
-            required=Metric.V2V,
+            required=Metric.CALL_LENGTH,
             optional=frozenset(
                 {
+                    Metric.V2V,
                     Metric.INTERRUPTION_RATE,
-                    Metric.CALL_LENGTH,
                     Metric.CHARACTER_ERROR_RATE,
                     Metric.TOOL_CALL_COUNT,
                 }

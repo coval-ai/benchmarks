@@ -135,7 +135,7 @@ def test_adherence_scenarios_fetch_their_judge() -> None:
             assert conditions.condition_for(dataset_id).fetched == {metric, *extra}
 
 
-def test_each_platform_room_is_its_own_latency_anchored_dataset() -> None:
+def test_each_platform_room_is_its_own_call_length_anchored_dataset() -> None:
     family = conditions.scenario_family("id-roulette")
     ids = {room: conditions.dataset_id_for(family, room) for room in conditions.ROOMS}
 
@@ -149,11 +149,11 @@ def test_each_platform_room_is_its_own_latency_anchored_dataset() -> None:
     for dataset_id in ids.values():
         assert dataset_id is not None
         contract = conditions.condition_for(dataset_id)
-        assert contract.required is Metric.V2V
+        assert contract.required is Metric.CALL_LENGTH
         assert contract.optional == frozenset(
             {
+                Metric.V2V,
                 Metric.INTERRUPTION_RATE,
-                Metric.CALL_LENGTH,
                 Metric.CHARACTER_ERROR_RATE,
                 Metric.TOOL_CALL_COUNT,
             }
