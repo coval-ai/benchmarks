@@ -9,6 +9,7 @@ time, and stores what comes back. It stops starting new items when its time is
 up, and the next run carries on from the stored results.
 
 Each provider call holds the model lock, the same one the latency probe takes.
+A clean transcript is scored for WER as soon as it's stored.
 """
 
 from __future__ import annotations
@@ -25,14 +26,18 @@ from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.model_lock import model_lock, model_lock_key
 from coval_bench.db.registry_store import RegistryStore, _registered
 from coval_bench.db.sweep_store import (
+    Score,
     complete_sweep,
     ensure_sweeps,
     store_result,
+    store_score,
     stored_samples,
     unfinished_sweeps,
 )
+from coval_bench.metrics import compute_wer
+from coval_bench.metrics.wer import NORM_VERSION
 from coval_bench.providers._http_session import close_all as _close_http_clients
-from coval_bench.registries import Benchmark
+from coval_bench.registries import Benchmark, Metric
 from coval_bench.runner.orchestrator import (
     _STT_TIMEOUT_S,
     _get_stt_providers,
@@ -57,6 +62,7 @@ class SweepSummary:
     opened: int = 0
     called: int = 0
     failed: int = 0
+    scored: int = 0
     completed: int = 0
 
 
@@ -65,6 +71,16 @@ class _Output:
     transcript: str | None = None
     timings: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+
+
+def _wer_score(reference: str, transcript: str) -> Score:
+    wer = compute_wer(reference, transcript)
+    return Score(
+        metric=Metric.WER,
+        metric_version=NORM_VERSION,
+        errors=wer.substitutions + wer.deletions + wer.insertions,
+        reference_units=wer.reference_words,
+    )
 
 
 async def _call(
@@ -164,7 +180,7 @@ async def run_sweeps(
                         left += 1
                         log.warning("sweep_item_skipped", sample_id=sample_id, reason="model busy")
                         continue
-                    await store_result(
+                    result_id = await store_result(
                         pool,
                         sweep_id=sweep.id,
                         sample_id=sample_id,
@@ -176,6 +192,14 @@ async def run_sweeps(
                     if output.error is not None:
                         summary.failed += 1
                         log.warning("sweep_item_failed", sample_id=sample_id, error=output.error)
+                    elif result_id is not None and output.transcript is not None:
+                        try:
+                            score = _wer_score(raw_item.transcript, output.transcript)
+                        except Exception:
+                            log.exception("sweep_item_not_scored", sample_id=sample_id)
+                        else:
+                            await store_score(pool, result_id, score)
+                            summary.scored += 1
                 if left == 0:
                     await complete_sweep(pool, sweep.id)
                     summary.completed += 1
