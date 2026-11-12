@@ -4,8 +4,9 @@
 """Quality sweep: every item of every dataset through a model, once per model version.
 
 A run opens a sweep for each model version and dataset version that has none,
-which queues every item of the dataset. It then sends each unfinished sweep's
-queued items to the provider, one at a time. An item that gets a result leaves
+which queues every item of the dataset. For TTS an item is a prompt in one of
+the model's voices, and a run only opens and queues. For STT it then sends each
+unfinished sweep's queued items to the provider, one at a time. An item that gets a result leaves
 the queue. One the provider fails loses a try and is run again on a later run
 while it has tries left. A run stops starting new items when its time is up,
 and the next run carries on from the queue.
@@ -18,12 +19,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import structlog
 
 from coval_bench.datasets.loader import dataset_manifest, stt_item_fetcher
-from coval_bench.datasets.suite import SWEEP_STT_DATASETS
+from coval_bench.datasets.suite import SWEEP_STT_DATASETS, SWEEP_TTS_DATASETS
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.model_lock import model_lock, model_lock_key
 from coval_bench.db.registry_store import RegistryStore, _registered
@@ -53,10 +54,12 @@ from coval_bench.runner.orchestrator import (
 
 if TYPE_CHECKING:
     from coval_bench.config import Settings
-    from coval_bench.datasets.manifest import Manifest, STTManifestItem
+    from coval_bench.datasets.manifest import Manifest, STTManifestItem, TTSManifestItem
     from coval_bench.registries import RegisteredModel
 
 logger = structlog.get_logger("coval_bench.sweep")
+
+Kind = Literal["stt", "tts"]
 
 
 @dataclass
@@ -78,6 +81,15 @@ class _Output:
 
 def _stt_items(manifest: Manifest) -> list[STTManifestItem]:
     return cast("list[STTManifestItem]", manifest.items)
+
+
+def _queue_items(kind: Kind, entry: RegisteredModel, manifest: Manifest) -> list[tuple[str, str]]:
+    """What a sweep of *manifest* has to run for *entry*, as (sample id, voice) pairs."""
+    if kind == "stt":
+        return [(item.sample_id or item.path, "") for item in _stt_items(manifest)]
+    voices = [voice.id for voice in entry.voices] or [entry.voice or ""]
+    prompts = cast("list[TTSManifestItem]", manifest.items)
+    return [(prompt.testcase_id, voice) for prompt in prompts for voice in voices]
 
 
 def _wer_score(reference: str, transcript: str) -> Score:
@@ -118,41 +130,42 @@ async def _call(
 async def run_sweeps(
     *,
     settings: Settings,
+    kind: Kind,
     only: frozenset[str] | None = None,
     max_minutes: float,
 ) -> SweepSummary:
-    """Open any missing sweeps for the collected shared STT models, then work on them."""
+    """Open any missing sweeps for the collected shared *kind* models, then work on the
+    STT ones."""
+    benchmark = Benchmark.STT if kind == "stt" else Benchmark.TTS
+    datasets = SWEEP_STT_DATASETS if kind == "stt" else SWEEP_TTS_DATASETS
     summary = SweepSummary()
     loop = asyncio.get_running_loop()
     deadline = loop.time() + max_minutes * 60
     async with lifespan_pool(settings) as pool:
-        records = [
-            r for r in await RegistryStore(pool).list_models() if r.modality is Benchmark.STT
-        ]
+        records = [r for r in await RegistryStore(pool).list_models() if r.modality is benchmark]
         ids = {(r.provider, r.model): r.id for r in records}
-        models, _ = _select_models(
-            [_registered(r) for r in records],
-            [],
+        roster = [_registered(r) for r in records]
+        stt_models, tts_models = _select_models(
+            roster if kind == "stt" else [],
+            roster if kind == "tts" else [],
             source="shared",
-            benchmark_kind="stt",
+            benchmark_kind=kind,
             only=only,
         )
+        models = stt_models if kind == "stt" else tts_models
         entries = {ids[(m.provider, m.model)]: m for m in models}
-        manifests = {dataset_id: dataset_manifest(dataset_id) for dataset_id in SWEEP_STT_DATASETS}
+        manifests = {dataset_id: dataset_manifest(dataset_id) for dataset_id in datasets}
         summary.models = len(models)
         summary.opened = await open_sweeps(
             pool,
             [
-                (
-                    model_id,
-                    dataset_id,
-                    manifest.version,
-                    [item.sample_id or item.path for item in _stt_items(manifest)],
-                )
-                for model_id in entries
+                (model_id, dataset_id, manifest.version, _queue_items(kind, entry, manifest))
+                for model_id, entry in entries.items()
                 for dataset_id, manifest in manifests.items()
             ],
         )
+        if kind == "tts":
+            return summary
 
         try:
             for sweep in await unfinished_sweeps(pool, list(entries)):
