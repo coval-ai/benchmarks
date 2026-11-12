@@ -18,7 +18,7 @@ from pytest_postgresql.factories import postgresql
 from coval_bench.config import Settings
 from coval_bench.db.registry_store import NewModel, RegistryStore
 from coval_bench.providers.base import TranscriptionResult
-from coval_bench.registries import Benchmark
+from coval_bench.registries import Benchmark, Gender, Voice
 from coval_bench.runner import sweep
 from tests.unit.conftest import apply_migrations, open_pool
 
@@ -94,8 +94,10 @@ def _wire(
     return calls
 
 
-async def _run(max_minutes: float = 1) -> sweep.SweepSummary:
-    return await sweep.run_sweeps(settings=_SETTINGS, only=_ONLY, max_minutes=max_minutes)
+async def _run(max_minutes: float = 1, kind: sweep.Kind = "stt") -> sweep.SweepSummary:
+    return await sweep.run_sweeps(
+        settings=_SETTINGS, kind=kind, only=_ONLY, max_minutes=max_minutes
+    )
 
 
 def _query(conn: Any, sql: str) -> list[Any]:
@@ -313,3 +315,34 @@ async def test_an_item_whose_model_is_busy_keeps_its_tries(
 
     assert (summary.called, summary.completed, len(calls)) == (0, 0, 0)
     assert _query(pg_conn, _QUEUE) == [("s1", 3, None), ("s2", 3, None)]
+
+
+async def test_a_tts_sweep_queues_every_prompt_in_each_voice_and_runs_nothing(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    apply_migrations(pg_conn)
+    pool = await open_pool(pg_conn)
+    voices = (Voice(id="f1", gender=Gender.FEMALE), Voice(id="m1", gender=Gender.MALE))
+    new = NewModel(modality=Benchmark.TTS, provider="acme", model="fast-1", voices=voices)
+    prompts = [SimpleNamespace(testcase_id="t1"), SimpleNamespace(testcase_id="t2")]
+
+    @asynccontextmanager
+    async def fake_pool(_settings: Any) -> Any:
+        yield pool
+
+    try:
+        await RegistryStore(pool).insert_model(new, user_id="user_editor", org_id=None, email=None)
+        monkeypatch.setattr(sweep, "lifespan_pool", fake_pool)
+        monkeypatch.setattr(sweep, "SWEEP_TTS_DATASETS", ("tts-1",))
+        monkeypatch.setattr(
+            sweep, "dataset_manifest", lambda _id: SimpleNamespace(version="1.0.0", items=prompts)
+        )
+        summary = await _run(kind="tts")
+    finally:
+        await pool.close()
+
+    assert (summary.models, summary.opened, summary.called) == (1, 1, 0)
+    assert _query(
+        pg_conn,
+        "SELECT sample_id, voice, tries_left FROM benchmarks_v2.sweep_queue ORDER BY 1, 2",
+    ) == [("t1", "f1", 3), ("t1", "m1", 3), ("t2", "f1", 3), ("t2", "m1", 3)]

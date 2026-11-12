@@ -41,8 +41,8 @@ _INSERT_SWEEP = """
 """
 
 _ENQUEUE = """
-    INSERT INTO benchmarks_v2.sweep_queue (sweep_id, sample_id)
-    SELECT %s, unnest(%s::text[])
+    INSERT INTO benchmarks_v2.sweep_queue (sweep_id, sample_id, voice)
+    VALUES (%s, %s, %s)
 """
 
 _UNFINISHED = """
@@ -80,25 +80,30 @@ _COMPLETE = """
 """
 
 
-async def open_sweeps(pool: Pool, wanted: Sequence[tuple[int, str, str, Sequence[str]]]) -> int:
+async def open_sweeps(
+    pool: Pool, wanted: Sequence[tuple[int, str, str, Sequence[tuple[str, str]]]]
+) -> int:
     """Open a sweep, at the model's current version, for each (model id, dataset id,
-    dataset version, sample ids) that has none, and queue its items.
+    dataset version, items) that has none, and queue its items.
 
-    Returns how many were opened.
+    An item is a (sample id, voice) pair; the voice is empty for STT. Returns how many
+    were opened.
     """
     opened = 0
-    async with pool.connection() as conn:
-        for model_id, dataset_id, dataset_version, sample_ids in wanted:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        for model_id, dataset_id, dataset_version, items in wanted:
             params = {
                 "model_id": model_id,
                 "dataset_id": dataset_id,
                 "dataset_version": dataset_version,
             }
             async with conn.transaction():
-                row = await (await conn.execute(_INSERT_SWEEP, params)).fetchone()
+                row = await (await cur.execute(_INSERT_SWEEP, params)).fetchone()
                 if row is None:
                     continue
-                await conn.execute(_ENQUEUE, (row["id"], list(sample_ids)))
+                await cur.executemany(
+                    _ENQUEUE, [(row["id"], sample_id, voice) for sample_id, voice in items]
+                )
             opened += 1
     return opened
 

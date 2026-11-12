@@ -35,6 +35,8 @@ SWEEP_STT_DATASETS: Final = (
     "stt-wildasr-accent",
 )
 
+SWEEP_TTS_DATASETS: Final = ("tts-v2",)
+
 
 def stt_sample_size(source: str, dataset_id: str, override: int | None) -> int:
     if override is not None:
