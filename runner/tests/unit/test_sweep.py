@@ -317,8 +317,16 @@ async def test_an_item_whose_model_is_busy_keeps_its_tries(
     assert _query(pg_conn, _QUEUE) == [("s1", 3, None), ("s2", 3, None)]
 
 
+def _stored(key: str, _path: Path) -> str:
+    return f"gs://artifacts/{key}"
+
+
 async def _tts(
-    conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, whisper: Any
+    conn: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    whisper: Any,
+    upload: Any = _stored,
 ) -> tuple[Any, list[tuple[str | None, str]]]:
     """A TTS model with two voices and a dataset of one prompt. Returns the pool and
     the (voice, text) pairs the provider was asked to speak."""
@@ -361,6 +369,7 @@ async def _tts(
     )
     monkeypatch.setattr(sweep, "_get_tts_providers", lambda: {"acme": Provider})
     monkeypatch.setattr(sweep, "_transcribe_with_whisper", whisper)
+    monkeypatch.setattr(sweep, "_uploader", lambda _settings: upload)
     monkeypatch.setattr(sweep, "_close_http_clients", nothing)
     return pool, spoken
 
@@ -390,10 +399,13 @@ async def test_a_tts_sweep_runs_each_prompt_in_each_voice_and_scores_the_whisper
     assert _query(pg_conn, _TTS_QUEUE) == []
     assert _query(
         pg_conn,
-        """SELECT r.voice, r.transcript, s.errors, s.reference_units
+        """SELECT r.voice, r.transcript, s.errors, s.reference_units, r.audio_uri
            FROM benchmarks_v2.sweep_results r
            JOIN benchmarks_v2.sweep_scores s ON s.sweep_result_id = r.id ORDER BY 1""",
-    ) == [("f1", "good morning", 0, 2), ("m1", "good morning", 0, 2)]
+    ) == [
+        ("f1", "good morning", 0, 2, "gs://artifacts/sweeps/1/t1/f1.wav"),
+        ("m1", "good morning", 0, 2, "gs://artifacts/sweeps/1/t1/m1.wav"),
+    ]
 
 
 async def test_a_tts_item_whisper_cannot_transcribe_loses_a_try(
@@ -414,4 +426,25 @@ async def test_a_tts_item_whisper_cannot_transcribe_loses_a_try(
         ("t1", 2, "whisper: whisper unavailable"),
         ("t1", 2, "whisper: whisper unavailable"),
     ]
+    assert _query(pg_conn, _RESULTS) == []
+
+
+async def test_a_tts_item_whose_audio_cannot_be_kept_loses_a_try(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def whisper(_path: Path, _settings: Any) -> str:
+        return "good morning"
+
+    def upload(_key: str, _path: Path) -> str:
+        raise OSError("bucket unavailable")
+
+    pool, _ = await _tts(pg_conn, monkeypatch, tmp_path, whisper, upload)
+    try:
+        summary = await _run(kind="tts")
+    finally:
+        await pool.close()
+
+    assert (summary.called, summary.failed, summary.completed) == (2, 2, 0)
+    assert not list(tmp_path.glob("*.wav"))
+    assert _query(pg_conn, _QUEUE) == [("t1", 2, "upload: bucket unavailable")] * 2
     assert _query(pg_conn, _RESULTS) == []
