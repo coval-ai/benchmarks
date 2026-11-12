@@ -17,8 +17,6 @@ _structlog_configure = structlog.configure
 
 
 def _configure_uncached(*args: Any, **kwargs: Any) -> None:
-    # A cached logger keeps its processors for good, so capture_logs() in a
-    # later test wouldn't see anything it logs.
     kwargs["cache_logger_on_first_use"] = False
     _structlog_configure(*args, **kwargs)
 

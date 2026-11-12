@@ -59,11 +59,11 @@ Origin = Literal["provider", "runner"]
 @dataclass(frozen=True)
 class ProbeSummary:
     scheduled_at: datetime
-    probed: int  # models attempted
-    stored: int  # rows written
-    failed: int  # stored rows that record a failure
-    skipped: int  # the tick already had a row for the model
-    errored: int  # the probe or its write raised
+    probed: int
+    stored: int
+    failed: int
+    skipped: int
+    errored: int
 
 
 def _origin(error: str | None, status_code: int | None = None) -> Origin:
@@ -197,7 +197,6 @@ async def _probe_tts(
         elif result.ttfa_ms is None:
             error, origin = "no TTFA produced", "provider"
         else:
-            # A cold or non-HTTP/2 connection isn't the provider being slow.
             error = _ttfa_transport_gate(result)
             origin = "runner" if error else None
     if result is None or error is not None:
