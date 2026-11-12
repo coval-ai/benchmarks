@@ -43,8 +43,8 @@ def _wire(
     versions: dict[str, str],
     transcribe: Callable[[int], Any] = lambda _n: "hello world",
 ) -> list[int]:
-    """Datasets of two clips each. *transcribe* gets the call number and returns the
-    transcript, or an exception to raise."""
+    """Datasets of two clips each, both with the reference "hello world". *transcribe*
+    gets the call number and returns the transcript, or an exception to raise."""
     calls: list[int] = []
     path = tmp_path / "clip.wav"
     with wave.open(str(path), "wb") as wav:
@@ -53,7 +53,10 @@ def _wire(
         wav.setframerate(16000)
         wav.writeframes(b"\x00\x00" * 1600)
     clip = SimpleNamespace(path=path, duration_sec=0.1, speech_end_offset_ms=None)
-    items = [SimpleNamespace(sample_id=name, path=f"audio/{name}.wav") for name in ("s1", "s2")]
+    items = [
+        SimpleNamespace(sample_id=name, path=f"audio/{name}.wav", transcript="hello world")
+        for name in ("s1", "s2")
+    ]
 
     class Provider:
         def __init__(self, settings: Any, model: str) -> None:
@@ -192,6 +195,39 @@ async def test_a_failed_call_is_stored_as_failed_and_the_sweep_still_completes(
     assert _query(pg_conn, _RESULTS) == [
         ("s1", None, "upstream 503"),
         ("s2", "hello world", None),
+    ]
+
+
+async def test_a_clean_transcript_is_scored_and_a_failed_call_is_not(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pool = await _pool_with_model(pg_conn)
+    try:
+        _wire(
+            monkeypatch,
+            tmp_path,
+            pool,
+            {"ds-1": "1.0.0", "ds-2": "1.0.0"},
+            lambda n: ("hello world", "hello", RuntimeError("upstream 503"), "hello world")[n - 1],
+        )
+        summary = await _run()
+    finally:
+        await pool.close()
+
+    assert (summary.called, summary.failed, summary.scored) == (4, 1, 3)
+    scores = _query(
+        pg_conn,
+        """SELECT w.dataset_id, r.sample_id, s.metric, s.metric_version, s.errors,
+                  s.reference_units
+           FROM benchmarks_v2.sweep_scores s
+           JOIN benchmarks_v2.sweep_results r ON r.id = s.sweep_result_id
+           JOIN benchmarks_v2.sweeps w ON w.id = r.sweep_id
+           ORDER BY w.dataset_id, r.sample_id""",
+    )
+    assert scores == [
+        ("ds-1", "s1", "WER", "4", 0, 2),
+        ("ds-1", "s2", "WER", "4", 1, 2),
+        ("ds-2", "s2", "WER", "4", 0, 2),
     ]
 
 

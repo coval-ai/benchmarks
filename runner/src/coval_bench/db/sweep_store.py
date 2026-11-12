@@ -23,6 +23,14 @@ class Sweep:
     dataset_version: str
 
 
+@dataclass(frozen=True)
+class Score:
+    metric: str
+    metric_version: str
+    errors: int
+    reference_units: int
+
+
 _ENSURE = """
     INSERT INTO benchmarks_v2.sweeps (model_id, model_version, dataset_id, dataset_version)
     SELECT m.id, m.version, %(dataset_id)s, %(dataset_version)s
@@ -45,6 +53,13 @@ _INSERT_RESULT = """
     VALUES
       (%(sweep_id)s, %(sample_id)s, %(transcript)s, %(timings)s, %(error)s)
     ON CONFLICT (sweep_id, sample_id) DO NOTHING
+    RETURNING id
+"""
+
+_INSERT_SCORE = """
+    INSERT INTO benchmarks_v2.sweep_scores
+      (sweep_result_id, metric, metric_version, errors, reference_units)
+    VALUES (%s, %s, %s, %s, %s)
 """
 
 
@@ -89,8 +104,11 @@ async def store_result(
     transcript: str | None,
     timings: Mapping[str, Any],
     error: str | None,
-) -> None:
-    """Store one item's result; *error* set means the call failed. An existing result is kept."""
+) -> int | None:
+    """Store one item's result; *error* set means the call failed.
+
+    Returns the new result's id, or None when the item already had a result, which is kept.
+    """
     params = {
         "sweep_id": sweep_id,
         "sample_id": sample_id,
@@ -99,7 +117,14 @@ async def store_result(
         "error": error or None,
     }
     async with pool.connection() as conn:
-        await conn.execute(_INSERT_RESULT, params)
+        row = await (await conn.execute(_INSERT_RESULT, params)).fetchone()
+    return None if row is None else row["id"]
+
+
+async def store_score(pool: Pool, result_id: int, score: Score) -> None:
+    params = (result_id, score.metric, score.metric_version, score.errors, score.reference_units)
+    async with pool.connection() as conn:
+        await conn.execute(_INSERT_SCORE, params)
 
 
 async def complete_sweep(pool: Pool, sweep_id: int) -> None:
