@@ -579,7 +579,7 @@ class AdminModelPatch(BaseModel):
     """PATCH body for /v1/admin/models/{id}; absent fields stay unchanged.
 
     ``color`` null returns the model to the site's built-in palette; ``display_name``
-    null returns it to the site's built-in label. ``version`` only moves up by one.
+    null returns it to the site's built-in label.
     """
 
     provider: str | None = Field(default=None, min_length=1)

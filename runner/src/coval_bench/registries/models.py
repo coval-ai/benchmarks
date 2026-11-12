@@ -134,5 +134,4 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     # calls the model directly.
     architecture: Architecture | None = None
     orchestration: Orchestration | None = None
-    # Our count of how many times the model has been measured from scratch.
     version: int = 1

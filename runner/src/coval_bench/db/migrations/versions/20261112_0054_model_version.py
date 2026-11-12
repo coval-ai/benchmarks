@@ -5,9 +5,6 @@
 Revision ID: 20261112_0054
 Revises:     20261111_0053
 Create Date: 2026-11-12
-
-Our own count of how many times a model has been measured from scratch. It isn't
-the provider's version. Every model starts at 1.
 """
 
 from __future__ import annotations
