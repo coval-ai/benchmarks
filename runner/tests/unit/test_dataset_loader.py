@@ -50,10 +50,12 @@ from coval_bench.datasets.loader import (
     TTSDatasetItem,
     _assert_family_alignment,
     _load_manifest,
+    dataset_manifest,
     family_rng,
     load_stt_dataset,
     load_tts_dataset,
     packaged_manifest_sha256,
+    stt_item_fetcher,
 )
 from coval_bench.datasets.manifest import Manifest, STTManifestItem, TTSManifestItem
 
@@ -817,6 +819,27 @@ def test_stt_sample_size_limits_and_fetches_only_sample(
 
     assert len(dataset.items) == 3
     assert client.bucket.return_value.blob.call_count == 3  # only the sample is fetched
+
+
+def test_a_manifest_is_read_without_audio_and_items_are_fetched_one_at_a_time(
+    test_settings: Settings, tmp_path: Path
+) -> None:
+    client = _always_fixture_client()
+    blob = client.bucket.return_value.blob
+
+    with patch("coval_bench.datasets.loader._load_manifest", return_value=_stt_manifest(10)):
+        manifest = dataset_manifest("stt-v1", cache_dir=tmp_path, storage_client=client)
+    fetch = stt_item_fetcher(
+        "stt-v1", settings=test_settings, cache_dir=tmp_path, storage_client=client
+    )
+    assert (len(manifest.items), blob.call_count) == (10, 0)
+
+    raw = manifest.items[4]
+    assert isinstance(raw, STTManifestItem)
+    item = fetch(raw)
+
+    assert blob.call_count == 1
+    assert (item.sample_id, item.transcript, item.path.exists()) == (raw.path, raw.transcript, True)
 
 
 def test_stt_sample_is_reproducible_with_seed(test_settings: Settings, tmp_path: Path) -> None:
