@@ -311,6 +311,29 @@ def probe_latency(kind: str, selectors: tuple[str, ...]) -> None:
         raise click.ClickException("no probe result was stored")
 
 
+@cli.command(name="sweep")
+@click.option(
+    "--only",
+    "selectors",
+    multiple=True,
+    help="provider/model to sweep (repeatable). Defaults to every collected shared STT model.",
+)
+def sweep(selectors: tuple[str, ...]) -> None:
+    """Open a quality sweep for each STT model version and dataset that has none.
+
+    Makes no provider calls. Safe to rerun: a sweep that exists is left alone.
+    """
+    from coval_bench.config import get_settings
+    from coval_bench.runner.sweep import open_sweeps
+
+    models, opened = asyncio.run(
+        open_sweeps(settings=get_settings(), only=frozenset(selectors) or None)
+    )
+    click.echo(json.dumps({"event": "sweeps", "models": models, "opened": opened}))
+    if models == 0:
+        raise click.ClickException("no models to sweep")
+
+
 @cli.command(name="stt-smoke")
 @click.option("--provider", required=True, help="STT provider name (e.g. deepgram, baseten).")
 @click.option("--model", required=True, help="Model ID for the provider (e.g. nova-3).")
