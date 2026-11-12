@@ -54,8 +54,10 @@ _UNFINISHED = """
 """
 
 _INSERT_RESULT = """
-    INSERT INTO benchmarks_v2.sweep_results (sweep_id, sample_id, voice, transcript, timings)
-    VALUES (%(sweep_id)s, %(sample_id)s, %(voice)s, %(transcript)s, %(timings)s)
+    INSERT INTO benchmarks_v2.sweep_results
+      (sweep_id, sample_id, voice, transcript, timings, audio_uri)
+    VALUES
+      (%(sweep_id)s, %(sample_id)s, %(voice)s, %(transcript)s, %(timings)s, %(audio_uri)s)
     ON CONFLICT (sweep_id, sample_id, voice) DO NOTHING
     RETURNING id
 """
@@ -134,6 +136,7 @@ async def store_result(
     voice: str,
     transcript: str | None,
     timings: Mapping[str, Any],
+    audio_uri: str | None,
 ) -> int | None:
     """Store an item's result and take the item off the queue.
 
@@ -145,6 +148,7 @@ async def store_result(
         "voice": voice,
         "transcript": transcript,
         "timings": Jsonb(dict(timings)),
+        "audio_uri": audio_uri,
     }
     async with pool.connection() as conn, conn.transaction():
         row = await (await conn.execute(_INSERT_RESULT, params)).fetchone()

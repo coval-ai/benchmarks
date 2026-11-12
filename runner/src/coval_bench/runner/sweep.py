@@ -14,18 +14,22 @@ and the next run carries on from the queue.
 Each provider call holds the model lock, the same one the latency probe takes.
 A clean transcript is scored for WER as soon as it's stored. For TTS the
 transcript is Whisper's reading of the synthesized audio, and the audio is
-deleted once it's transcribed.
+kept in the artifact bucket.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import structlog
 
+from coval_bench import gcs
+from coval_bench.config import require_capture_bucket
 from coval_bench.datasets.loader import dataset_manifest, stt_item_fetcher
 from coval_bench.datasets.suite import SWEEP_STT_DATASETS, SWEEP_TTS_DATASETS
 from coval_bench.db.conn import lifespan_pool
@@ -82,6 +86,7 @@ class SweepSummary:
 class _Output:
     transcript: str | None = None
     timings: dict[str, Any] = field(default_factory=dict)
+    audio_uri: str | None = None
     error: str | None = None
 
 
@@ -164,19 +169,34 @@ async def _run_stt(
     )
 
 
+def _uploader(settings: Settings) -> Callable[[str, Path], str]:
+    """A function that puts a file in the artifact bucket under a key and returns its URI."""
+    require_capture_bucket(settings)
+    bucket = gcs.client().bucket(settings.benchmark_artifact_bucket)
+
+    def upload(key: str, path: Path) -> str:
+        bucket.blob(key).upload_from_filename(str(path))
+        return f"gs://{bucket.name}/{key}"
+
+    return upload
+
+
 async def _run_tts(
     entry: RegisteredModel,
     item: _Item,
     *,
+    sweep_id: int,
+    upload: Callable[[str, Path], str],
     settings: Settings,
     pool: Any,  # noqa: ANN401 — the connection pool
     log: Any,  # noqa: ANN401 — a bound structlog logger
 ) -> _Output | None:
-    """Synthesize one prompt in one voice and transcribe the audio with Whisper.
+    """Synthesize one prompt in one voice, transcribe the audio with Whisper and keep it.
 
-    None when the item should just be left for the next run. A Whisper failure counts
-    against the item like a provider one, since audio Whisper can't read fails every
-    time. The audio is always deleted.
+    None when the item should just be left for the next run. A Whisper or upload
+    failure counts against the item like a provider one: the provider has been paid by
+    then, so an item that never ran out of tries would be paid for on every run. The
+    local copy of the audio is always deleted.
     """
     try:
         provider_cls = _get_tts_providers()[entry.provider]
@@ -202,7 +222,12 @@ async def _run_tts(
             transcript = await _transcribe_with_whisper(audio_path, settings)
         except Exception as exc:
             return _Output(timings=timings, error=_truncate(f"whisper: {exc}"))
-        return _Output(transcript=transcript, timings=timings)
+        key = f"sweeps/{sweep_id}/{item.sample_id}/{item.voice}{audio_path.suffix}"
+        try:
+            audio_uri = await asyncio.to_thread(upload, key, audio_path)
+        except Exception as exc:
+            return _Output(timings=timings, error=_truncate(f"upload: {exc}"))
+        return _Output(transcript=transcript, timings=timings, audio_uri=audio_uri)
     finally:
         if audio_path is not None:
             audio_path.unlink(missing_ok=True)
@@ -260,7 +285,14 @@ async def run_sweeps(
                     fetch = stt_item_fetcher(sweep.dataset_id, settings=settings)
                     run = partial(_run_stt, entry, fetch=fetch, settings=settings, pool=pool)
                 else:
-                    run = partial(_run_tts, entry, settings=settings, pool=pool)
+                    run = partial(
+                        _run_tts,
+                        entry,
+                        sweep_id=sweep.id,
+                        upload=_uploader(settings),
+                        settings=settings,
+                        pool=pool,
+                    )
                 queued = await queued_items(pool, sweep.id)
                 sweep_log = logger.bind(
                     provider=entry.provider,
@@ -296,6 +328,7 @@ async def run_sweeps(
                         voice=item.voice,
                         transcript=output.transcript,
                         timings=output.timings,
+                        audio_uri=output.audio_uri,
                     )
                     if result_id is not None and output.transcript is not None:
                         try:
