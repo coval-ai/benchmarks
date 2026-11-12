@@ -26,7 +26,7 @@ from coval_bench.datasets.loader import load_stt_dataset
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.model_lock import model_lock, model_lock_key
 from coval_bench.db.probe_store import ProbeResult, insert_probe_result
-from coval_bench.db.registry_store import fetch_models
+from coval_bench.db.registry_store import fetch_models_with_ids
 from coval_bench.metrics import compute_ttfs
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.registries import METRIC_EXCLUSIONS, Benchmark, Metric
@@ -106,6 +106,7 @@ async def _probe_stt(
     entry: RegisteredModel,
     item: Any,  # noqa: ANN401 — DatasetItem
     *,
+    model_id: int,
     settings: Settings,
     scheduled_at: datetime,
 ) -> ProbeResult:
@@ -116,9 +117,7 @@ async def _probe_stt(
 
     def row(sent_at: datetime, **fields: Any) -> ProbeResult:  # noqa: ANN401
         return ProbeResult(
-            benchmark="STT",
-            provider=entry.provider,
-            model=entry.model,
+            model_id=model_id,
             scheduled_at=scheduled_at,
             sent_at=sent_at,
             **fields,
@@ -164,6 +163,7 @@ async def _probe_stt(
 async def _probe_tts(
     entry: RegisteredModel,
     *,
+    model_id: int,
     settings: Settings,
     scheduled_at: datetime,
 ) -> ProbeResult:
@@ -172,9 +172,7 @@ async def _probe_tts(
 
     def row(sent_at: datetime, **fields: Any) -> ProbeResult:  # noqa: ANN401
         return ProbeResult(
-            benchmark="TTS",
-            provider=entry.provider,
-            model=entry.model,
+            model_id=model_id,
             voice=voice,
             scheduled_at=scheduled_at,
             sent_at=sent_at,
@@ -215,7 +213,10 @@ async def run_latency_probes(
     scheduled_at = _current_tick(settings)
     stored = failed = skipped = errored = 0
     async with lifespan_pool(settings) as pool:
-        roster = await fetch_models(pool)
+        benchmark = Benchmark.STT if kind == "stt" else Benchmark.TTS
+        rows = [(i, m) for i, m in await fetch_models_with_ids(pool) if m.benchmark is benchmark]
+        ids = {(m.provider, m.model): i for i, m in rows}
+        roster = [m for _, m in rows]
         stt_models, tts_models = _select_models(
             [m for m in roster if m.benchmark is Benchmark.STT],
             [m for m in roster if m.benchmark is Benchmark.TTS],
@@ -234,9 +235,14 @@ async def run_latency_probes(
         lock_wait_s = _STT_TIMEOUT_S if kind == "stt" else _TTS_TIMEOUT_S
 
         async def probe(entry: RegisteredModel) -> ProbeResult:
+            model_id = ids[(entry.provider, entry.model)]
             if kind == "stt":
-                return await _probe_stt(entry, item, settings=settings, scheduled_at=scheduled_at)
-            return await _probe_tts(entry, settings=settings, scheduled_at=scheduled_at)
+                return await _probe_stt(
+                    entry, item, model_id=model_id, settings=settings, scheduled_at=scheduled_at
+                )
+            return await _probe_tts(
+                entry, model_id=model_id, settings=settings, scheduled_at=scheduled_at
+            )
 
         try:
             await _warmup(models, settings)

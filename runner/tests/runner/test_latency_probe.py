@@ -84,6 +84,7 @@ async def _probe_tts(
     )
     result = await latency_probe._probe_tts(
         _model(Benchmark.TTS, **model_fields),
+        model_id=1,
         settings=_SETTINGS,
         scheduled_at=_TICK,
     )
@@ -149,7 +150,7 @@ async def test_unknown_provider_is_our_failure(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(latency_probe, "_get_tts_providers", dict)
 
     result = await latency_probe._probe_tts(
-        _model(Benchmark.TTS), settings=_SETTINGS, scheduled_at=_TICK
+        _model(Benchmark.TTS), model_id=1, settings=_SETTINGS, scheduled_at=_TICK
     )
 
     assert (result.status, result.failure_origin) == ("failed", "runner")
@@ -179,6 +180,7 @@ async def _probe_stt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, outcome: A
     return await latency_probe._probe_stt(
         _model(Benchmark.STT),
         _stt_item(tmp_path),
+        model_id=1,
         settings=_SETTINGS,
         scheduled_at=_TICK,
     )
@@ -266,8 +268,8 @@ async def test_run_probes_every_collected_model_and_stores_each(
     async def fake_pool(_settings: Any) -> Any:
         yield object()
 
-    async def fake_fetch(_pool: Any) -> list[RegisteredModel]:
-        return roster
+    async def fake_fetch(_pool: Any) -> list[tuple[int, RegisteredModel]]:
+        return list(enumerate(roster, start=1))
 
     async def fake_insert(_pool: Any, result: Any) -> bool:
         stored.append(result)
@@ -280,7 +282,7 @@ async def test_run_probes_every_collected_model_and_stores_each(
         return None
 
     monkeypatch.setattr(latency_probe, "lifespan_pool", fake_pool)
-    monkeypatch.setattr(latency_probe, "fetch_models", fake_fetch)
+    monkeypatch.setattr(latency_probe, "fetch_models_with_ids", fake_fetch)
     monkeypatch.setattr(latency_probe, "insert_probe_result", fake_insert)
     monkeypatch.setattr(latency_probe, "model_lock", _free_lock)
     monkeypatch.setattr(latency_probe, "_close_http_clients", fake_close)
@@ -299,10 +301,7 @@ async def test_run_probes_every_collected_model_and_stores_each(
 
     assert (summary.scheduled_at, summary.probed, summary.stored) == (_TICK, 2, 2)
     assert (summary.failed, summary.skipped, summary.errored) == (1, 0, 0)
-    assert {(r.provider, r.model, r.status) for r in stored} == {
-        ("acme", "fast-1", "succeeded"),
-        ("down", "tts-2", "failed"),
-    }
+    assert {(r.model_id, r.status) for r in stored} == {(1, "succeeded"), (3, "failed")}
     assert closed == [True]
 
 
@@ -318,14 +317,14 @@ def _wire_run(monkeypatch: pytest.MonkeyPatch, insert: Any) -> None:
     async def fake_pool(_settings: Any) -> Any:
         yield object()
 
-    async def fake_fetch(_pool: Any) -> list[RegisteredModel]:
-        return roster
+    async def fake_fetch(_pool: Any) -> list[tuple[int, RegisteredModel]]:
+        return list(enumerate(roster, start=1))
 
     async def nothing(*_: Any) -> None:
         return None
 
     monkeypatch.setattr(latency_probe, "lifespan_pool", fake_pool)
-    monkeypatch.setattr(latency_probe, "fetch_models", fake_fetch)
+    monkeypatch.setattr(latency_probe, "fetch_models_with_ids", fake_fetch)
     monkeypatch.setattr(latency_probe, "insert_probe_result", insert)
     monkeypatch.setattr(latency_probe, "model_lock", _free_lock)
     monkeypatch.setattr(latency_probe, "_close_http_clients", nothing)
@@ -339,19 +338,19 @@ def _wire_run(monkeypatch: pytest.MonkeyPatch, insert: Any) -> None:
 async def test_one_failed_write_does_not_stop_the_other_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    stored: list[str] = []
+    stored: list[int] = []
 
     async def flaky_insert(_pool: Any, result: Any) -> bool:
-        if result.model == "fast-1":
+        if result.model_id == 1:
             raise RuntimeError("permission denied for table probe_results")
-        stored.append(result.model)
+        stored.append(result.model_id)
         return True
 
     _wire_run(monkeypatch, flaky_insert)
 
     summary = await latency_probe.run_latency_probes(settings=_SETTINGS, kind="tts")
 
-    assert stored == ["fast-2"]
+    assert stored == [2]
     assert (summary.probed, summary.stored, summary.errored) == (2, 1, 1)
 
 
@@ -372,10 +371,10 @@ async def test_a_model_another_job_holds_is_skipped_without_a_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, Any]] = []
-    stored: list[str] = []
+    stored: list[int] = []
 
     async def insert(_pool: Any, result: Any) -> bool:
-        stored.append(result.model)
+        stored.append(result.model_id)
         return True
 
     @asynccontextmanager
@@ -391,7 +390,7 @@ async def test_a_model_another_job_holds_is_skipped_without_a_call(
     summary = await latency_probe.run_latency_probes(settings=_SETTINGS, kind="tts")
 
     assert len(calls) == 1
-    assert stored == ["fast-2"]
+    assert stored == [2]
     assert (summary.probed, summary.stored, summary.skipped) == (2, 1, 1)
 
 

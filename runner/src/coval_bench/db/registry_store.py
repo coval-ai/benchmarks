@@ -517,6 +517,11 @@ async def fetch_models(pool: RegistryPool) -> list[RegisteredModel]:
     return [_registered(record) for record in await RegistryStore(pool).list_models()]
 
 
+async def fetch_models_with_ids(pool: RegistryPool) -> list[tuple[int, RegisteredModel]]:
+    """Every registered model with its row id, in catalogue order."""
+    return [(r.id, _registered(r)) for r in await RegistryStore(pool).list_models()]
+
+
 def load_models(settings: Settings) -> list[RegisteredModel]:
     """Every registered model, read through a short-lived pool, for a command-line job."""
     import asyncio
