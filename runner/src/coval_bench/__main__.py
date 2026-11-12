@@ -318,19 +318,34 @@ def probe_latency(kind: str, selectors: tuple[str, ...]) -> None:
     multiple=True,
     help="provider/model to sweep (repeatable). Defaults to every collected shared STT model.",
 )
-def sweep(selectors: tuple[str, ...]) -> None:
-    """Open a quality sweep for each STT model version and dataset that has none.
+@click.option(
+    "--max-minutes",
+    default=20.0,
+    show_default=True,
+    type=float,
+    help="Stop starting new items after this long; the next run carries on.",
+)
+def sweep(selectors: tuple[str, ...], max_minutes: float) -> None:
+    """Run every dataset item through each STT model once per model version.
 
-    Makes no provider calls. Safe to rerun: a sweep that exists is left alone.
+    Opens a sweep for each model version and dataset that has none, then sends
+    the items each sweep is missing to the provider and stores the results.
+    Safe to stop and rerun: an item with a result is never run again.
     """
-    from coval_bench.config import get_settings
-    from coval_bench.runner.sweep import open_sweeps
+    from dataclasses import asdict
 
-    models, opened = asyncio.run(
-        open_sweeps(settings=get_settings(), only=frozenset(selectors) or None)
+    from coval_bench.config import get_settings
+    from coval_bench.runner.sweep import run_sweeps
+
+    summary = asyncio.run(
+        run_sweeps(
+            settings=get_settings(),
+            only=frozenset(selectors) or None,
+            max_minutes=max_minutes,
+        )
     )
-    click.echo(json.dumps({"event": "sweeps", "models": models, "opened": opened}))
-    if models == 0:
+    click.echo(json.dumps({"event": "sweeps", **asdict(summary)}))
+    if summary.models == 0:
         raise click.ClickException("no models to sweep")
 
 
