@@ -668,6 +668,27 @@ async def test_ingest_run_rollup_refresh_failure_does_not_change_status(
 
 
 @pytest.mark.asyncio
+async def test_ingest_run_can_leave_the_rollup_to_the_caller() -> None:
+    writer = _stub_writer()
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+
+    async with _fake_client({}, _run_json(values)) as client:
+        status = await ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=LATENCY_IDS,
+            period_seconds=10_800,
+            rebuild_rollup=False,
+        )
+
+    assert status is RunStatus.SUCCEEDED
+    writer.finish_run_exact.assert_awaited_once()
+    writer.rebuild_run_rollup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_ingest_run_skips_before_any_write() -> None:
     # Metric absent: skipped, no run row created.
     writer = _stub_writer()
