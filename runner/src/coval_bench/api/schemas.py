@@ -539,6 +539,7 @@ class AdminModelOut(BaseModel):
     display_name: str | None = None
     architecture: Architecture | None = None
     orchestration: Orchestration | None = None
+    version: int
     updated_by_user_id: str
     updated_by_email: str | None = None
     updated_at: datetime
@@ -578,7 +579,7 @@ class AdminModelPatch(BaseModel):
     """PATCH body for /v1/admin/models/{id}; absent fields stay unchanged.
 
     ``color`` null returns the model to the site's built-in palette; ``display_name``
-    null returns it to the site's built-in label.
+    null returns it to the site's built-in label. ``version`` only moves up by one.
     """
 
     provider: str | None = Field(default=None, min_length=1)
@@ -598,6 +599,7 @@ class AdminModelPatch(BaseModel):
     display_name: str | None = Field(default=None, min_length=1)
     architecture: Architecture | None = None
     orchestration: Orchestration | None = None
+    version: int | None = None
 
 
 class AdminModelUpdateResponse(BaseModel):

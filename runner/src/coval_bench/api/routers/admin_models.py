@@ -246,6 +246,8 @@ async def update_admin_model(
     current = await store.get_model(model_id)
     if current is None:
         raise HTTPException(404, "no such model")
+    if changes.get("version", current.version + 1) != current.version + 1:
+        raise HTTPException(422, f"version only moves up by one, to {current.version + 1}")
     candidate = ModelRecord.model_validate({**current.model_dump(), **changes})
     await _validate_model(candidate, store)
     try:
