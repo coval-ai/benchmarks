@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 import wave
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -397,15 +398,18 @@ async def test_a_tts_sweep_runs_each_prompt_in_each_voice_and_scores_the_whisper
     assert sorted(spoken) == [("f1", "Good morning."), ("m1", "Good morning.")]
     assert not list(tmp_path.glob("*.wav"))
     assert _query(pg_conn, _TTS_QUEUE) == []
-    assert _query(
+    stored = _query(
         pg_conn,
         """SELECT r.voice, r.transcript, s.errors, s.reference_units, r.audio_uri
            FROM benchmarks_v2.sweep_results r
            JOIN benchmarks_v2.sweep_scores s ON s.sweep_result_id = r.id ORDER BY 1""",
-    ) == [
-        ("f1", "good morning", 0, 2, "gs://artifacts/sweeps/1/t1/f1.wav"),
-        ("m1", "good morning", 0, 2, "gs://artifacts/sweeps/1/t1/m1.wav"),
+    )
+    assert [row[:4] for row in stored] == [
+        ("f1", "good morning", 0, 2),
+        ("m1", "good morning", 0, 2),
     ]
+    assert re.fullmatch(r"gs://artifacts/sweeps/1/t1/f1-[0-9a-f]{8}\.wav", stored[0][4])
+    assert re.fullmatch(r"gs://artifacts/sweeps/1/t1/m1-[0-9a-f]{8}\.wav", stored[1][4])
 
 
 async def test_a_tts_item_whisper_cannot_transcribe_loses_a_try(
@@ -448,3 +452,28 @@ async def test_a_tts_item_whose_audio_cannot_be_kept_loses_a_try(
     assert not list(tmp_path.glob("*.wav"))
     assert _query(pg_conn, _QUEUE) == [("t1", 2, "upload: bucket unavailable")] * 2
     assert _query(pg_conn, _RESULTS) == []
+
+
+async def test_a_retried_tts_item_uploads_under_a_new_file_name(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def whisper(_path: Path, _settings: Any) -> str:
+        return "good morning"
+
+    keys: list[str] = []
+
+    def upload(key: str, _path: Path) -> str:
+        keys.append(key)
+        if len(keys) <= 2:
+            raise OSError("bucket unavailable")
+        return f"gs://artifacts/{key}"
+
+    pool, _ = await _tts(pg_conn, monkeypatch, tmp_path, whisper, upload)
+    try:
+        await _run(kind="tts")
+        retried = await _run(kind="tts")
+    finally:
+        await pool.close()
+
+    assert (retried.called, retried.failed, retried.completed) == (2, 0, 1)
+    assert len(set(keys)) == 4

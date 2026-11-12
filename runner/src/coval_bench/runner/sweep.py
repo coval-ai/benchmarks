@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
+from uuid import uuid4
 
 import structlog
 
@@ -195,8 +196,9 @@ async def _run_tts(
 
     None when the item should just be left for the next run. A Whisper or upload
     failure counts against the item like a provider one: the provider has been paid by
-    then, so an item that never ran out of tries would be paid for on every run. The
-    local copy of the audio is always deleted.
+    then, so an item that never ran out of tries would be paid for on every run. Each
+    upload gets its own file name, since the bucket lets us create files but not replace
+    them. The local copy of the audio is always deleted.
     """
     try:
         provider_cls = _get_tts_providers()[entry.provider]
@@ -222,7 +224,8 @@ async def _run_tts(
             transcript = await _transcribe_with_whisper(audio_path, settings)
         except Exception as exc:
             return _Output(timings=timings, error=_truncate(f"whisper: {exc}"))
-        key = f"sweeps/{sweep_id}/{item.sample_id}/{item.voice}{audio_path.suffix}"
+        name = f"{item.voice}-{uuid4().hex[:8]}{audio_path.suffix}"
+        key = f"sweeps/{sweep_id}/{item.sample_id}/{name}"
         try:
             audio_uri = await asyncio.to_thread(upload, key, audio_path)
         except Exception as exc:
