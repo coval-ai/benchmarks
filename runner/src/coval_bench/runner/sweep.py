@@ -174,7 +174,9 @@ async def _run_tts(
 ) -> _Output | None:
     """Synthesize one prompt in one voice and transcribe the audio with Whisper.
 
-    None when the item should just be left for the next run. The audio is always deleted.
+    None when the item should just be left for the next run. A Whisper failure counts
+    against the item like a provider one, since audio Whisper can't read fails every
+    time. The audio is always deleted.
     """
     try:
         provider_cls = _get_tts_providers()[entry.provider]
@@ -198,9 +200,8 @@ async def _run_tts(
             return _Output(timings=timings, error="no audio produced")
         try:
             transcript = await _transcribe_with_whisper(audio_path, settings)
-        except Exception:
-            log.exception("sweep_item_not_transcribed")
-            return None
+        except Exception as exc:
+            return _Output(timings=timings, error=_truncate(f"whisper: {exc}"))
         return _Output(transcript=transcript, timings=timings)
     finally:
         if audio_path is not None:

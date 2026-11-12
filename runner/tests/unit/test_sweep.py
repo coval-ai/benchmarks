@@ -396,7 +396,7 @@ async def test_a_tts_sweep_runs_each_prompt_in_each_voice_and_scores_the_whisper
     ) == [("f1", "good morning", 0, 2), ("m1", "good morning", 0, 2)]
 
 
-async def test_a_tts_item_whisper_cannot_transcribe_keeps_its_tries(
+async def test_a_tts_item_whisper_cannot_transcribe_loses_a_try(
     pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     async def whisper(_path: Path, _settings: Any) -> str:
@@ -408,7 +408,10 @@ async def test_a_tts_item_whisper_cannot_transcribe_keeps_its_tries(
     finally:
         await pool.close()
 
-    assert (summary.called, summary.failed, summary.completed, len(spoken)) == (0, 0, 0, 2)
+    assert (summary.called, summary.failed, summary.completed, len(spoken)) == (2, 2, 0, 2)
     assert not list(tmp_path.glob("*.wav"))
-    assert _query(pg_conn, _TTS_QUEUE) == [("t1", "f1", 3), ("t1", "m1", 3)]
+    assert _query(pg_conn, _QUEUE) == [
+        ("t1", 2, "whisper: whisper unavailable"),
+        ("t1", 2, "whisper: whisper unavailable"),
+    ]
     assert _query(pg_conn, _RESULTS) == []
