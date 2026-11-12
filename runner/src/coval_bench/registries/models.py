@@ -134,3 +134,4 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     # calls the model directly.
     architecture: Architecture | None = None
     orchestration: Orchestration | None = None
+    version: int = 1

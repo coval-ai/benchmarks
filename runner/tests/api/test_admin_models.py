@@ -520,6 +520,24 @@ async def test_an_unknown_agent_kind_is_rejected(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
+async def test_a_version_bump_moves_up_by_one_and_lands_in_history(client: AsyncClient) -> None:
+    created = (await _post_model(client)).json()
+    assert created["version"] == 1
+
+    for wrong in (1, 3):
+        skipped = await _patch(client, created["id"], created["updated_at"], {"version": wrong})
+        assert skipped.status_code == 422
+
+    bumped = await _patch(client, created["id"], created["updated_at"], {"version": 2})
+    assert bumped.status_code == 200
+    model = bumped.json()["model"]
+    assert model["version"] == 2
+    assert (model["history"][0]["old"]["version"], model["history"][0]["new"]["version"]) == (1, 2)
+
+    again = await _patch(client, created["id"], created["updated_at"], {"version": 2})
+    assert again.status_code == 422
+
+
 async def test_patch_unknown_model_is_404(client: AsyncClient) -> None:
     created = (await _post_model(client)).json()
     response = await _patch(client, created["id"] + 1, created["updated_at"], {})

@@ -322,6 +322,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 display_name  text CHECK (display_name IS NULL OR display_name <> ''),
                 architecture  text CHECK (architecture IN ('speech-to-speech', 'cascaded')),
                 orchestration text CHECK (orchestration IN ('harness', 'platform')),
+                version       integer NOT NULL DEFAULT 1 CHECK (version >= 1),
                 updated_by_user_id text NOT NULL CHECK (updated_by_user_id <> ''),
                 updated_by_email   text CHECK (updated_by_email IS NULL OR updated_by_email <> ''),
                 updated_at    timestamptz NOT NULL DEFAULT now(),
