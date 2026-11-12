@@ -20,13 +20,17 @@ from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.config import Settings, get_settings, require_capture_bucket
 from coval_bench.db.conn import lifespan_pool
-from coval_bench.db.dashboard_rollups import ENQUEUE_SLOT_SQL, RUN_SLOT, fill_rollup
+from coval_bench.db.dashboard_rollups import ENQUEUE_SLOT_SQL, rebuild_slots
 from coval_bench.db.models import RunStatus
 from coval_bench.db.registry_store import fetch_models
 from coval_bench.db.writer import RunWriter
 from coval_bench.logging import configure_logging
 from coval_bench.registries import Metric
-from coval_bench.runner.capture import preflight_capture_storage, read_import_run_claim
+from coval_bench.runner.capture import (
+    preflight_capture_storage,
+    read_import_run_claim,
+    read_run_state,
+)
 from coval_bench.s2s.conditions import (
     PLATFORM_SLUGS,
     ROOMS,
@@ -38,6 +42,7 @@ from coval_bench.s2s.conditions import (
 )
 from coval_bench.s2s.coval_runs import CovalRun, coval_client, recent_completed_runs
 from coval_bench.s2s.identity import (
+    UnmappedPersona,
     all_persona_conditions,
     dataset_identity,
     parse_persona_conditions,
@@ -63,7 +68,7 @@ GROUP BY o.run_id, m.code, e.status
 """
 
 _CALLS_SQL = """
-SELECT o.run_id, count(*) AS n
+SELECT o.run_id, count(*) AS n, min(o.captured_at) AS captured_at
 FROM benchmarks_v2.benchmark_observations o
 JOIN benchmarks_v2.runs r ON r.id = o.run_id
 WHERE o.provider = %(provider)s
@@ -83,6 +88,7 @@ class StoredRun:
     run_id: int
     calls: int
     counts: Counts
+    captured_at: datetime | None = None
 
     @property
     def metrics(self) -> frozenset[str]:
@@ -109,9 +115,16 @@ async def _stored(
             row["n"]
         )
     await cur.execute(_CALLS_SQL, params)
-    calls = {int(row["run_id"]): int(row["n"]) for row in await cur.fetchall()}
+    calls = {
+        int(row["run_id"]): (int(row["n"]), row["captured_at"]) for row in await cur.fetchall()
+    }
     return {
-        run_id: StoredRun(run_id=run_id, calls=calls.get(run_id, 0), counts=counts.get(run_id, {}))
+        run_id: StoredRun(
+            run_id=run_id,
+            calls=calls.get(run_id, (0, None))[0],
+            counts=counts.get(run_id, {}),
+            captured_at=calls.get(run_id, (0, None))[1],
+        )
         for run_id in calls.keys() | counts.keys()
     }
 
@@ -131,11 +144,13 @@ async def swap_runs(
     coval_run_id: str,
     keep: int,
     replace: Mapping[int, StoredRun],
+    named: frozenset[str],
 ) -> None:
     """Delete the replaced runs in one transaction, or change nothing.
 
-    The replaced runs must still hold exactly the rows they were planned with, and
-    afterwards only ``keep`` may hold rows for the Coval run.
+    The replaced runs must still hold exactly the rows they were planned with, the
+    kept run must hold every named metric, and afterwards only ``keep`` may hold rows
+    for the Coval run.
     """
     old = sorted(replace)
     if not old or keep in replace:
@@ -156,6 +171,10 @@ async def swap_runs(
             raise SwapRefused(f"stored rows for {coval_run_id} changed since they were counted")
         if keep not in before:
             raise SwapRefused(f"run {keep} holds no counted rows for {coval_run_id}")
+        if before[keep].metrics != named:
+            raise SwapRefused(
+                f"run {keep} holds {sorted(before[keep].metrics)}, not every named metric"
+            )
         await cur.execute("DELETE FROM benchmarks_v2.runs WHERE id = ANY(%(ids)s)", {"ids": old})
         if cur.rowcount != len(old):
             raise SwapRefused(f"deleted {cur.rowcount} runs, expected {len(old)}")
@@ -163,8 +182,29 @@ async def swap_runs(
         if after != {keep: before[keep]}:
             raise SwapRefused(f"after the swap {coval_run_id} is held by runs {sorted(after)}")
         await cur.execute(ENQUEUE_SLOT_SQL, {"run_id": keep})
-        for slot in sorted(slots):
-            await fill_rollup(conn, grain=RUN_SLOT, bucket_at=slot)
+        await rebuild_slots(conn, sorted(slots))
+
+
+async def discard_run(
+    pool: AsyncConnectionPool[Any], *, provider: str, coval_run_id: str, run_id: int
+) -> None:
+    """Delete a new run whose swap was refused, so the old run stays the only one counted."""
+    async with (
+        pool.connection() as conn,
+        conn.transaction(),
+        conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+    ):
+        await cur.execute(
+            """SELECT DISTINCT split_part(sample_id, '/', 1) AS coval_run_id, provider
+               FROM benchmarks_v2.benchmark_observations WHERE run_id = %(run_id)s""",
+            {"run_id": run_id},
+        )
+        owners = {(row["coval_run_id"], row["provider"]) for row in await cur.fetchall()}
+        if owners - {(coval_run_id, provider)}:
+            raise SwapRefused(f"run {run_id} holds other runs' rows; not discarding it")
+        await cur.execute(
+            "DELETE FROM benchmarks_v2.runs WHERE id = %(run_id)s", {"run_id": run_id}
+        )
 
 
 def _days(since: datetime, until: datetime | None) -> tuple[datetime, datetime]:
@@ -205,12 +245,18 @@ async def find_candidates(
                 continue
             if coval_run_ids and run.run_id not in coval_run_ids:
                 continue
-            identity = dataset_identity(
-                spec.test_set_id,
-                run.persona_id,
-                family=spec.family,
-                persona_conditions=persona_conditions,
-            )
+            try:
+                identity = dataset_identity(
+                    spec.test_set_id,
+                    run.persona_id,
+                    family=spec.family,
+                    persona_conditions=persona_conditions,
+                )
+            except UnmappedPersona:
+                click.echo(
+                    f"{spec.provider} {run.run_id}: skipped, persona {run.persona_id} is unmapped"
+                )
+                continue
             if identity is None:
                 continue
             dataset_id, dataset_sha256 = identity
@@ -233,7 +279,8 @@ async def coval_calls(
 ) -> int | None:
     """How many calls a fresh import would store; None when the anchor metric is absent.
 
-    The anchor's calls, plus the calls the optional latency adds as failed rows.
+    The anchor's calls, plus the calls ingest adds as failed latency rows when latency
+    is written and every anchor value carries its id.
     """
     headers = (
         {"X-Coval-Workspace-Id": candidate.spec.workspace_id}
@@ -249,7 +296,9 @@ async def coval_calls(
     if values is None:
         return None
     calls = {str(v.get("simulation_output_id") or f"#{i}") for i, v in enumerate(values)}
-    if anchor is not Metric.V2V and str(Metric.V2V) in named:
+    latency = metric_values(results.get("metrics") or {}, candidate.spec.metric_ids.get(Metric.V2V))
+    ids_known = anchor is not Metric.V2V or all(v.get("simulation_output_id") for v in values)
+    if str(Metric.V2V) in named and latency is not None and ids_known:
         calls |= {s for s in results.get("output_ids") or [] if isinstance(s, str)}
     return len(calls)
 
@@ -286,6 +335,21 @@ def _describe(stored: Mapping[int, StoredRun]) -> str:
     return "; ".join(parts)
 
 
+async def _swappable(
+    writer: RunWriter, artifact_client: storage.Client, bucket: str, run_id: int
+) -> str | None:
+    """Why ``run_id`` must not replace anything yet, or None when it may."""
+    run = await writer.get_run(run_id)
+    if run.status not in (RunStatus.SUCCEEDED, RunStatus.PARTIAL) or run.error:
+        return f"run {run_id} is {run.status} ({run.error or 'no error'})"
+    finalized = await asyncio.to_thread(
+        read_run_state, artifact_client, bucket, run_id, "finalized"
+    )
+    if finalized is None:
+        return f"run {run_id} has no finalized receipt; capture-recover owes it"
+    return None
+
+
 async def _apply(
     client: httpx.AsyncClient,
     pool: AsyncConnectionPool[Any],
@@ -299,16 +363,6 @@ async def _apply(
     artifact_client: storage.Client,
 ) -> str:
     spec, coval_run = candidate.spec, candidate.coval_run
-    if action == "finish":
-        keep = max(stored)
-        await swap_runs(
-            pool,
-            provider=spec.provider,
-            coval_run_id=coval_run.run_id,
-            keep=keep,
-            replace={run_id: run for run_id, run in stored.items() if run_id != keep},
-        )
-        return f"swapped in run {keep}"
     bucket = settings.benchmark_artifact_bucket
     identity = import_identity(
         spec=spec,
@@ -320,6 +374,20 @@ async def _apply(
     claim, generation = await resolve_import_generation(artifact_client, bucket, identity)
     if claim is not None or generation is None:
         return "refused: another import of this run is in progress or owes recovery"
+    if action == "finish":
+        keep = max(stored)
+        if reason := await _swappable(writer, artifact_client, bucket, keep):
+            return f"refused: {reason}"
+        await swap_runs(
+            pool,
+            provider=spec.provider,
+            coval_run_id=coval_run.run_id,
+            keep=keep,
+            replace={run_id: run for run_id, run in stored.items() if run_id != keep},
+            named=named,
+        )
+        return f"swapped in run {keep}"
+    captured = [run.captured_at for run in stored.values() if run.captured_at is not None]
     status = await ingest_run(
         client,
         writer,
@@ -337,27 +405,35 @@ async def _apply(
         import_identity=identity,
         import_generation=generation,
         rebuild_rollup=False,
+        captured_at=min(captured) if captured else None,
     )
-    if status is None or status is RunStatus.FAILED:
-        return f"refused: the new import came back {status}; nothing replaced"
     new_claim = await asyncio.to_thread(
         read_import_run_claim, artifact_client, bucket, identity, generation
     )
     if new_claim is None:
-        return "refused: the new import left no claim; nothing replaced"
-    new_run = await writer.get_run(new_claim.run_id)
-    if new_run.error:
-        return (
-            f"refused: new run {new_claim.run_id} is incomplete ({new_run.error}); nothing replaced"
-        )
-    await swap_runs(
-        pool,
-        provider=spec.provider,
-        coval_run_id=coval_run.run_id,
-        keep=new_claim.run_id,
-        replace=stored,
+        return f"refused: the new import came back {status} and left no run; nothing replaced"
+    reason = (
+        f"the new import came back {status}"
+        if status is None or status is RunStatus.FAILED
+        else await _swappable(writer, artifact_client, bucket, new_claim.run_id)
     )
-    return f"replaced by run {new_claim.run_id} ({status})"
+    if reason is None:
+        try:
+            await swap_runs(
+                pool,
+                provider=spec.provider,
+                coval_run_id=coval_run.run_id,
+                keep=new_claim.run_id,
+                replace=stored,
+                named=named,
+            )
+            return f"replaced by run {new_claim.run_id} ({status})"
+        except SwapRefused as exc:
+            reason = str(exc)
+    await discard_run(
+        pool, provider=spec.provider, coval_run_id=coval_run.run_id, run_id=new_claim.run_id
+    )
+    return f"refused: {reason}; new run {new_claim.run_id} discarded, old rows kept"
 
 
 async def reimport(
@@ -401,44 +477,55 @@ async def reimport(
             room_dataset=room_dataset_id(scenario, room) if room else None,
             coval_run_ids=coval_run_ids,
         )
-        for candidate in candidates:
-            run = candidate.coval_run
-            created = run.create_time.strftime("%Y-%m-%d %H:%M") if run.create_time else "?"
-            label = f"{candidate.spec.provider} {candidate.dataset_id} {run.run_id} {created}"
-            fetched = ingestable_metrics(candidate.condition, candidate.spec.metric_ids)
-            unknown = metrics - {str(metric) for metric in fetched}
-            if unknown:
-                click.echo(f"{label}: refuse: {sorted(unknown)} are not fetched for this dataset")
-                problems += 1
-                continue
-            stored = await stored_runs(pool, candidate.spec.provider, run.run_id)
-            action, reason = decide(stored, metrics, await coval_calls(client, candidate, metrics))
-            click.echo(f"{label}: {action} ({reason}) | {_describe(stored)}")
-            if action == "refuse":
-                problems += 1
-            if artifact_client is None or action not in ("replace", "finish"):
-                continue
-            try:
-                outcome = await _apply(
-                    client,
-                    pool,
-                    writer,
-                    settings,
-                    candidate,
-                    action=action,
-                    stored=stored,
-                    named=metrics,
-                    artifact_client=artifact_client,
-                )
-            except SwapRefused as exc:
-                outcome = f"refused: {exc}"
-            if outcome.startswith("refused"):
-                problems += 1
-            after = await stored_runs(pool, candidate.spec.provider, run.run_id)
-            click.echo(f"  -> {outcome} | {_describe(after)}")
-        if apply:
-            await writer.refresh_window_views()
-        click.echo(f"{len(candidates)} runs, {problems} refused or failed")
+        applied = 0
+        try:
+            for candidate in candidates:
+                run = candidate.coval_run
+                created = run.create_time.strftime("%Y-%m-%d %H:%M") if run.create_time else "?"
+                label = f"{candidate.spec.provider} {candidate.dataset_id} {run.run_id} {created}"
+                fetched = ingestable_metrics(candidate.condition, candidate.spec.metric_ids)
+                unknown = metrics - {str(metric) for metric in fetched}
+                if unknown:
+                    click.echo(
+                        f"{label}: refuse: {sorted(unknown)} are not fetched for this dataset"
+                    )
+                    problems += 1
+                    continue
+                try:
+                    stored = await stored_runs(pool, candidate.spec.provider, run.run_id)
+                    calls_now = await coval_calls(client, candidate, metrics)
+                    action, reason = decide(stored, metrics, calls_now)
+                    click.echo(f"{label}: {action} ({reason}) | {_describe(stored)}")
+                    if action == "refuse":
+                        problems += 1
+                    if artifact_client is None or action not in ("replace", "finish"):
+                        continue
+                    outcome = await _apply(
+                        client,
+                        pool,
+                        writer,
+                        settings,
+                        candidate,
+                        action=action,
+                        stored=stored,
+                        named=metrics,
+                        artifact_client=artifact_client,
+                    )
+                except (SwapRefused, httpx.HTTPError, psycopg.Error, OSError, ValueError) as exc:
+                    outcome = f"refused: {type(exc).__name__}: {exc}"
+                if outcome.startswith("refused"):
+                    problems += 1
+                else:
+                    applied += 1
+                after = await stored_runs(pool, candidate.spec.provider, run.run_id)
+                click.echo(f"  -> {outcome} | {_describe(after)}")
+        finally:
+            if applied:
+                refreshed = await writer.refresh_window_views()
+                click.echo(f"window views: {refreshed}")
+                if refreshed != "published":
+                    problems += 1
+        click.echo(f"{len(candidates)} runs, {applied} replaced, {problems} refused or failed")
     return problems
 
 

@@ -268,6 +268,7 @@ async def _claim_run(
     import_claim: ImportRunClaim | None,
     scheduled_at: datetime,
     metric_types: list[str],
+    captured_at: datetime | None = None,
 ) -> ImportRunClaim:
     """Reserve a run id and record the claim, or reuse the claim being resumed."""
     if import_claim is None:
@@ -282,7 +283,7 @@ async def _claim_run(
                 run_id=await writer.reserve_run_id(),
                 started_at=started_at,
                 scheduled_at=scheduled_at,
-                captured_at=started_at,
+                captured_at=captured_at or started_at,
                 metric_types=metric_types,
             ),
         )
@@ -507,6 +508,7 @@ async def ingest_run(
     import_generation: int,
     import_claim: ImportRunClaim | None = None,
     rebuild_rollup: bool = True,
+    captured_at: datetime | None = None,
 ) -> RunStatus | None:
     """Ingest one Coval run into its own run row; None means skipped, nothing written.
 
@@ -583,6 +585,7 @@ async def ingest_run(
                 coval_run.create_time or datetime.now(tz=UTC), period_seconds
             ),
             metric_types=sorted(str(metric) for metric in set(writable) | set(local)),
+            captured_at=captured_at,
         )
         run_pk = claim.run_id
         claimed_run = await writer.ensure_capture_run(

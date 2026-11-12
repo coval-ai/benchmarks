@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import psycopg
 import psycopg.rows
 import pytest
@@ -28,13 +29,26 @@ from coval_bench.db.models import (
 )
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import Metric
-from coval_bench.s2s.reimport import StoredRun, SwapRefused, decide, stored_runs, swap_runs
+from coval_bench.s2s.conditions import condition_for
+from coval_bench.s2s.coval_runs import CovalRun
+from coval_bench.s2s.reimport import (
+    Candidate,
+    StoredRun,
+    SwapRefused,
+    coval_calls,
+    decide,
+    discard_run,
+    stored_runs,
+    swap_runs,
+)
+from coval_bench.s2s.specs import AgentSpec
 
 pg_conn = postgresql("pg_proc")
 _INI_PATH = Path(__file__).parents[2] / "alembic.ini"
 _NOW = datetime(2026, 11, 8, tzinfo=UTC)
 _SHA = "a" * 64
 _METRICS = (Metric.CALL_LENGTH, Metric.CHARACTER_ERROR_RATE)
+_NAMED = frozenset(str(m) for m in _METRICS)
 
 
 def _dsn(conn: psycopg.Connection[Any]) -> str:
@@ -60,19 +74,31 @@ async def _pool(conn: psycopg.Connection[Any]) -> AsyncConnectionPool[Any]:
 
 
 async def _stored_run(
-    writer: RunWriter, coval_run_id: str, calls: int, *, provider: str = "vapi"
+    writer: RunWriter,
+    coval_run_id: str,
+    calls: int,
+    *,
+    provider: str = "vapi",
+    metrics: tuple[Metric, ...] = _METRICS,
 ) -> int:
     run = await writer.start_run(
         dataset_id="s2s-id-roulette-quiet-room-v1", dataset_sha256=_SHA, scheduled_at=_NOW
     )
     assert run.id is not None
     for i in range(calls):
-        await _call(writer, run.id, f"{coval_run_id}/s{i}", provider=provider)
+        await _call(writer, run.id, f"{coval_run_id}/s{i}", provider=provider, metrics=metrics)
     await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
     return run.id
 
 
-async def _call(writer: RunWriter, run_id: int, sample_id: str, *, provider: str = "vapi") -> None:
+async def _call(
+    writer: RunWriter,
+    run_id: int,
+    sample_id: str,
+    *,
+    provider: str = "vapi",
+    metrics: tuple[Metric, ...] = _METRICS,
+) -> None:
     observation = await writer.insert_observation(
         Observation(
             run_id=run_id,
@@ -87,7 +113,7 @@ async def _call(writer: RunWriter, run_id: int, sample_id: str, *, provider: str
         )
     )
     assert observation.id is not None
-    for metric in _METRICS:
+    for metric in metrics:
         queued = await writer.insert_metric_evaluation(
             MetricEvaluation(
                 observation_id=observation.id,
@@ -124,7 +150,12 @@ async def test_swap_deletes_exactly_the_replaced_runs(pg_conn: psycopg.Connectio
         assert {run_id: run.calls for run_id, run in stored.items()} == {old: 2, new: 3}
 
         await swap_runs(
-            pool, provider="vapi", coval_run_id="R1", keep=new, replace={old: stored[old]}
+            pool,
+            provider="vapi",
+            coval_run_id="R1",
+            keep=new,
+            replace={old: stored[old]},
+            named=_NAMED,
         )
 
         assert await stored_runs(pool, "vapi", "R1") == {new: stored[new]}
@@ -149,7 +180,12 @@ async def test_swap_changes_nothing_when_the_old_rows_moved(
 
         with pytest.raises(SwapRefused, match="changed since they were counted"):
             await swap_runs(
-                pool, provider="vapi", coval_run_id="R1", keep=new, replace={old: planned[old]}
+                pool,
+                provider="vapi",
+                coval_run_id="R1",
+                keep=new,
+                replace={old: planned[old]},
+                named=_NAMED,
             )
 
         assert set(await stored_runs(pool, "vapi", "R1")) == {old, new}
@@ -165,15 +201,16 @@ async def test_swap_refuses_to_replace_the_kept_run(pg_conn: psycopg.Connection[
         run = await _stored_run(writer, "R1", calls=1)
         stored = await stored_runs(pool, "vapi", "R1")
         with pytest.raises(SwapRefused):
-            await swap_runs(pool, provider="vapi", coval_run_id="R1", keep=run, replace=stored)
+            await swap_runs(
+                pool, provider="vapi", coval_run_id="R1", keep=run, replace=stored, named=_NAMED
+            )
         with pytest.raises(SwapRefused):
-            await swap_runs(pool, provider="vapi", coval_run_id="R1", keep=run, replace={})
+            await swap_runs(
+                pool, provider="vapi", coval_run_id="R1", keep=run, replace={}, named=_NAMED
+            )
         assert set(await stored_runs(pool, "vapi", "R1")) == {run}
     finally:
         await pool.close()
-
-
-_NAMED = frozenset({"CallLength", "CharacterErrorRate"})
 
 
 def _run(run_id: int, calls: int, metrics: frozenset[str] = _NAMED) -> StoredRun:
@@ -194,3 +231,86 @@ def _run(run_id: int, calls: int, metrics: frozenset[str] = _NAMED) -> StoredRun
 )
 def test_decide(stored: dict[int, StoredRun], calls_now: int | None, action: str) -> None:
     assert decide(stored, _NAMED, calls_now)[0] == action
+
+
+@pytest.mark.asyncio
+async def test_swap_refuses_a_new_run_missing_a_named_metric(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    pool = await _pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        old = await _stored_run(writer, "R1", calls=2)
+        new = await _stored_run(writer, "R1", calls=3, metrics=(Metric.CALL_LENGTH,))
+        stored = await stored_runs(pool, "vapi", "R1")
+        with pytest.raises(SwapRefused, match="not every named metric"):
+            await swap_runs(
+                pool,
+                provider="vapi",
+                coval_run_id="R1",
+                keep=new,
+                replace={old: stored[old]},
+                named=_NAMED,
+            )
+        assert set(await stored_runs(pool, "vapi", "R1")) == {old, new}
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_discard_removes_only_the_new_run(pg_conn: psycopg.Connection[Any]) -> None:
+    pool = await _pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        old = await _stored_run(writer, "R1", calls=2)
+        new = await _stored_run(writer, "R1", calls=3)
+        mixed = await _stored_run(writer, "R1", calls=1)
+        await _call(writer, mixed, "R2/s0")
+
+        await discard_run(pool, provider="vapi", coval_run_id="R1", run_id=new)
+        with pytest.raises(SwapRefused, match="other runs' rows"):
+            await discard_run(pool, provider="vapi", coval_run_id="R1", run_id=mixed)
+
+        assert set(await stored_runs(pool, "vapi", "R1")) == {old, mixed}
+    finally:
+        await pool.close()
+
+
+def _candidate(dataset_id: str) -> Candidate:
+    return Candidate(
+        spec=AgentSpec(
+            provider="vapi",
+            model="pinned",
+            agent_id="A",
+            metric_ids={Metric.V2V: "lat", Metric.CALL_LENGTH: "len"},
+        ),
+        coval_run=CovalRun(run_id="R1", create_time=_NOW),
+        dataset_id=dataset_id,
+        dataset_sha256=_SHA,
+        condition=condition_for(dataset_id),
+    )
+
+
+def _client(metrics: dict[str, Any], output_ids: list[str]) -> httpx.AsyncClient:
+    body = {"run": {"results": {"metrics": metrics, "output_ids": output_ids}}}
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=body))
+    return httpx.AsyncClient(transport=transport, base_url="https://coval.test")
+
+
+def _values(*ids: str) -> dict[str, Any]:
+    return {"values": [{"simulation_output_id": i, "value": 1.0} for i in ids]}
+
+
+@pytest.mark.asyncio
+async def test_coval_calls_counts_the_failed_latency_rows_ingest_adds() -> None:
+    candidate = _candidate("s2s-id-roulette-quiet-room-v1")
+    metrics = (
+        {"lat": _values("s1", "s2")}
+        if candidate.condition.required is Metric.V2V
+        else {"len": _values("s1", "s2"), "lat": _values("s1")}
+    )
+    async with _client(metrics, ["s1", "s2", "s3"]) as client:
+        assert await coval_calls(client, candidate, frozenset({"V2V", "CallLength"})) == 3
+        assert await coval_calls(client, candidate, frozenset({"CallLength"})) == 2
+    async with _client({}, ["s1"]) as client:
+        assert await coval_calls(client, candidate, frozenset({"V2V"})) is None
