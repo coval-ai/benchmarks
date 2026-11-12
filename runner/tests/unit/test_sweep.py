@@ -107,10 +107,14 @@ _SWEEPS = (
     "SELECT model_version, dataset_id, dataset_version, completed_at IS NOT NULL"
     " FROM benchmarks_v2.sweeps ORDER BY id"
 )
-_RESULTS = "SELECT sample_id, transcript, error FROM benchmarks_v2.sweep_results ORDER BY id"
+_RESULTS = "SELECT sample_id, transcript FROM benchmarks_v2.sweep_results ORDER BY id"
+_QUEUE = (
+    "SELECT sample_id, tries_left, last_error FROM benchmarks_v2.sweep_queue"
+    " ORDER BY sweep_id, sample_id"
+)
 
 
-async def test_a_run_opens_one_sweep_per_dataset_and_a_rerun_opens_none(
+async def test_a_run_opens_one_sweep_per_dataset_queues_its_items_and_a_rerun_opens_none(
     pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     pool = await _pool_with_model(pg_conn)
@@ -123,6 +127,7 @@ async def test_a_run_opens_one_sweep_per_dataset_and_a_rerun_opens_none(
 
     assert (first.models, first.opened, second.opened) == (1, 2, 0)
     assert _query(pg_conn, _SWEEPS) == [(1, "ds-1", "1.0.0", False), (1, "ds-2", "1.0.0", False)]
+    assert _query(pg_conn, _QUEUE) == [("s1", 3, None), ("s2", 3, None)] * 2
 
 
 async def test_a_model_version_bump_or_a_new_dataset_version_opens_a_new_sweep(
@@ -166,16 +171,14 @@ async def test_a_sweep_runs_each_item_once_stores_it_and_completes(
     assert (second.called, second.completed) == (0, 0)
     assert len(calls) == 2
     assert _query(pg_conn, _SWEEPS) == [(1, "ds-1", "1.0.0", True)]
-    assert _query(pg_conn, _RESULTS) == [
-        ("s1", "hello world", None),
-        ("s2", "hello world", None),
-    ]
+    assert _query(pg_conn, _RESULTS) == [("s1", "hello world"), ("s2", "hello world")]
+    assert _query(pg_conn, _QUEUE) == []
     assert _query(pg_conn, "SELECT timings FROM benchmarks_v2.sweep_results LIMIT 1") == [
         ({"ttft_seconds": 0.2, "audio_to_final_seconds": 0.5},)
     ]
 
 
-async def test_a_failed_call_is_stored_as_failed_and_the_sweep_still_completes(
+async def test_an_item_the_provider_fails_is_run_again_on_the_next_run(
     pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     pool = await _pool_with_model(pg_conn)
@@ -187,15 +190,40 @@ async def test_a_failed_call_is_stored_as_failed_and_the_sweep_still_completes(
             {"ds-1": "1.0.0"},
             lambda n: RuntimeError("upstream 503") if n == 1 else "hello world",
         )
-        summary = await _run()
+        first = await _run()
+        queue_after_first = _query(pg_conn, _QUEUE)
+        second = await _run()
     finally:
         await pool.close()
 
-    assert (summary.called, summary.failed, summary.completed) == (2, 1, 1)
-    assert _query(pg_conn, _RESULTS) == [
-        ("s1", None, "upstream 503"),
-        ("s2", "hello world", None),
-    ]
+    assert (first.called, first.failed, first.completed) == (2, 1, 0)
+    assert queue_after_first == [("s1", 2, "upstream 503")]
+    assert (second.called, second.failed, second.scored, second.completed) == (1, 0, 1, 1)
+    assert _query(pg_conn, _RESULTS) == [("s2", "hello world"), ("s1", "hello world")]
+    assert _query(pg_conn, _QUEUE) == []
+
+
+async def test_an_item_out_of_tries_stays_queued_at_zero_and_the_sweep_completes(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pool = await _pool_with_model(pg_conn)
+    try:
+        calls = _wire(
+            monkeypatch,
+            tmp_path,
+            pool,
+            {"ds-1": "1.0.0"},
+            lambda n: "hello world" if n == 2 else RuntimeError("upstream 503"),
+        )
+        runs = [await _run() for _ in range(4)]
+    finally:
+        await pool.close()
+
+    assert [run.called for run in runs] == [2, 1, 1, 0]
+    assert [run.completed for run in runs] == [0, 0, 1, 0]
+    assert len(calls) == 4
+    assert _query(pg_conn, _RESULTS) == [("s2", "hello world")]
+    assert _query(pg_conn, _QUEUE) == [("s1", 0, "upstream 503")]
 
 
 async def test_a_clean_transcript_is_scored_and_a_failed_call_is_not(
@@ -247,7 +275,7 @@ async def test_a_run_out_of_time_leaves_the_rest_for_the_next_run(
     assert len(calls) == 2
 
 
-async def test_a_clip_that_fails_to_load_is_left_for_the_next_run(
+async def test_a_clip_that_fails_to_load_keeps_its_tries(
     pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     def broken(_dataset_id: str, settings: Any) -> Any:
@@ -265,10 +293,10 @@ async def test_a_clip_that_fails_to_load_is_left_for_the_next_run(
         await pool.close()
 
     assert (summary.called, summary.failed, summary.completed, len(calls)) == (0, 0, 0, 0)
-    assert _query(pg_conn, _RESULTS) == []
+    assert _query(pg_conn, _QUEUE) == [("s1", 3, None), ("s2", 3, None)]
 
 
-async def test_an_item_whose_model_is_busy_is_left_for_the_next_run(
+async def test_an_item_whose_model_is_busy_keeps_its_tries(
     pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     @asynccontextmanager
@@ -284,4 +312,4 @@ async def test_an_item_whose_model_is_busy_is_left_for_the_next_run(
         await pool.close()
 
     assert (summary.called, summary.completed, len(calls)) == (0, 0, 0)
-    assert _query(pg_conn, _SWEEPS) == [(1, "ds-1", "1.0.0", False)]
+    assert _query(pg_conn, _QUEUE) == [("s1", 3, None), ("s2", 3, None)]
