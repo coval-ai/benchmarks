@@ -4,9 +4,11 @@
 """Quality sweep: every item of every dataset through a model, once per model version.
 
 A run opens a sweep for each model version and dataset version that has none,
-then sends the items each unfinished sweep is missing to the provider, one at a
-time, and stores what comes back. It stops starting new items when its time is
-up, and the next run carries on from the stored results.
+which queues every item of the dataset. It then sends each unfinished sweep's
+queued items to the provider, one at a time. An item that gets a result leaves
+the queue. One the provider fails loses a try and is run again on a later run
+while it has tries left. A run stops starting new items when its time is up,
+and the next run carries on from the queue.
 
 Each provider call holds the model lock, the same one the latency probe takes.
 A clean transcript is scored for WER as soon as it's stored.
@@ -28,10 +30,11 @@ from coval_bench.db.registry_store import RegistryStore, _registered
 from coval_bench.db.sweep_store import (
     Score,
     complete_sweep,
-    ensure_sweeps,
+    open_sweeps,
+    queued_samples,
+    record_failure,
     store_result,
     store_score,
-    stored_samples,
     unfinished_sweeps,
 )
 from coval_bench.metrics import compute_wer
@@ -50,7 +53,7 @@ from coval_bench.runner.orchestrator import (
 
 if TYPE_CHECKING:
     from coval_bench.config import Settings
-    from coval_bench.datasets.manifest import STTManifestItem
+    from coval_bench.datasets.manifest import Manifest, STTManifestItem
     from coval_bench.registries import RegisteredModel
 
 logger = structlog.get_logger("coval_bench.sweep")
@@ -71,6 +74,10 @@ class _Output:
     transcript: str | None = None
     timings: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+
+
+def _stt_items(manifest: Manifest) -> list[STTManifestItem]:
+    return cast("list[STTManifestItem]", manifest.items)
 
 
 def _wer_score(reference: str, transcript: str) -> Score:
@@ -133,10 +140,15 @@ async def run_sweeps(
         entries = {ids[(m.provider, m.model)]: m for m in models}
         manifests = {dataset_id: dataset_manifest(dataset_id) for dataset_id in SWEEP_STT_DATASETS}
         summary.models = len(models)
-        summary.opened = await ensure_sweeps(
+        summary.opened = await open_sweeps(
             pool,
             [
-                (model_id, dataset_id, manifest.version)
+                (
+                    model_id,
+                    dataset_id,
+                    manifest.version,
+                    [item.sample_id or item.path for item in _stt_items(manifest)],
+                )
                 for model_id in entries
                 for dataset_id, manifest in manifests.items()
             ],
@@ -149,17 +161,16 @@ async def run_sweeps(
                     continue
                 entry = entries[sweep.model_id]
                 fetch = stt_item_fetcher(sweep.dataset_id, settings=settings)
-                stored = await stored_samples(pool, sweep.id)
+                queued = await queued_samples(pool, sweep.id)
                 log = logger.bind(
                     provider=entry.provider,
                     model=entry.model,
                     dataset=sweep.dataset_id,
                     sweep_id=sweep.id,
                 )
-                left = 0
-                for raw_item in cast("list[STTManifestItem]", manifest.items):
+                for raw_item in _stt_items(manifest):
                     sample_id = raw_item.sample_id or raw_item.path
-                    if sample_id in stored:
+                    if sample_id not in queued:
                         continue
                     if loop.time() >= deadline:
                         return summary
@@ -169,7 +180,6 @@ async def run_sweeps(
                             _read_pcm16(item.path), item.duration_sec, item.speech_end_offset_ms
                         )
                     except Exception:
-                        left += 1
                         log.exception("sweep_item_not_loaded", sample_id=sample_id)
                         continue
                     try:
@@ -177,8 +187,15 @@ async def run_sweeps(
                     except Exception as exc:
                         output = _Output(error=_truncate(str(exc) or type(exc).__name__))
                     if output is None:
-                        left += 1
                         log.warning("sweep_item_skipped", sample_id=sample_id, reason="model busy")
+                        continue
+                    summary.called += 1
+                    if output.error is not None:
+                        summary.failed += 1
+                        await record_failure(
+                            pool, sweep_id=sweep.id, sample_id=sample_id, error=output.error
+                        )
+                        log.warning("sweep_item_failed", sample_id=sample_id, error=output.error)
                         continue
                     result_id = await store_result(
                         pool,
@@ -186,13 +203,8 @@ async def run_sweeps(
                         sample_id=sample_id,
                         transcript=output.transcript,
                         timings=output.timings,
-                        error=output.error,
                     )
-                    summary.called += 1
-                    if output.error is not None:
-                        summary.failed += 1
-                        log.warning("sweep_item_failed", sample_id=sample_id, error=output.error)
-                    elif result_id is not None and output.transcript is not None:
+                    if result_id is not None and output.transcript is not None:
                         try:
                             score = _wer_score(raw_item.transcript, output.transcript)
                         except Exception:
@@ -200,8 +212,7 @@ async def run_sweeps(
                         else:
                             await store_score(pool, result_id, score)
                             summary.scored += 1
-                if left == 0:
-                    await complete_sweep(pool, sweep.id)
+                if await complete_sweep(pool, sweep.id):
                     summary.completed += 1
                     log.info("sweep_completed", items=len(manifest.items))
         finally:
