@@ -47,7 +47,13 @@ from coval_bench.s2s.identity import (
     dataset_identity,
     parse_persona_conditions,
 )
-from coval_bench.s2s.ingest import import_identity, ingest_run, resolve_import_generation
+from coval_bench.s2s.ingest import (
+    _rows_by_metric,
+    _writable_metrics,
+    import_identity,
+    ingest_run,
+    resolve_import_generation,
+)
 from coval_bench.s2s.rows import ingestable_metrics, metric_values
 from coval_bench.s2s.scenario_map import with_scenario_map
 from coval_bench.s2s.specs import AgentSpec, platform_specs
@@ -93,6 +99,14 @@ class StoredRun:
     @property
     def metrics(self) -> frozenset[str]:
         return frozenset(metric for metric, _ in self.counts)
+
+    @property
+    def rows(self) -> dict[str, int]:
+        """Evaluations per metric, any status."""
+        totals: dict[str, int] = {}
+        for (metric, _), n in self.counts.items():
+            totals[metric] = totals.get(metric, 0) + n
+        return totals
 
 
 @dataclass(frozen=True)
@@ -274,57 +288,64 @@ async def find_candidates(
     return sorted(candidates, key=lambda c: (c.spec.provider, c.coval_run.create_time or start))
 
 
-async def coval_calls(
+async def coval_rows(
     client: httpx.AsyncClient, candidate: Candidate, named: frozenset[str]
-) -> int | None:
-    """How many calls a fresh import would store; None when the anchor metric is absent.
+) -> dict[str, int] | None:
+    """Rows per metric a fresh import would store; None when the anchor metric is absent.
 
-    The anchor's calls, plus the calls ingest adds as failed latency rows when latency
-    is written and every anchor value carries its id.
+    Built with ingest's own trimming and failed-row rules, so it cannot drift from
+    what ``ingest_run`` writes.
     """
-    headers = (
-        {"X-Coval-Workspace-Id": candidate.spec.workspace_id}
-        if candidate.spec.workspace_id
-        else None
-    )
-    resp = await client.get(f"/runs/{candidate.coval_run.run_id}", headers=headers)
+    spec, coval_run = candidate.spec, candidate.coval_run
+    headers = {"X-Coval-Workspace-Id": spec.workspace_id} if spec.workspace_id else None
+    resp = await client.get(f"/runs/{coval_run.run_id}", headers=headers)
     resp.raise_for_status()
     run = resp.json()["run"]
-    results = run.get("results") or {}
+    metrics = (run.get("results") or {}).get("metrics") or {}
     anchor = candidate.condition.required
-    values = metric_values(results.get("metrics") or {}, candidate.spec.metric_ids.get(anchor))
-    if values is None:
+    anchor_values = metric_values(metrics, spec.metric_ids.get(anchor))
+    if anchor_values is None:
         return None
-    calls = {str(v.get("simulation_output_id") or f"#{i}") for i, v in enumerate(values)}
-    latency = metric_values(results.get("metrics") or {}, candidate.spec.metric_ids.get(Metric.V2V))
-    ids_known = anchor is not Metric.V2V or all(v.get("simulation_output_id") for v in values)
-    if str(Metric.V2V) in named and latency is not None and ids_known:
-        calls |= {s for s in results.get("output_ids") or [] if isinstance(s, str)}
-    return len(calls)
+    writable = _writable_metrics(
+        spec=spec,
+        coval_run=coval_run,
+        metrics=metrics,
+        anchor=anchor,
+        anchor_values=anchor_values,
+        condition=candidate.condition,
+        pending=frozenset(Metric(metric) for metric in named),
+        metric_ids=spec.metric_ids,
+    )
+    by_metric = _rows_by_metric(
+        spec=spec, run_pk=1, coval_run=coval_run, run=run, writable=writable, local={}
+    )
+    return {str(metric): len(rows) for metric, rows in by_metric.items() if rows}
 
 
 def decide(
-    stored: Mapping[int, StoredRun], named: frozenset[str], calls_now: int | None
+    stored: Mapping[int, StoredRun], named: frozenset[str], rows_now: Mapping[str, int] | None
 ) -> tuple[str, str]:
-    """(action, reason): replace, finish (swap only), unchanged, or refuse."""
+    """(action, reason): replace, finish (swap only), unchanged, or refuse.
+
+    A run is unchanged only when every named metric already holds the rows a fresh
+    import would write; matching call counts alone miss a metric cut short.
+    """
     if not stored:
         return "refuse", "nothing stored; the normal fetch imports it"
-    if calls_now is None:
+    if rows_now is None:
         return "refuse", "the anchor metric is not on the Coval run"
+    if set(rows_now) != named:
+        return "refuse", f"a fresh import would write {sorted(rows_now)}, not {sorted(named)}"
     held = frozenset().union(*(run.metrics for run in stored.values()))
     if held != named:
         return "refuse", f"stored metrics {sorted(held)} differ from --metric {sorted(named)}"
     newest = stored[max(stored)]
-    if newest.calls == calls_now and newest.metrics == named:
-        return (
-            ("unchanged", "already matches Coval")
-            if len(stored) == 1
-            else (
-                "finish",
-                "an earlier --apply wrote the new run but did not swap",
-            )
-        )
-    return "replace", f"{newest.calls} calls stored, {calls_now} on Coval"
+    if newest.rows == dict(rows_now):
+        if len(stored) == 1:
+            return "unchanged", "already matches Coval"
+        return "finish", "an earlier --apply wrote the new run but did not swap"
+    short = sorted(m for m in named if newest.rows.get(m) != rows_now[m])
+    return "replace", f"rows differ from Coval on {short}"
 
 
 def _describe(stored: Mapping[int, StoredRun]) -> str:
@@ -430,6 +451,14 @@ async def _apply(
             return f"replaced by run {new_claim.run_id} ({status})"
         except SwapRefused as exc:
             reason = str(exc)
+    finalized = await asyncio.to_thread(
+        read_run_state, artifact_client, bucket, new_claim.run_id, "finalized"
+    )
+    if finalized is None:
+        return (
+            f"refused: {reason}; new run {new_claim.run_id} is left for "
+            f"`coval-bench capture recover --run-id {new_claim.run_id}`, then rerun --apply"
+        )
     await discard_run(
         pool, provider=spec.provider, coval_run_id=coval_run.run_id, run_id=new_claim.run_id
     )
@@ -493,8 +522,8 @@ async def reimport(
                     continue
                 try:
                     stored = await stored_runs(pool, candidate.spec.provider, run.run_id)
-                    calls_now = await coval_calls(client, candidate, metrics)
-                    action, reason = decide(stored, metrics, calls_now)
+                    rows_now = await coval_rows(client, candidate, metrics)
+                    action, reason = decide(stored, metrics, rows_now)
                     click.echo(f"{label}: {action} ({reason}) | {_describe(stored)}")
                     if action == "refuse":
                         problems += 1

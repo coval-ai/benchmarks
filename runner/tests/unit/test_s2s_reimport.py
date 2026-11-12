@@ -35,7 +35,7 @@ from coval_bench.s2s.reimport import (
     Candidate,
     StoredRun,
     SwapRefused,
-    coval_calls,
+    coval_rows,
     decide,
     discard_run,
     stored_runs,
@@ -213,24 +213,33 @@ async def test_swap_refuses_to_replace_the_kept_run(pg_conn: psycopg.Connection[
         await pool.close()
 
 
-def _run(run_id: int, calls: int, metrics: frozenset[str] = _NAMED) -> StoredRun:
-    return StoredRun(run_id=run_id, calls=calls, counts={(m, "succeeded"): calls for m in metrics})
+def _run(run_id: int, rows: dict[str, int]) -> StoredRun:
+    return StoredRun(
+        run_id=run_id,
+        calls=max(rows.values()),
+        counts={(metric, "succeeded"): n for metric, n in rows.items()},
+    )
+
+
+_FULL = {"CallLength": 3, "CharacterErrorRate": 3}
+_CUT = {"CallLength": 3, "CharacterErrorRate": 2}
 
 
 @pytest.mark.parametrize(
-    ("stored", "calls_now", "action"),
+    ("stored", "rows_now", "action"),
     [
-        ({}, 5, "refuse"),
-        ({1: _run(1, 3)}, None, "refuse"),
-        ({1: _run(1, 3, frozenset({"CallLength"}))}, 5, "refuse"),
-        ({1: _run(1, 3)}, 5, "replace"),
-        ({1: _run(1, 5)}, 5, "unchanged"),
-        ({1: _run(1, 3), 2: _run(2, 5)}, 5, "finish"),
-        ({1: _run(1, 3), 2: _run(2, 4)}, 5, "replace"),
+        ({}, _FULL, "refuse"),
+        ({1: _run(1, _CUT)}, None, "refuse"),
+        ({1: _run(1, _CUT)}, {"CallLength": 3}, "refuse"),
+        ({1: _run(1, {"CallLength": 3})}, _FULL, "refuse"),
+        ({1: _run(1, _CUT)}, _FULL, "replace"),
+        ({1: _run(1, _FULL)}, _FULL, "unchanged"),
+        ({1: _run(1, _CUT), 2: _run(2, _FULL)}, _FULL, "finish"),
+        ({1: _run(1, _CUT), 2: _run(2, _CUT)}, _FULL, "replace"),
     ],
 )
-def test_decide(stored: dict[int, StoredRun], calls_now: int | None, action: str) -> None:
-    assert decide(stored, _NAMED, calls_now)[0] == action
+def test_decide(stored: dict[int, StoredRun], rows_now: dict[str, int] | None, action: str) -> None:
+    assert decide(stored, _NAMED, rows_now)[0] == action
 
 
 @pytest.mark.asyncio
@@ -282,7 +291,12 @@ def _candidate(dataset_id: str) -> Candidate:
             provider="vapi",
             model="pinned",
             agent_id="A",
-            metric_ids={Metric.V2V: "lat", Metric.CALL_LENGTH: "len"},
+            metric_ids={
+                Metric.V2V: "lat",
+                Metric.CALL_LENGTH: "len",
+                Metric.CHARACTER_ERROR_RATE: "cer",
+            },
+            uses_shared_metrics=False,
         ),
         coval_run=CovalRun(run_id="R1", create_time=_NOW),
         dataset_id=dataset_id,
@@ -297,20 +311,26 @@ def _client(metrics: dict[str, Any], output_ids: list[str]) -> httpx.AsyncClient
     return httpx.AsyncClient(transport=transport, base_url="https://coval.test")
 
 
-def _values(*ids: str) -> dict[str, Any]:
-    return {"values": [{"simulation_output_id": i, "value": 1.0} for i in ids]}
+def _values(*ids: str, value: float = 1.0) -> dict[str, Any]:
+    return {"values": [{"simulation_output_id": i, "value": value} for i in ids]}
 
 
 @pytest.mark.asyncio
-async def test_coval_calls_counts_the_failed_latency_rows_ingest_adds() -> None:
+async def test_coval_rows_follows_ingest_including_failed_latency_rows() -> None:
     candidate = _candidate("s2s-id-roulette-quiet-room-v1")
-    metrics = (
-        {"lat": _values("s1", "s2")}
-        if candidate.condition.required is Metric.V2V
-        else {"len": _values("s1", "s2"), "lat": _values("s1")}
-    )
+    metrics = {
+        "lat": _values("s1", "s2"),
+        "len": _values("s1", "s2", "s3", value=60.0),
+        "cer": _values("s1", "s2", "s3", value=0.1),
+    }
+    named = frozenset({"V2V", "CallLength", "CharacterErrorRate"})
     async with _client(metrics, ["s1", "s2", "s3"]) as client:
-        assert await coval_calls(client, candidate, frozenset({"V2V", "CallLength"})) == 3
-        assert await coval_calls(client, candidate, frozenset({"CallLength"})) == 2
+        rows = await coval_rows(client, candidate, named)
+    assert rows is not None
+    assert rows["V2V"] == 3
+    if candidate.condition.required is Metric.V2V:
+        assert rows == {"V2V": 3, "CallLength": 2, "CharacterErrorRate": 2}
+    else:
+        assert rows == {"V2V": 3, "CallLength": 3, "CharacterErrorRate": 3}
     async with _client({}, ["s1"]) as client:
-        assert await coval_calls(client, candidate, frozenset({"V2V"})) is None
+        assert await coval_rows(client, candidate, named) is None
