@@ -16,9 +16,7 @@ from psycopg_pool import AsyncConnectionPool
 class ProbeResult:
     """One latency probe of one model. Timings are milliseconds."""
 
-    benchmark: Literal["STT", "TTS"]
-    provider: str
-    model: str
+    model_id: int
     scheduled_at: datetime
     sent_at: datetime
     voice: str | None = None
@@ -35,13 +33,13 @@ class ProbeResult:
 
 _INSERT = """
     INSERT INTO benchmarks_v2.probe_results
-      (benchmark, provider, model, voice, scheduled_at, sent_at,
+      (model_id, voice, scheduled_at, sent_at,
        ttft_ms, ttfs_ms, ttfa_ms, status, error, failure_origin)
     VALUES
-      (%(benchmark)s, %(provider)s, %(model)s, %(voice)s, %(scheduled_at)s, %(sent_at)s,
+      (%(model_id)s, %(voice)s, %(scheduled_at)s, %(sent_at)s,
        %(ttft_ms)s, %(ttfs_ms)s, %(ttfa_ms)s, %(status)s,
        %(error)s, %(failure_origin)s)
-    ON CONFLICT (benchmark, provider, model, scheduled_at) DO NOTHING
+    ON CONFLICT (model_id, scheduled_at) DO NOTHING
     RETURNING id
 """
 
