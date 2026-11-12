@@ -29,6 +29,11 @@ _TICK = datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
 _SETTINGS = cast(Settings, SimpleNamespace(schedule_period_seconds=1800))
 
 
+@asynccontextmanager
+async def _free_lock(_pool: Any, _key: str, *, timeout_s: float) -> Any:
+    yield True
+
+
 def _model(benchmark: Benchmark, **fields: Any) -> RegisteredModel:
     return RegisteredModel(
         benchmark=benchmark,
@@ -277,6 +282,7 @@ async def test_run_probes_every_collected_model_and_stores_each(
     monkeypatch.setattr(latency_probe, "lifespan_pool", fake_pool)
     monkeypatch.setattr(latency_probe, "fetch_models", fake_fetch)
     monkeypatch.setattr(latency_probe, "insert_probe_result", fake_insert)
+    monkeypatch.setattr(latency_probe, "model_lock", _free_lock)
     monkeypatch.setattr(latency_probe, "_close_http_clients", fake_close)
     monkeypatch.setattr(latency_probe, "_warmup", no_warmup)
     monkeypatch.setattr(latency_probe, "_current_tick", lambda _settings: _TICK)
@@ -321,6 +327,7 @@ def _wire_run(monkeypatch: pytest.MonkeyPatch, insert: Any) -> None:
     monkeypatch.setattr(latency_probe, "lifespan_pool", fake_pool)
     monkeypatch.setattr(latency_probe, "fetch_models", fake_fetch)
     monkeypatch.setattr(latency_probe, "insert_probe_result", insert)
+    monkeypatch.setattr(latency_probe, "model_lock", _free_lock)
     monkeypatch.setattr(latency_probe, "_close_http_clients", nothing)
     monkeypatch.setattr(latency_probe, "_warmup", nothing)
     monkeypatch.setattr(latency_probe, "_current_tick", lambda _settings: _TICK)
@@ -359,6 +366,33 @@ async def test_a_probe_the_tick_already_has_is_counted_as_skipped(
     summary = await latency_probe.run_latency_probes(settings=_SETTINGS, kind="tts")
 
     assert (summary.probed, summary.stored, summary.skipped) == (2, 0, 2)
+
+
+async def test_a_model_another_job_holds_is_skipped_without_a_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    stored: list[str] = []
+
+    async def insert(_pool: Any, result: Any) -> bool:
+        stored.append(result.model)
+        return True
+
+    @asynccontextmanager
+    async def fast_1_is_busy(_pool: Any, key: str, *, timeout_s: float) -> Any:
+        yield key != "model_lock:acme/fast-1"
+
+    _wire_run(monkeypatch, insert)
+    monkeypatch.setattr(latency_probe, "model_lock", fast_1_is_busy)
+    monkeypatch.setattr(
+        latency_probe, "_get_tts_providers", lambda: {"acme": _tts_provider(_tts_result(), calls)}
+    )
+
+    summary = await latency_probe.run_latency_probes(settings=_SETTINGS, kind="tts")
+
+    assert len(calls) == 1
+    assert stored == ["fast-2"]
+    assert (summary.probed, summary.stored, summary.skipped) == (2, 1, 1)
 
 
 async def test_models_are_probed_one_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
