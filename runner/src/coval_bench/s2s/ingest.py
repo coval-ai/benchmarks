@@ -450,6 +450,7 @@ async def _seal_import(
     claimed_run: Run,
     capture_outcomes: list[Any],
     expected_capture_ids: list[str],
+    rebuild_rollup: bool = True,
 ) -> RunStatus:
     """Seal and finish the run row; a resumed run keeps the status it already stored."""
     from coval_bench.runner.persistence import capture_pending, seal_and_finish_run
@@ -477,7 +478,7 @@ async def _seal_import(
         ),
         capture_pending=incomplete,
     )
-    if status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
+    if rebuild_rollup and status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
         try:
             await writer.rebuild_run_rollup(run_pk)
         except Exception:
@@ -505,6 +506,7 @@ async def ingest_run(
     import_identity: ImportRunIdentity,
     import_generation: int,
     import_claim: ImportRunClaim | None = None,
+    rebuild_rollup: bool = True,
 ) -> RunStatus | None:
     """Ingest one Coval run into its own run row; None means skipped, nothing written.
 
@@ -633,6 +635,7 @@ async def ingest_run(
             claimed_run=claimed_run,
             capture_outcomes=capture_outcomes,
             expected_capture_ids=expected_capture_ids,
+            rebuild_rollup=rebuild_rollup,
         )
     except Exception as exc:
         if run_pk is not None:

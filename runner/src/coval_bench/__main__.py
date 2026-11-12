@@ -29,6 +29,7 @@ from coval_bench.platform_assets import platform_assets
 from coval_bench.runner.capture_cli import capture
 from coval_bench.s2s.check import check_s2s
 from coval_bench.s2s.fetch_v2v import fetch_s2s
+from coval_bench.s2s.reimport import reimport_s2s
 from coval_bench.s2s.sync import sync_s2s
 from coval_bench.variants.pull import pull_contract
 
@@ -129,6 +130,7 @@ cli.add_command(fetch_s2s, name="fetch-s2s")
 cli.add_command(check_s2s, name="check-s2s")
 cli.add_command(sync_llm, name="sync-llm")
 cli.add_command(sync_s2s, name="sync-s2s")
+cli.add_command(reimport_s2s, name="reimport-s2s")
 cli.add_command(pull_contract, name="pull-contract")
 cli.add_command(platform_assets, name="platform-assets")
 
