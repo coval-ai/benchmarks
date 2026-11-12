@@ -38,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import os
 import random
+from collections.abc import Callable
 from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
@@ -343,6 +344,55 @@ def _resolve_manifest(
 # ---------------------------------------------------------------------------
 
 
+def dataset_manifest(
+    dataset_id: str,
+    *,
+    cache_dir: Path | None = None,
+    storage_client: storage.Client | None = None,
+) -> Manifest:
+    """The dataset's full manifest, without fetching any of its audio."""
+    return _resolve_manifest(dataset_id, cache_dir=cache_dir, storage_client=storage_client)
+
+
+def stt_item_fetcher(
+    dataset_id: str,
+    *,
+    settings: Settings,
+    cache_dir: Path | None = None,
+    storage_client: storage.Client | None = None,
+) -> Callable[[STTManifestItem], DatasetItem]:
+    """A function that fetches and verifies one STT item's audio, sharing one client."""
+    resolved_cache = cache_dir if cache_dir is not None else _default_cache_dir()
+    client = storage_client if storage_client is not None else _make_storage_client(settings)
+
+    def fetch(raw_item: STTManifestItem) -> DatasetItem:
+        local_path = _fetch_and_verify(
+            client=client,
+            bucket=settings.dataset_bucket,
+            dataset_id=dataset_id,
+            item=raw_item,
+            cache_dir=resolved_cache,
+        )
+        meta: dict[str, str] = {}
+        if raw_item.speaker_id is not None:
+            meta["speaker_id"] = raw_item.speaker_id
+        if raw_item.chapter_id is not None:
+            meta["chapter_id"] = raw_item.chapter_id
+        if raw_item.utterance_id is not None:
+            meta["utterance_id"] = raw_item.utterance_id
+        return DatasetItem(
+            path=local_path,
+            sample_id=raw_item.sample_id or raw_item.path,
+            transcript=raw_item.transcript,
+            duration_sec=raw_item.duration_sec,
+            sha256=raw_item.sha256,
+            speech_end_offset_ms=raw_item.speech_end_offset_ms,
+            metadata=meta,
+        )
+
+    return fetch
+
+
 def load_stt_dataset(
     dataset_id: str,
     *,
@@ -377,8 +427,9 @@ def load_stt_dataset(
     manifest = _resolve_manifest(dataset_id, cache_dir=cache_dir, storage_client=storage_client)
     if dataset_id in WILDASR_ENV_FAMILY:
         _assert_family_alignment(dataset_id, manifest)
-    resolved_cache = cache_dir if cache_dir is not None else _default_cache_dir()
-    client = storage_client if storage_client is not None else _make_storage_client(settings)
+    fetch = stt_item_fetcher(
+        dataset_id, settings=settings, cache_dir=cache_dir, storage_client=storage_client
+    )
 
     items: list[DatasetItem] = []
     for raw_item in _sample_items(list(manifest.items), sample_size, rng):
@@ -386,31 +437,7 @@ def load_stt_dataset(
             raise TypeError(
                 f"Dataset '{dataset_id}' contains non-STT items; use load_tts_dataset instead."
             )
-        local_path = _fetch_and_verify(
-            client=client,
-            bucket=settings.dataset_bucket,
-            dataset_id=dataset_id,
-            item=raw_item,
-            cache_dir=resolved_cache,
-        )
-        meta: dict[str, str] = {}
-        if raw_item.speaker_id is not None:
-            meta["speaker_id"] = raw_item.speaker_id
-        if raw_item.chapter_id is not None:
-            meta["chapter_id"] = raw_item.chapter_id
-        if raw_item.utterance_id is not None:
-            meta["utterance_id"] = raw_item.utterance_id
-        items.append(
-            DatasetItem(
-                path=local_path,
-                sample_id=raw_item.sample_id or raw_item.path,
-                transcript=raw_item.transcript,
-                duration_sec=raw_item.duration_sec,
-                sha256=raw_item.sha256,
-                speech_end_offset_ms=raw_item.speech_end_offset_ms,
-                metadata=meta,
-            )
-        )
+        items.append(fetch(raw_item))
 
     return Dataset(id=manifest.id, version=manifest.version, items=items)
 
