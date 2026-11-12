@@ -640,6 +640,8 @@ export interface components {
             display_name?: string | null;
             architecture?: components["schemas"]["Architecture"] | null;
             orchestration?: components["schemas"]["Orchestration"] | null;
+            /** Version */
+            version: number;
             /** Updated By User Id */
             updated_by_user_id: string;
             /** Updated By Email */
@@ -660,7 +662,7 @@ export interface components {
          * @description PATCH body for /v1/admin/models/{id}; absent fields stay unchanged.
          *
          *     ``color`` null returns the model to the site's built-in palette; ``display_name``
-         *     null returns it to the site's built-in label.
+         *     null returns it to the site's built-in label. ``version`` only moves up by one.
          */
         AdminModelPatch: {
             /** Provider */
@@ -693,6 +695,8 @@ export interface components {
             display_name?: string | null;
             architecture?: components["schemas"]["Architecture"] | null;
             orchestration?: components["schemas"]["Orchestration"] | null;
+            /** Version */
+            version?: number | null;
         };
         /**
          * AdminModelPricingOut
