@@ -7,8 +7,8 @@ Unlike a benchmark run this scores nothing. It makes one provider call per
 model, with no retry, and stores the timings (or the failure) in
 ``probe_results``. A failed call is a data point, not something to hide.
 
-Models are probed one at a time so nothing on our side competes with the call
-being timed.
+Models are probed one at a time, each under its model lock, so nothing on our
+side competes with the call being timed.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ import structlog
 from coval_bench.arena.provider_health import classify_failure
 from coval_bench.datasets.loader import load_stt_dataset
 from coval_bench.db.conn import lifespan_pool
+from coval_bench.db.model_lock import model_lock, model_lock_key
 from coval_bench.db.probe_store import ProbeResult, insert_probe_result
 from coval_bench.db.registry_store import fetch_models
 from coval_bench.metrics import compute_ttfs
@@ -230,6 +231,9 @@ async def run_latency_probes(
             else None
         )
 
+        providers = _get_stt_providers() if kind == "stt" else _get_tts_providers()
+        lock_wait_s = _STT_TIMEOUT_S if kind == "stt" else _TTS_TIMEOUT_S
+
         async def probe(entry: RegisteredModel) -> ProbeResult:
             if kind == "stt":
                 return await _probe_stt(entry, item, settings=settings, scheduled_at=scheduled_at)
@@ -241,8 +245,14 @@ async def run_latency_probes(
                 log = logger.bind(
                     benchmark=kind.upper(), provider=entry.provider, model=entry.model
                 )
+                key = model_lock_key(entry, providers.get(entry.provider))
                 try:
-                    result = await probe(entry)
+                    async with model_lock(pool, key, timeout_s=lock_wait_s) as held:
+                        result = await probe(entry) if held else None
+                    if result is None:
+                        skipped += 1
+                        log.warning("latency_probe_skipped", reason="model is busy")
+                        continue
                     was_stored = await insert_probe_result(pool, result)
                 except Exception:
                     errored += 1
