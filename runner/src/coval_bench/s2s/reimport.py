@@ -15,6 +15,7 @@ import click
 import httpx
 import psycopg
 import psycopg.rows
+from google.api_core.exceptions import GoogleAPIError
 from google.cloud import storage
 from psycopg_pool import AsyncConnectionPool
 
@@ -85,6 +86,12 @@ GROUP BY o.run_id
 """
 
 
+_OWNERS_SQL = """
+SELECT DISTINCT run_id, split_part(sample_id, '/', 1) AS coval_run_id, provider
+FROM benchmarks_v2.benchmark_observations WHERE run_id = ANY(%(ids)s)
+"""
+
+
 class SwapRefused(RuntimeError):
     """The stored rows are not what the swap was planned against."""
 
@@ -143,6 +150,23 @@ async def _stored(
     }
 
 
+async def _others(
+    cur: psycopg.AsyncCursor[psycopg.rows.DictRow],
+    run_ids: list[int],
+    provider: str,
+    coval_run_id: str,
+) -> list[int]:
+    """The runs among ``run_ids`` that also hold another Coval run's or provider's rows."""
+    await cur.execute(_OWNERS_SQL, {"ids": run_ids})
+    return sorted(
+        {
+            int(row["run_id"])
+            for row in await cur.fetchall()
+            if (row["coval_run_id"], row["provider"]) != (coval_run_id, provider)
+        }
+    )
+
+
 async def stored_runs(
     pool: AsyncConnectionPool[Any], provider: str, coval_run_id: str
 ) -> dict[int, StoredRun]:
@@ -185,6 +209,8 @@ async def swap_runs(
             raise SwapRefused(f"stored rows for {coval_run_id} changed since they were counted")
         if keep not in before:
             raise SwapRefused(f"run {keep} holds no counted rows for {coval_run_id}")
+        if mixed := await _others(cur, old, provider, coval_run_id):
+            raise SwapRefused(f"runs {mixed} also hold other runs' rows; not deleting them")
         if before[keep].metrics != named:
             raise SwapRefused(
                 f"run {keep} holds {sorted(before[keep].metrics)}, not every named metric"
@@ -208,13 +234,7 @@ async def discard_run(
         conn.transaction(),
         conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
     ):
-        await cur.execute(
-            """SELECT DISTINCT split_part(sample_id, '/', 1) AS coval_run_id, provider
-               FROM benchmarks_v2.benchmark_observations WHERE run_id = %(run_id)s""",
-            {"run_id": run_id},
-        )
-        owners = {(row["coval_run_id"], row["provider"]) for row in await cur.fetchall()}
-        if owners - {(coval_run_id, provider)}:
+        if await _others(cur, [run_id], provider, coval_run_id):
             raise SwapRefused(f"run {run_id} holds other runs' rows; not discarding it")
         await cur.execute(
             "DELETE FROM benchmarks_v2.runs WHERE id = %(run_id)s", {"run_id": run_id}
@@ -449,15 +469,20 @@ async def _apply(
                 named=named,
             )
             return f"replaced by run {new_claim.run_id} ({status})"
-        except SwapRefused as exc:
-            reason = str(exc)
-    finalized = await asyncio.to_thread(
-        read_run_state, artifact_client, bucket, new_claim.run_id, "finalized"
-    )
-    if finalized is None:
+        except (SwapRefused, psycopg.Error) as exc:
+            reason = f"{type(exc).__name__}: {exc}"
+    run_id = new_claim.run_id
+    if (
+        await asyncio.to_thread(read_run_state, artifact_client, bucket, run_id, "finalized")
+        is None
+    ):
+        sealed = await asyncio.to_thread(read_run_state, artifact_client, bucket, run_id, "seal")
+        recover = f"coval-bench capture recover --run-id {run_id}" + (
+            "" if sealed is not None else " --abandoned"
+        )
         return (
-            f"refused: {reason}; new run {new_claim.run_id} is left for "
-            f"`coval-bench capture recover --run-id {new_claim.run_id}`, then rerun --apply"
+            f"refused: {reason}; new run {run_id} is unfinished and left for `{recover}`, "
+            "then rerun --apply (until then the scheduled fetch may count it too)"
         )
     await discard_run(
         pool, provider=spec.provider, coval_run_id=coval_run.run_id, run_id=new_claim.run_id
@@ -540,7 +565,15 @@ async def reimport(
                         named=metrics,
                         artifact_client=artifact_client,
                     )
-                except (SwapRefused, httpx.HTTPError, psycopg.Error, OSError, ValueError) as exc:
+                except (
+                    SwapRefused,
+                    httpx.HTTPError,
+                    psycopg.Error,
+                    GoogleAPIError,
+                    OSError,
+                    KeyError,
+                    ValueError,
+                ) as exc:
                     outcome = f"refused: {type(exc).__name__}: {exc}"
                 if outcome.startswith("refused"):
                     problems += 1

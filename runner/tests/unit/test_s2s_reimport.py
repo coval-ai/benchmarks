@@ -334,3 +334,28 @@ async def test_coval_rows_follows_ingest_including_failed_latency_rows() -> None
         assert rows == {"V2V": 3, "CallLength": 3, "CharacterErrorRate": 3}
     async with _client({}, ["s1"]) as client:
         assert await coval_rows(client, candidate, named) is None
+
+
+@pytest.mark.asyncio
+async def test_swap_refuses_an_old_run_holding_another_coval_run(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    pool = await _pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        old = await _stored_run(writer, "R1", calls=2)
+        await _call(writer, old, "R2/s0")
+        new = await _stored_run(writer, "R1", calls=3)
+        stored = await stored_runs(pool, "vapi", "R1")
+        with pytest.raises(SwapRefused, match="also hold other runs' rows"):
+            await swap_runs(
+                pool,
+                provider="vapi",
+                coval_run_id="R1",
+                keep=new,
+                replace={old: stored[old]},
+                named=_NAMED,
+            )
+        assert set(await stored_runs(pool, "vapi", "R2")) == {old}
+    finally:
+        await pool.close()
