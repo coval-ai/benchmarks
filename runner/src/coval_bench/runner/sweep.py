@@ -5,20 +5,23 @@
 
 A run opens a sweep for each model version and dataset version that has none,
 which queues every item of the dataset. For TTS an item is a prompt in one of
-the model's voices, and a run only opens and queues. For STT it then sends each
-unfinished sweep's queued items to the provider, one at a time. An item that gets a result leaves
+the model's voices. It then sends each unfinished sweep's queued items to the
+provider, one at a time. An item that gets a result leaves
 the queue. One the provider fails loses a try and is run again on a later run
 while it has tries left. A run stops starting new items when its time is up,
 and the next run carries on from the queue.
 
 Each provider call holds the model lock, the same one the latency probe takes.
-A clean transcript is scored for WER as soon as it's stored.
+A clean transcript is scored for WER as soon as it's stored. For TTS the
+transcript is Whisper's reading of the synthesized audio, and the audio is
+deleted once it's transcribed.
 """
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import structlog
@@ -32,7 +35,7 @@ from coval_bench.db.sweep_store import (
     Score,
     complete_sweep,
     open_sweeps,
-    queued_samples,
+    queued_items,
     record_failure,
     store_result,
     store_score,
@@ -44,10 +47,13 @@ from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.registries import Benchmark, Metric
 from coval_bench.runner.orchestrator import (
     _STT_TIMEOUT_S,
+    _TTS_TIMEOUT_S,
     _get_stt_providers,
+    _get_tts_providers,
     _read_pcm16,
     _select_models,
     _stt_silent_failure,
+    _transcribe_with_whisper,
     _trim_to_speech_end,
     _truncate,
 )
@@ -83,13 +89,28 @@ def _stt_items(manifest: Manifest) -> list[STTManifestItem]:
     return cast("list[STTManifestItem]", manifest.items)
 
 
-def _queue_items(kind: Kind, entry: RegisteredModel, manifest: Manifest) -> list[tuple[str, str]]:
-    """What a sweep of *manifest* has to run for *entry*, as (sample id, voice) pairs."""
+@dataclass(frozen=True)
+class _Item:
+    sample_id: str
+    voice: str
+    reference: str
+    raw: Any
+
+
+def _items(kind: Kind, entry: RegisteredModel, manifest: Manifest) -> list[_Item]:
+    """What a sweep of *manifest* has to run for *entry*; the voice is empty for STT."""
     if kind == "stt":
-        return [(item.sample_id or item.path, "") for item in _stt_items(manifest)]
+        return [
+            _Item(item.sample_id or item.path, "", item.transcript, item)
+            for item in _stt_items(manifest)
+        ]
     voices = [voice.id for voice in entry.voices] or [entry.voice or ""]
     prompts = cast("list[TTSManifestItem]", manifest.items)
-    return [(prompt.testcase_id, voice) for prompt in prompts for voice in voices]
+    return [
+        _Item(prompt.testcase_id, voice, prompt.spoken_reference or prompt.transcript, prompt)
+        for prompt in prompts
+        for voice in voices
+    ]
 
 
 def _wer_score(reference: str, transcript: str) -> Score:
@@ -102,21 +123,37 @@ def _wer_score(reference: str, transcript: str) -> Score:
     )
 
 
-async def _call(
+async def _run_stt(
     entry: RegisteredModel,
-    pcm: bytes,
+    item: _Item,
     *,
+    fetch: Any,  # noqa: ANN401 — the dataset's item fetcher
     settings: Settings,
     pool: Any,  # noqa: ANN401 — the connection pool
+    log: Any,  # noqa: ANN401 — a bound structlog logger
 ) -> _Output | None:
-    """One provider call for one item. None when another job held the model too long."""
-    provider_cls = _get_stt_providers()[entry.provider]
-    key = model_lock_key(entry, provider_cls)
-    async with model_lock(pool, key, timeout_s=_STT_TIMEOUT_S) as held:
-        if not held:
-            return None
-        async with asyncio.timeout(_STT_TIMEOUT_S):
-            result = await provider_cls(settings, entry.model).measure_ttft(pcm, 1, 2, 16000, 0.1)
+    """Transcribe one clip. None when the item should just be left for the next run."""
+    try:
+        clip = await asyncio.to_thread(fetch, item.raw)
+        pcm, _ = _trim_to_speech_end(
+            _read_pcm16(clip.path), clip.duration_sec, clip.speech_end_offset_ms
+        )
+    except Exception:
+        log.exception("sweep_item_not_loaded")
+        return None
+    try:
+        provider_cls = _get_stt_providers()[entry.provider]
+        key = model_lock_key(entry, provider_cls)
+        async with model_lock(pool, key, timeout_s=_STT_TIMEOUT_S) as held:
+            if not held:
+                log.warning("sweep_item_skipped", reason="model busy")
+                return None
+            async with asyncio.timeout(_STT_TIMEOUT_S):
+                result = await provider_cls(settings, entry.model).measure_ttft(
+                    pcm, 1, 2, 16000, 0.1
+                )
+    except Exception as exc:
+        return _Output(error=_truncate(str(exc) or type(exc).__name__))
     return _Output(
         transcript=result.complete_transcript,
         timings={
@@ -127,6 +164,49 @@ async def _call(
     )
 
 
+async def _run_tts(
+    entry: RegisteredModel,
+    item: _Item,
+    *,
+    settings: Settings,
+    pool: Any,  # noqa: ANN401 — the connection pool
+    log: Any,  # noqa: ANN401 — a bound structlog logger
+) -> _Output | None:
+    """Synthesize one prompt in one voice and transcribe the audio with Whisper.
+
+    None when the item should just be left for the next run. The audio is always deleted.
+    """
+    try:
+        provider_cls = _get_tts_providers()[entry.provider]
+        key = model_lock_key(entry, provider_cls)
+        async with model_lock(pool, key, timeout_s=_TTS_TIMEOUT_S) as held:
+            if not held:
+                log.warning("sweep_item_skipped", reason="model busy")
+                return None
+            async with asyncio.timeout(_TTS_TIMEOUT_S):
+                result = await provider_cls(
+                    settings=settings, model=entry.model, voice=item.voice or None
+                ).synthesize(item.raw.transcript)
+    except Exception as exc:
+        return _Output(error=_truncate(str(exc) or type(exc).__name__))
+    timings = {"ttfa_ms": result.ttfa_ms}
+    audio_path = result.audio_path
+    try:
+        if result.error:
+            return _Output(timings=timings, error=result.error)
+        if audio_path is None or not audio_path.exists():
+            return _Output(timings=timings, error="no audio produced")
+        try:
+            transcript = await _transcribe_with_whisper(audio_path, settings)
+        except Exception:
+            log.exception("sweep_item_not_transcribed")
+            return None
+        return _Output(transcript=transcript, timings=timings)
+    finally:
+        if audio_path is not None:
+            audio_path.unlink(missing_ok=True)
+
+
 async def run_sweeps(
     *,
     settings: Settings,
@@ -134,8 +214,7 @@ async def run_sweeps(
     only: frozenset[str] | None = None,
     max_minutes: float,
 ) -> SweepSummary:
-    """Open any missing sweeps for the collected shared *kind* models, then work on the
-    STT ones."""
+    """Open any missing sweeps for the collected shared *kind* models, then work on them."""
     benchmark = Benchmark.STT if kind == "stt" else Benchmark.TTS
     datasets = SWEEP_STT_DATASETS if kind == "stt" else SWEEP_TTS_DATASETS
     summary = SweepSummary()
@@ -159,13 +238,16 @@ async def run_sweeps(
         summary.opened = await open_sweeps(
             pool,
             [
-                (model_id, dataset_id, manifest.version, _queue_items(kind, entry, manifest))
+                (
+                    model_id,
+                    dataset_id,
+                    manifest.version,
+                    [(item.sample_id, item.voice) for item in _items(kind, entry, manifest)],
+                )
                 for model_id, entry in entries.items()
                 for dataset_id, manifest in manifests.items()
             ],
         )
-        if kind == "tts":
-            return summary
 
         try:
             for sweep in await unfinished_sweeps(pool, list(entries)):
@@ -173,61 +255,58 @@ async def run_sweeps(
                 if manifest.version != sweep.dataset_version:
                     continue
                 entry = entries[sweep.model_id]
-                fetch = stt_item_fetcher(sweep.dataset_id, settings=settings)
-                queued = await queued_samples(pool, sweep.id)
-                log = logger.bind(
+                if kind == "stt":
+                    fetch = stt_item_fetcher(sweep.dataset_id, settings=settings)
+                    run = partial(_run_stt, entry, fetch=fetch, settings=settings, pool=pool)
+                else:
+                    run = partial(_run_tts, entry, settings=settings, pool=pool)
+                queued = await queued_items(pool, sweep.id)
+                sweep_log = logger.bind(
                     provider=entry.provider,
                     model=entry.model,
                     dataset=sweep.dataset_id,
                     sweep_id=sweep.id,
                 )
-                for raw_item in _stt_items(manifest):
-                    sample_id = raw_item.sample_id or raw_item.path
-                    if sample_id not in queued:
+                for item in _items(kind, entry, manifest):
+                    if (item.sample_id, item.voice) not in queued:
                         continue
                     if loop.time() >= deadline:
                         return summary
-                    try:
-                        item = await asyncio.to_thread(fetch, raw_item)
-                        pcm, _ = _trim_to_speech_end(
-                            _read_pcm16(item.path), item.duration_sec, item.speech_end_offset_ms
-                        )
-                    except Exception:
-                        log.exception("sweep_item_not_loaded", sample_id=sample_id)
-                        continue
-                    try:
-                        output = await _call(entry, pcm, settings=settings, pool=pool)
-                    except Exception as exc:
-                        output = _Output(error=_truncate(str(exc) or type(exc).__name__))
+                    log = sweep_log.bind(sample_id=item.sample_id, voice=item.voice)
+                    output = await run(item, log=log)
                     if output is None:
-                        log.warning("sweep_item_skipped", sample_id=sample_id, reason="model busy")
                         continue
                     summary.called += 1
                     if output.error is not None:
                         summary.failed += 1
                         await record_failure(
-                            pool, sweep_id=sweep.id, sample_id=sample_id, error=output.error
+                            pool,
+                            sweep_id=sweep.id,
+                            sample_id=item.sample_id,
+                            voice=item.voice,
+                            error=output.error,
                         )
-                        log.warning("sweep_item_failed", sample_id=sample_id, error=output.error)
+                        log.warning("sweep_item_failed", error=output.error)
                         continue
                     result_id = await store_result(
                         pool,
                         sweep_id=sweep.id,
-                        sample_id=sample_id,
+                        sample_id=item.sample_id,
+                        voice=item.voice,
                         transcript=output.transcript,
                         timings=output.timings,
                     )
                     if result_id is not None and output.transcript is not None:
                         try:
-                            score = _wer_score(raw_item.transcript, output.transcript)
+                            score = _wer_score(item.reference, output.transcript)
                         except Exception:
-                            log.exception("sweep_item_not_scored", sample_id=sample_id)
+                            log.exception("sweep_item_not_scored")
                         else:
                             await store_score(pool, result_id, score)
                             summary.scored += 1
                 if await complete_sweep(pool, sweep.id):
                     summary.completed += 1
-                    log.info("sweep_completed", items=len(manifest.items))
+                    sweep_log.info("sweep_completed", items=len(manifest.items))
         finally:
             await _close_http_clients()
     return summary

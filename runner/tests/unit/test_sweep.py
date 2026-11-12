@@ -17,7 +17,7 @@ from pytest_postgresql.factories import postgresql
 
 from coval_bench.config import Settings
 from coval_bench.db.registry_store import NewModel, RegistryStore
-from coval_bench.providers.base import TranscriptionResult
+from coval_bench.providers.base import TranscriptionResult, TTSResult
 from coval_bench.registries import Benchmark, Gender, Voice
 from coval_bench.runner import sweep
 from tests.unit.conftest import apply_migrations, open_pool
@@ -317,32 +317,98 @@ async def test_an_item_whose_model_is_busy_keeps_its_tries(
     assert _query(pg_conn, _QUEUE) == [("s1", 3, None), ("s2", 3, None)]
 
 
-async def test_a_tts_sweep_queues_every_prompt_in_each_voice_and_runs_nothing(
-    pg_conn: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    apply_migrations(pg_conn)
-    pool = await open_pool(pg_conn)
+async def _tts(
+    conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, whisper: Any
+) -> tuple[Any, list[tuple[str | None, str]]]:
+    """A TTS model with two voices and a dataset of one prompt. Returns the pool and
+    the (voice, text) pairs the provider was asked to speak."""
+    apply_migrations(conn)
+    pool = await open_pool(conn)
     voices = (Voice(id="f1", gender=Gender.FEMALE), Voice(id="m1", gender=Gender.MALE))
     new = NewModel(modality=Benchmark.TTS, provider="acme", model="fast-1", voices=voices)
-    prompts = [SimpleNamespace(testcase_id="t1"), SimpleNamespace(testcase_id="t2")]
+    await RegistryStore(pool).insert_model(new, user_id="user_editor", org_id=None, email=None)
+    prompts = [SimpleNamespace(testcase_id="t1", transcript="Good morning.", spoken_reference=None)]
+    spoken: list[tuple[str | None, str]] = []
+
+    class Provider:
+        def __init__(self, *, settings: Any, model: str, voice: str | None) -> None:
+            self.voice = voice
+
+        async def synthesize(self, text: str) -> TTSResult:
+            spoken.append((self.voice, text))
+            path = tmp_path / f"{self.voice}.wav"
+            path.write_bytes(b"audio")
+            return TTSResult(
+                provider="acme",
+                model="fast-1",
+                voice=self.voice or "",
+                ttfa_ms=180.0,
+                audio_path=path,
+                error=None,
+            )
 
     @asynccontextmanager
     async def fake_pool(_settings: Any) -> Any:
         yield pool
 
+    async def nothing() -> None:
+        return None
+
+    monkeypatch.setattr(sweep, "lifespan_pool", fake_pool)
+    monkeypatch.setattr(sweep, "SWEEP_TTS_DATASETS", ("tts-1",))
+    monkeypatch.setattr(
+        sweep, "dataset_manifest", lambda _id: SimpleNamespace(version="1.0.0", items=prompts)
+    )
+    monkeypatch.setattr(sweep, "_get_tts_providers", lambda: {"acme": Provider})
+    monkeypatch.setattr(sweep, "_transcribe_with_whisper", whisper)
+    monkeypatch.setattr(sweep, "_close_http_clients", nothing)
+    return pool, spoken
+
+
+_TTS_QUEUE = "SELECT sample_id, voice, tries_left FROM benchmarks_v2.sweep_queue ORDER BY 1, 2"
+
+
+async def test_a_tts_sweep_runs_each_prompt_in_each_voice_and_scores_the_whisper_transcript(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def whisper(_path: Path, _settings: Any) -> str:
+        return "good morning"
+
+    pool, spoken = await _tts(pg_conn, monkeypatch, tmp_path, whisper)
     try:
-        await RegistryStore(pool).insert_model(new, user_id="user_editor", org_id=None, email=None)
-        monkeypatch.setattr(sweep, "lifespan_pool", fake_pool)
-        monkeypatch.setattr(sweep, "SWEEP_TTS_DATASETS", ("tts-1",))
-        monkeypatch.setattr(
-            sweep, "dataset_manifest", lambda _id: SimpleNamespace(version="1.0.0", items=prompts)
-        )
+        queued = await _run(max_minutes=0, kind="tts")
+        queue_before = _query(pg_conn, _TTS_QUEUE)
         summary = await _run(kind="tts")
     finally:
         await pool.close()
 
-    assert (summary.models, summary.opened, summary.called) == (1, 1, 0)
+    assert (queued.opened, queued.called) == (1, 0)
+    assert queue_before == [("t1", "f1", 3), ("t1", "m1", 3)]
+    assert (summary.called, summary.failed, summary.scored, summary.completed) == (2, 0, 2, 1)
+    assert sorted(spoken) == [("f1", "Good morning."), ("m1", "Good morning.")]
+    assert not list(tmp_path.glob("*.wav"))
+    assert _query(pg_conn, _TTS_QUEUE) == []
     assert _query(
         pg_conn,
-        "SELECT sample_id, voice, tries_left FROM benchmarks_v2.sweep_queue ORDER BY 1, 2",
-    ) == [("t1", "f1", 3), ("t1", "m1", 3), ("t2", "f1", 3), ("t2", "m1", 3)]
+        """SELECT r.voice, r.transcript, s.errors, s.reference_units
+           FROM benchmarks_v2.sweep_results r
+           JOIN benchmarks_v2.sweep_scores s ON s.sweep_result_id = r.id ORDER BY 1""",
+    ) == [("f1", "good morning", 0, 2), ("m1", "good morning", 0, 2)]
+
+
+async def test_a_tts_item_whisper_cannot_transcribe_keeps_its_tries(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def whisper(_path: Path, _settings: Any) -> str:
+        raise RuntimeError("whisper unavailable")
+
+    pool, spoken = await _tts(pg_conn, monkeypatch, tmp_path, whisper)
+    try:
+        summary = await _run(kind="tts")
+    finally:
+        await pool.close()
+
+    assert (summary.called, summary.failed, summary.completed, len(spoken)) == (0, 0, 0, 2)
+    assert not list(tmp_path.glob("*.wav"))
+    assert _query(pg_conn, _TTS_QUEUE) == [("t1", "f1", 3), ("t1", "m1", 3)]
+    assert _query(pg_conn, _RESULTS) == []
