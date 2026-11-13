@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from coval_bench.registries import RegisteredModel
 
 _ACQUIRE = "SELECT pg_advisory_lock(hashtextextended(%s, 0))"
+_TRY_ACQUIRE = "SELECT pg_try_advisory_lock(hashtextextended(%s, 0)) AS held"
 _RELEASE = "SELECT pg_advisory_unlock(hashtextextended(%s, 0))"
 
 
@@ -47,9 +48,33 @@ async def model_lock(
             yield held
         finally:
             if held:
-                try:
-                    async with conn.transaction():
-                        await conn.execute(_RELEASE, (key,))
-                except BaseException:
-                    await conn.close()
-                    raise
+                await _release(conn, key)
+
+
+@asynccontextmanager
+async def model_claim(pool: AsyncConnectionPool[Any], key: str) -> AsyncIterator[bool]:
+    """Claim *key* for as long as the block runs. Yields False at once if another job has it.
+
+    A claim is separate from the model lock. The lock is held for one provider call, so a
+    probe can slip in between a sweep's calls. A claim is held for a whole model's worth
+    of work, so two sweep runs never work the same model's queue.
+    """
+    claim = f"claim:{key}"
+    async with pool.connection() as conn:
+        async with conn.transaction():
+            row = await (await conn.execute(_TRY_ACQUIRE, (claim,))).fetchone()
+        held = bool(row["held"])
+        try:
+            yield held
+        finally:
+            if held:
+                await _release(conn, claim)
+
+
+async def _release(conn: Any, key: str) -> None:  # noqa: ANN401
+    try:
+        async with conn.transaction():
+            await conn.execute(_RELEASE, (key,))
+    except BaseException:
+        await conn.close()
+        raise
