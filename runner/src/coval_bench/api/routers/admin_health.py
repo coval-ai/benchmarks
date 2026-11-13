@@ -61,7 +61,7 @@ def _model_out(row: dict[str, Any]) -> AdminModelHealthOut:
     )
 
 
-@router.get("/admin/health", response_model=AdminHealthResponse)
+@router.get("/admin/provider-health", response_model=AdminHealthResponse)
 async def admin_health(
     response: Response, pool: AsyncConnectionPool[Any] = Depends(get_pool)
 ) -> AdminHealthResponse:

@@ -664,7 +664,7 @@ class AdminModelHealthOut(BaseModel):
 
 
 class AdminHealthResponse(BaseModel):
-    """Response schema for GET /v1/admin/health."""
+    """Response schema for GET /v1/admin/provider-health."""
 
     models: list[AdminModelHealthOut]
 

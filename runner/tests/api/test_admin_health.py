@@ -52,9 +52,9 @@ def _two_models(postgresql: Any) -> tuple[int, int]:
 
 
 async def test_health_requires_a_coval_token(client: AsyncClient) -> None:
-    assert (await client.get("/v1/admin/health")).status_code == 401
+    assert (await client.get("/v1/admin/provider-health")).status_code == 401
     other_org = bearer(sub="u", org_id=EA_ORG)
-    assert (await client.get("/v1/admin/health", headers=other_org)).status_code == 403
+    assert (await client.get("/v1/admin/provider-health", headers=other_org)).status_code == 403
 
 
 async def test_health_lists_each_probed_model_with_its_latest_failure(
@@ -62,7 +62,7 @@ async def test_health_lists_each_probed_model_with_its_latest_failure(
 ) -> None:
     up, down = _two_models(postgresql)
 
-    response = await client.get("/v1/admin/health", headers=ADMIN)
+    response = await client.get("/v1/admin/provider-health", headers=ADMIN)
 
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "private, no-store"
@@ -81,7 +81,7 @@ async def test_a_401_is_reported_as_an_auth_failure(client: AsyncClient, postgre
         model_id = conn.execute("SELECT id FROM benchmarks_v2.models LIMIT 1").fetchone()[0]  # type: ignore[index]
         _probe(conn, model_id, 1, error="request failed", origin="runner", status_code=401)
 
-    failure = (await client.get("/v1/admin/health", headers=ADMIN)).json()["models"][0][
+    failure = (await client.get("/v1/admin/provider-health", headers=ADMIN)).json()["models"][0][
         "last_failure"
     ]
 
