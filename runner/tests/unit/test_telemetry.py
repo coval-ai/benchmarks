@@ -151,6 +151,11 @@ def test_an_outcome_names_what_went_wrong(error: str | None, ours: bool, expecte
     assert telemetry.outcome(error, ours=ours) == expected
 
 
+def test_a_status_code_names_a_key_failure_the_error_text_does_not() -> None:
+    assert telemetry.outcome("request failed") == "provider"
+    assert telemetry.outcome("request failed", status_code=401) == "auth"
+
+
 def test_probe_and_sweep_outcomes_are_counted_and_the_queue_is_reported() -> None:
     reader = InMemoryMetricReader()
     telemetry.configure_metrics(_settings(), readers=[reader])

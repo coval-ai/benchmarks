@@ -13,8 +13,11 @@ Call :func:`configure_metrics` once at process startup and
 * ``probe_results{kind, provider, model, outcome}`` — one increment per latency
   probe stored.
 * ``sweep_items{kind, provider, model, outcome}`` — one increment per sweep item
-  that got an outcome.
-* ``sweep_queued{kind}`` — the items a sweep run left queued with tries to spare.
+  that got an outcome. A TTS item whose Whisper transcription failed is counted
+  against ``openai``/``whisper-1`` and not the model being swept, so that
+  model's total is short by those items.
+* ``sweep_queued{kind}`` — the items every sweep of that kind has queued with
+  tries to spare, reported at the end of each run whatever it was limited to.
 
 ``outcome`` is ``ok``, ``provider`` for a failure that's the provider's, or what
 went wrong on our side: ``auth``, ``credit``, ``rate_limit``, or ``ours`` for
@@ -165,13 +168,17 @@ def record_run(*, kind: str, status: str) -> None:
         logger.warning("otel_record_run_failed", exc_info=True)
 
 
-def outcome(error: str | None, *, ours: bool = False) -> str:
-    """The ``outcome`` label for a call: ok, a key failure, or whose fault it otherwise was."""
+def outcome(error: str | None, *, status_code: int | None = None, ours: bool = False) -> str:
+    """The ``outcome`` label for a call: ok, a key failure, or whose fault it otherwise was.
+
+    Pass the *status_code* when the call reported one. Some failures are only a key
+    failure by their status, with nothing in the error text to say so.
+    """
     from coval_bench.arena.provider_health import classify_failure
 
     if error is None:
         return "ok"
-    reason = classify_failure(None, error)
+    reason = classify_failure(status_code, error)
     if reason is not None:
         return reason.value
     return "ours" if ours else "provider"

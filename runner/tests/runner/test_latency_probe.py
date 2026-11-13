@@ -19,6 +19,7 @@ from typing import Any, cast
 
 import pytest
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader, NumberDataPoint
+from structlog.testing import capture_logs
 
 from coval_bench import telemetry
 from coval_bench.config import Settings
@@ -352,7 +353,11 @@ async def test_each_stored_probe_is_counted_with_its_outcome(
         monkeypatch.setattr(
             latency_probe,
             "_get_tts_providers",
-            lambda: {"acme": _tts_provider(RuntimeError("rejected: HTTP 401"), [])},
+            lambda: {
+                "acme": _tts_provider(
+                    _tts_result(ttfa_ms=None, error="request failed", status_code=401), []
+                )
+            },
         )
         await latency_probe.run_latency_probes(settings=_SETTINGS, kind="tts")
         data = reader.get_metrics_data()
@@ -370,6 +375,24 @@ async def test_each_stored_probe_is_counted_with_its_outcome(
         if isinstance(point, NumberDataPoint)
     }
     assert counted == {("fast-1", "auth"): 1, ("fast-2", "auth"): 1}
+
+
+async def test_a_run_logs_when_it_starts_and_what_it_did(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def insert(_pool: Any, _result: Any) -> bool:
+        return True
+
+    _wire_run(monkeypatch, insert)
+    with capture_logs() as logs:
+        await latency_probe.run_latency_probes(settings=_SETTINGS, kind="tts")
+
+    by_event = {entry["event"]: entry for entry in logs}
+    assert (by_event["latency_probe_run_started"]["models"], logs[0]["event"]) == (
+        2,
+        "latency_probe_run_started",
+    )
+    finished = by_event["latency_probe_run_finished"]
+    assert (finished["probed"], finished["stored"], finished["failed"]) == (2, 2, 0)
+    assert logs[-1]["event"] == "latency_probe_run_finished"
 
 
 async def test_one_failed_write_does_not_stop_the_other_models(

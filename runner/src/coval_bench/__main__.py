@@ -293,20 +293,6 @@ def probe_latency(kind: str, selectors: tuple[str, ...]) -> None:
             only=frozenset(selectors) or None,
         )
     )
-    click.echo(
-        json.dumps(
-            {
-                "event": "latency_probes",
-                "kind": kind,
-                "scheduled_at": summary.scheduled_at.isoformat(),
-                "probed": summary.probed,
-                "stored": summary.stored,
-                "failed": summary.failed,
-                "skipped": summary.skipped,
-                "errored": summary.errored,
-            }
-        )
-    )
     if summary.probed == 0:
         raise click.ClickException("no models to probe")
     if summary.stored == 0 and summary.skipped == 0:
@@ -335,8 +321,6 @@ def sweep(kind: str, selectors: tuple[str, ...], max_minutes: float) -> None:
     its items, then sends the queued items to the provider and stores the
     results. Safe to stop and rerun: an item with a result is never run again.
     """
-    from dataclasses import asdict
-
     from coval_bench.config import get_settings
     from coval_bench.runner.sweep import run_sweeps
 
@@ -348,7 +332,6 @@ def sweep(kind: str, selectors: tuple[str, ...], max_minutes: float) -> None:
             max_minutes=max_minutes,
         )
     )
-    click.echo(json.dumps({"event": "sweeps", "kind": kind, **asdict(summary)}))
     if summary.models == 0:
         raise click.ClickException("no models to sweep")
 

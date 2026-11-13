@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -86,12 +86,22 @@ class SweepSummary:
     completed: int = 0
 
 
+_PROGRESS_EVERY_S = 600.0
+
+
+@dataclass
+class _Progress:
+    next_at: float
+
+
 @dataclass(frozen=True)
 class _Output:
     transcript: str | None = None
     timings: dict[str, Any] = field(default_factory=dict)
     audio_uri: str | None = None
     error: str | None = None
+    status_code: int | None = None
+    failed_at: Literal["provider", "whisper", "upload"] = "provider"
 
 
 def _stt_items(manifest: Manifest) -> list[STTManifestItem]:
@@ -219,18 +229,18 @@ async def _run_tts(
     audio_path = result.audio_path
     try:
         if result.error:
-            return _Output(timings=timings, error=result.error)
+            return _Output(timings=timings, error=result.error, status_code=result.status_code)
         if audio_path is None or not audio_path.exists():
             return _Output(timings=timings, error="no audio produced")
         try:
             transcript = await _transcribe_with_whisper(audio_path, settings)
         except Exception as exc:
-            return _Output(timings=timings, error=_truncate(f"whisper: {exc}"))
+            return _Output(timings=timings, error=_truncate(f"whisper: {exc}"), failed_at="whisper")
         key = f"sweeps/{sweep_id}/{item.sample_id}/{item.voice}{audio_path.suffix}"
         try:
             audio_uri = await asyncio.to_thread(upload, key, audio_path)
         except Exception as exc:
-            return _Output(timings=timings, error=_truncate(f"upload: {exc}"))
+            return _Output(timings=timings, error=_truncate(f"upload: {exc}"), failed_at="upload")
         return _Output(transcript=transcript, timings=timings, audio_uri=audio_uri)
     finally:
         if audio_path is not None:
@@ -247,8 +257,10 @@ async def _work_sweep(
     pool: Any,  # noqa: ANN401 — the connection pool
     deadline: float,
     summary: SweepSummary,
+    progress: _Progress,
 ) -> bool:
     """Run a sweep's queued items until they're done or time is up. False when time ran out."""
+    loop = asyncio.get_running_loop()
     if kind == "stt":
         fetch = stt_item_fetcher(sweep.dataset_id, settings=settings)
         run = partial(_run_stt, entry, fetch=fetch, settings=settings, pool=pool)
@@ -268,24 +280,32 @@ async def _work_sweep(
         dataset=sweep.dataset_id,
         sweep_id=sweep.id,
     )
-    for item in _items(kind, entry, manifest):
-        if (item.sample_id, item.voice) not in queued:
-            continue
-        if asyncio.get_running_loop().time() >= deadline:
+    pending = [i for i in _items(kind, entry, manifest) if (i.sample_id, i.voice) in queued]
+    for done, item in enumerate(pending):
+        if loop.time() >= deadline:
             return False
+        if loop.time() >= progress.next_at:
+            progress.next_at = loop.time() + _PROGRESS_EVERY_S
+            sweep_log.info(
+                "sweep_progress",
+                left=len(pending) - done,
+                called=summary.called,
+                failed=summary.failed,
+                scored=summary.scored,
+            )
         log = sweep_log.bind(sample_id=item.sample_id, voice=item.voice)
         output = await run(item, log=log)
         if output is None:
             continue
         summary.called += 1
-        whisper = output.error is not None and output.error.startswith("whisper:")
+        whisper = output.failed_at == "whisper"
         telemetry.record_sweep_item(
             kind=kind,
             provider="openai" if whisper else entry.provider,
             model="whisper-1" if whisper else entry.model,
-            outcome=telemetry.outcome(
-                output.error, ours=whisper or (output.error or "").startswith("upload:")
-            ),
+            outcome="ours"
+            if output.failed_at == "upload"
+            else telemetry.outcome(output.error, status_code=output.status_code, ours=whisper),
         )
         if output.error is not None:
             summary.failed += 1
@@ -321,6 +341,28 @@ async def _work_sweep(
     return True
 
 
+async def _report_queued(
+    kind: Kind,
+    pool: Any,  # noqa: ANN401 — the connection pool
+    model_ids: list[int],
+    manifests: dict[str, Manifest],
+) -> None:
+    """Report what every current sweep of *kind* has queued, not just this run's models.
+
+    Runs on the way out of every run, so it never raises over whatever ended the run.
+    """
+    try:
+        current = [
+            sweep.id
+            for sweep in await unfinished_sweeps(pool, model_ids)
+            if sweep.dataset_id in manifests
+            and manifests[sweep.dataset_id].version == sweep.dataset_version
+        ]
+        telemetry.record_sweep_queued(kind=kind, queued=await queued_count(pool, current))
+    except Exception:
+        logger.warning("sweep_queue_not_reported", exc_info=True)
+
+
 async def run_sweeps(
     *,
     settings: Settings,
@@ -333,7 +375,8 @@ async def run_sweeps(
     datasets = SWEEP_STT_DATASETS if kind == "stt" else SWEEP_TTS_DATASETS
     summary = SweepSummary()
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + max_minutes * 60
+    started = loop.time()
+    deadline = started + max_minutes * 60
     async with lifespan_pool(settings) as pool:
         records = [r for r in await RegistryStore(pool).list_models() if r.modality is benchmark]
         ids = {(r.provider, r.model): r.id for r in records}
@@ -372,6 +415,17 @@ async def run_sweeps(
                 entry = entries[sweep.model_id]
                 key = model_lock_key(entry, providers.get(entry.provider))
                 by_claim.setdefault(key, []).append(sweep)
+            sweep_ids = [sweep.id for sweeps in by_claim.values() for sweep in sweeps]
+            logger.info(
+                "sweep_run_started",
+                kind=kind,
+                models=len(models),
+                opened=summary.opened,
+                sweeps=len(sweep_ids),
+                queued=await queued_count(pool, sweep_ids),
+                max_minutes=max_minutes,
+            )
+            progress = _Progress(next_at=loop.time() + _PROGRESS_EVERY_S)
             in_time = True
             for key, sweeps in by_claim.items():
                 if not in_time:
@@ -390,11 +444,19 @@ async def run_sweeps(
                             pool=pool,
                             deadline=deadline,
                             summary=summary,
+                            progress=progress,
                         )
                         if not in_time:
                             break
-            sweep_ids = [sweep.id for sweeps in by_claim.values() for sweep in sweeps]
-            telemetry.record_sweep_queued(kind=kind, queued=await queued_count(pool, sweep_ids))
+            logger.info(
+                "sweep_run_finished",
+                kind=kind,
+                **asdict(summary),
+                queued=await queued_count(pool, sweep_ids),
+                duration_s=round(loop.time() - started, 1),
+                stopped="finished" if in_time else "out_of_time",
+            )
         finally:
+            await _report_queued(kind, pool, [r.id for r in records], manifests)
             await _close_http_clients()
     return summary

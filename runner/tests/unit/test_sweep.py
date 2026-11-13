@@ -15,6 +15,7 @@ from typing import Any, cast
 import pytest
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader, NumberDataPoint
 from pytest_postgresql.factories import postgresql
+from structlog.testing import capture_logs
 
 from coval_bench import telemetry
 from coval_bench.config import Settings
@@ -342,13 +343,98 @@ async def test_a_model_another_run_has_claimed_is_skipped_until_it_is_free(
     assert (freed.called, freed.completed) == (2, 1)
 
 
-async def test_a_run_reports_each_items_outcome_and_what_it_left_queued(
-    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def _points(reader: InMemoryMetricReader) -> dict[tuple[str, Any, Any], Any]:
+    """{(metric name, provider, outcome): value} for everything reported so far."""
+    data = reader.get_metrics_data()
+    assert data is not None
+    return {
+        (metric.name, (p.attributes or {}).get("provider"), (p.attributes or {}).get("outcome")): (
+            p.value
+        )
+        for rm in data.resource_metrics
+        for sm in rm.scope_metrics
+        for metric in sm.metrics
+        for p in metric.data.data_points
+        if isinstance(p, NumberDataPoint)
+    }
+
+
+def _metrics() -> InMemoryMetricReader:
     reader = InMemoryMetricReader()
     telemetry.configure_metrics(
         Settings(database_url="postgresql://u:p@localhost:5432/x"), readers=[reader]
     )
+    return reader
+
+
+async def test_the_queue_is_reported_for_every_model_even_when_a_limited_run_raises(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def boom(*_args: Any, **_kwargs: Any) -> bool:
+        raise RuntimeError("boom")
+
+    reader = _metrics()
+    pool = await _pool_with_model(pg_conn)
+    try:
+        other = NewModel(modality=Benchmark.STT, provider="acme", model="fast-2")
+        await RegistryStore(pool).insert_model(other, user_id="u", org_id=None, email=None)
+        _wire(monkeypatch, tmp_path, pool, {"ds-1": "1.0.0"})
+        both = frozenset({"acme/fast-1", "acme/fast-2"})
+        await sweep.run_sweeps(settings=_SETTINGS, kind="stt", only=both, max_minutes=0)
+        monkeypatch.setattr(sweep, "_work_sweep", boom)
+        with pytest.raises(RuntimeError, match="boom"):
+            await _run()
+        points = _points(reader)
+    finally:
+        await pool.close()
+        telemetry.shutdown_metrics()
+
+    assert points == {(telemetry.SWEEP_QUEUED_GAUGE, None, None): 4}
+
+
+async def test_a_failed_upload_is_ours_whatever_its_error_says(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def whisper(_path: Path, _settings: Any) -> str:
+        return "good morning"
+
+    def upload(_key: str, _path: Path) -> str:
+        raise OSError("403 Forbidden: billing quota exceeded")
+
+    reader = _metrics()
+    pool, _ = await _tts(pg_conn, monkeypatch, tmp_path, whisper, upload)
+    try:
+        await _run(kind="tts")
+        points = _points(reader)
+    finally:
+        await pool.close()
+        telemetry.shutdown_metrics()
+
+    assert points[(telemetry.SWEEP_ITEMS_COUNTER, "acme", "ours")] == 2
+
+
+async def test_a_failed_whisper_call_is_counted_against_whisper(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def whisper(_path: Path, _settings: Any) -> str:
+        raise RuntimeError("Error code: 429 - insufficient_quota")
+
+    reader = _metrics()
+    pool, _ = await _tts(pg_conn, monkeypatch, tmp_path, whisper)
+    try:
+        await _run(kind="tts")
+        points = _points(reader)
+    finally:
+        await pool.close()
+        telemetry.shutdown_metrics()
+
+    assert points[(telemetry.SWEEP_ITEMS_COUNTER, "openai", "credit")] == 2
+
+
+async def test_a_run_reports_each_items_outcome_and_what_it_left_queued(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    reader = _metrics()
     pool = await _pool_with_model(pg_conn)
     try:
         _wire(
@@ -359,25 +445,57 @@ async def test_a_run_reports_each_items_outcome_and_what_it_left_queued(
             lambda n: RuntimeError("rejected: HTTP 401") if n == 1 else "hello world",
         )
         await _run()
-        data = reader.get_metrics_data()
+        points = _points(reader)
     finally:
         await pool.close()
         telemetry.shutdown_metrics()
 
-    assert data is not None
-    points = {
-        (metric.name, (point.attributes or {}).get("outcome")): point.value
-        for rm in data.resource_metrics
-        for sm in rm.scope_metrics
-        for metric in sm.metrics
-        for point in metric.data.data_points
-        if isinstance(point, NumberDataPoint)
-    }
     assert points == {
-        (telemetry.SWEEP_ITEMS_COUNTER, "auth"): 1,
-        (telemetry.SWEEP_ITEMS_COUNTER, "ok"): 1,
-        (telemetry.SWEEP_QUEUED_GAUGE, None): 1,
+        (telemetry.SWEEP_ITEMS_COUNTER, "acme", "auth"): 1,
+        (telemetry.SWEEP_ITEMS_COUNTER, "acme", "ok"): 1,
+        (telemetry.SWEEP_QUEUED_GAUGE, None, None): 1,
     }
+
+
+async def test_a_run_logs_what_it_found_its_progress_and_why_it_stopped(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pool = await _pool_with_model(pg_conn)
+    try:
+        _wire(monkeypatch, tmp_path, pool, {"ds-1": "1.0.0"})
+        monkeypatch.setattr(sweep, "_PROGRESS_EVERY_S", 0.0)
+        with capture_logs() as cut_short:
+            await _run(max_minutes=0)
+        with capture_logs() as whole:
+            await _run()
+    finally:
+        await pool.close()
+
+    def line(logs: list[Any], event: str) -> dict[str, Any]:
+        (found,) = [entry for entry in logs if entry["event"] == event]
+        return {k: v for k, v in found.items() if k not in ("event", "log_level", "duration_s")}
+
+    assert line(cut_short, "sweep_run_started") == {
+        "kind": "stt",
+        "models": 1,
+        "opened": 1,
+        "sweeps": 1,
+        "queued": 2,
+        "max_minutes": 0,
+    }
+    assert line(cut_short, "sweep_run_finished")["stopped"] == "out_of_time"
+    assert line(whole, "sweep_run_finished") == {
+        "kind": "stt",
+        "models": 1,
+        "opened": 0,
+        "called": 2,
+        "failed": 0,
+        "scored": 2,
+        "completed": 1,
+        "queued": 0,
+        "stopped": "finished",
+    }
+    assert [entry["left"] for entry in whole if entry["event"] == "sweep_progress"] == [2, 1]
 
 
 async def _tts(
