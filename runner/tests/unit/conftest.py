@@ -52,7 +52,7 @@ async def open_pool(conn: psycopg.Connection[Any]) -> AsyncConnectionPool[Any]:
     pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
         conninfo=async_dsn(conn),
         min_size=1,
-        max_size=2,
+        max_size=4,
         open=False,
         kwargs={"autocommit": True, "row_factory": psycopg.rows.dict_row},
     )

@@ -16,6 +16,7 @@ import pytest
 from pytest_postgresql.factories import postgresql
 
 from coval_bench.config import Settings
+from coval_bench.db.model_lock import model_claim
 from coval_bench.db.registry_store import NewModel, RegistryStore
 from coval_bench.providers.base import TranscriptionResult, TTSResult
 from coval_bench.registries import Benchmark, Gender, Voice
@@ -319,6 +320,24 @@ async def test_an_item_whose_model_is_busy_keeps_its_tries(
 
 def _stored(key: str, _path: Path) -> str:
     return f"gs://artifacts/{key}"
+
+
+async def test_a_model_another_run_has_claimed_is_skipped_until_it_is_free(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pool = await _pool_with_model(pg_conn)
+    try:
+        calls = _wire(monkeypatch, tmp_path, pool, {"ds-1": "1.0.0"})
+        async with model_claim(pool, "model_lock:acme/fast-1") as claimed:
+            skipped = await _run()
+            calls_while_claimed = len(calls)
+        freed = await _run()
+    finally:
+        await pool.close()
+
+    assert claimed is True
+    assert (skipped.opened, skipped.called, skipped.completed, calls_while_claimed) == (1, 0, 0, 0)
+    assert (freed.called, freed.completed) == (2, 1)
 
 
 async def _tts(

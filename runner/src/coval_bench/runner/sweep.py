@@ -12,6 +12,8 @@ while it has tries left. A run stops starting new items when its time is up,
 and the next run carries on from the queue.
 
 Each provider call holds the model lock, the same one the latency probe takes.
+A run also claims a model for as long as it works on it and skips one another
+run has claimed, so several runs started together spread across models.
 A clean transcript is scored for WER as soon as it's stored. For TTS the
 transcript is Whisper's reading of the synthesized audio, and the audio is
 kept in the artifact bucket.
@@ -33,10 +35,11 @@ from coval_bench.config import require_capture_bucket
 from coval_bench.datasets.loader import dataset_manifest, stt_item_fetcher
 from coval_bench.datasets.suite import SWEEP_STT_DATASETS, SWEEP_TTS_DATASETS
 from coval_bench.db.conn import lifespan_pool
-from coval_bench.db.model_lock import model_lock, model_lock_key
+from coval_bench.db.model_lock import model_claim, model_lock, model_lock_key
 from coval_bench.db.registry_store import RegistryStore, _registered
 from coval_bench.db.sweep_store import (
     Score,
+    Sweep,
     complete_sweep,
     open_sweeps,
     queued_items,
@@ -233,6 +236,81 @@ async def _run_tts(
             audio_path.unlink(missing_ok=True)
 
 
+async def _work_sweep(
+    kind: Kind,
+    entry: RegisteredModel,
+    sweep: Sweep,
+    manifest: Manifest,
+    *,
+    settings: Settings,
+    pool: Any,  # noqa: ANN401 — the connection pool
+    deadline: float,
+    summary: SweepSummary,
+) -> bool:
+    """Run a sweep's queued items until they're done or time is up. False when time ran out."""
+    if kind == "stt":
+        fetch = stt_item_fetcher(sweep.dataset_id, settings=settings)
+        run = partial(_run_stt, entry, fetch=fetch, settings=settings, pool=pool)
+    else:
+        run = partial(
+            _run_tts,
+            entry,
+            sweep_id=sweep.id,
+            upload=_uploader(settings),
+            settings=settings,
+            pool=pool,
+        )
+    queued = await queued_items(pool, sweep.id)
+    sweep_log = logger.bind(
+        provider=entry.provider,
+        model=entry.model,
+        dataset=sweep.dataset_id,
+        sweep_id=sweep.id,
+    )
+    for item in _items(kind, entry, manifest):
+        if (item.sample_id, item.voice) not in queued:
+            continue
+        if asyncio.get_running_loop().time() >= deadline:
+            return False
+        log = sweep_log.bind(sample_id=item.sample_id, voice=item.voice)
+        output = await run(item, log=log)
+        if output is None:
+            continue
+        summary.called += 1
+        if output.error is not None:
+            summary.failed += 1
+            await record_failure(
+                pool,
+                sweep_id=sweep.id,
+                sample_id=item.sample_id,
+                voice=item.voice,
+                error=output.error,
+            )
+            log.warning("sweep_item_failed", error=output.error)
+            continue
+        result_id = await store_result(
+            pool,
+            sweep_id=sweep.id,
+            sample_id=item.sample_id,
+            voice=item.voice,
+            transcript=output.transcript,
+            timings=output.timings,
+            audio_uri=output.audio_uri,
+        )
+        if result_id is not None and output.transcript is not None:
+            try:
+                score = _wer_score(item.reference, output.transcript)
+            except Exception:
+                log.exception("sweep_item_not_scored")
+            else:
+                await store_score(pool, result_id, score)
+                summary.scored += 1
+    if await complete_sweep(pool, sweep.id):
+        summary.completed += 1
+        sweep_log.info("sweep_completed", items=len(manifest.items))
+    return True
+
+
 async def run_sweeps(
     *,
     settings: Settings,
@@ -275,72 +353,33 @@ async def run_sweeps(
             ],
         )
 
+        providers = _get_stt_providers() if kind == "stt" else _get_tts_providers()
         try:
+            by_claim: dict[str, list[Sweep]] = {}
             for sweep in await unfinished_sweeps(pool, list(entries)):
-                manifest = manifests[sweep.dataset_id]
-                if manifest.version != sweep.dataset_version:
+                if manifests[sweep.dataset_id].version != sweep.dataset_version:
                     continue
                 entry = entries[sweep.model_id]
-                if kind == "stt":
-                    fetch = stt_item_fetcher(sweep.dataset_id, settings=settings)
-                    run = partial(_run_stt, entry, fetch=fetch, settings=settings, pool=pool)
-                else:
-                    run = partial(
-                        _run_tts,
-                        entry,
-                        sweep_id=sweep.id,
-                        upload=_uploader(settings),
-                        settings=settings,
-                        pool=pool,
-                    )
-                queued = await queued_items(pool, sweep.id)
-                sweep_log = logger.bind(
-                    provider=entry.provider,
-                    model=entry.model,
-                    dataset=sweep.dataset_id,
-                    sweep_id=sweep.id,
-                )
-                for item in _items(kind, entry, manifest):
-                    if (item.sample_id, item.voice) not in queued:
+                key = model_lock_key(entry, providers.get(entry.provider))
+                by_claim.setdefault(key, []).append(sweep)
+            for key, sweeps in by_claim.items():
+                async with model_claim(pool, key) as claimed:
+                    if not claimed:
+                        logger.info("sweep_model_skipped", claim=key, reason="another run has it")
                         continue
-                    if loop.time() >= deadline:
-                        return summary
-                    log = sweep_log.bind(sample_id=item.sample_id, voice=item.voice)
-                    output = await run(item, log=log)
-                    if output is None:
-                        continue
-                    summary.called += 1
-                    if output.error is not None:
-                        summary.failed += 1
-                        await record_failure(
-                            pool,
-                            sweep_id=sweep.id,
-                            sample_id=item.sample_id,
-                            voice=item.voice,
-                            error=output.error,
+                    for sweep in sweeps:
+                        in_time = await _work_sweep(
+                            kind,
+                            entries[sweep.model_id],
+                            sweep,
+                            manifests[sweep.dataset_id],
+                            settings=settings,
+                            pool=pool,
+                            deadline=deadline,
+                            summary=summary,
                         )
-                        log.warning("sweep_item_failed", error=output.error)
-                        continue
-                    result_id = await store_result(
-                        pool,
-                        sweep_id=sweep.id,
-                        sample_id=item.sample_id,
-                        voice=item.voice,
-                        transcript=output.transcript,
-                        timings=output.timings,
-                        audio_uri=output.audio_uri,
-                    )
-                    if result_id is not None and output.transcript is not None:
-                        try:
-                            score = _wer_score(item.reference, output.transcript)
-                        except Exception:
-                            log.exception("sweep_item_not_scored")
-                        else:
-                            await store_score(pool, result_id, score)
-                            summary.scored += 1
-                if await complete_sweep(pool, sweep.id):
-                    summary.completed += 1
-                    sweep_log.info("sweep_completed", items=len(manifest.items))
+                        if not in_time:
+                            return summary
         finally:
             await _close_http_clients()
     return summary
