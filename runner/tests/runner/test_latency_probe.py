@@ -438,7 +438,7 @@ async def test_a_reported_401_is_our_failure(monkeypatch: pytest.MonkeyPatch) ->
 
     result, _ = await _probe_tts(monkeypatch, outcome)
 
-    assert (result.status, result.failure_origin) == ("failed", "runner")
+    assert (result.status, result.failure_origin, result.status_code) == ("failed", "runner", 401)
 
 
 async def test_a_providers_own_timeout_is_not_reported_as_ours(

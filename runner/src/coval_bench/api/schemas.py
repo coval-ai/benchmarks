@@ -638,6 +638,37 @@ class AdminPricingResponse(BaseModel):
     models: list[AdminModelPricingOut]
 
 
+class AdminProbeFailureOut(BaseModel):
+    """A model's latest failed probe."""
+
+    at: datetime
+    kind: Literal["auth", "credit", "rate_limit", "timeout", "other"]
+    origin: Literal["provider", "runner"]
+    status_code: int | None
+    error: str
+
+
+class AdminModelHealthOut(BaseModel):
+    """One model's latency probes over the last 24 hours."""
+
+    model_id: int
+    modality: str
+    provider: str
+    model: str
+    healthy: bool
+    probe_count: int
+    failed_count: int
+    last_probe_at: datetime
+    last_success_at: datetime | None
+    last_failure: AdminProbeFailureOut | None
+
+
+class AdminHealthResponse(BaseModel):
+    """Response schema for GET /v1/admin/health."""
+
+    models: list[AdminModelHealthOut]
+
+
 class AdminRateCreate(BaseModel):
     """POST body for /v1/admin/pricing: ``unit`` + ``price_usd`` (decimal string) for a
     published rate, neither for a delisting; ``effective_from`` defaults to today (UTC)."""
