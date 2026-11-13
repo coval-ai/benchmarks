@@ -128,6 +128,17 @@ async def queued_items(pool: Pool, sweep_id: int) -> set[tuple[str, str]]:
     return {(row["sample_id"], row["voice"]) for row in rows}
 
 
+async def queued_count(pool: Pool, sweep_ids: Sequence[int]) -> int:
+    """How many items *sweep_ids* still have queued with tries left."""
+    sql = """
+        SELECT count(*) AS queued FROM benchmarks_v2.sweep_queue
+        WHERE sweep_id = ANY(%s) AND tries_left > 0
+    """
+    async with pool.connection() as conn:
+        row = await (await conn.execute(sql, (list(sweep_ids),))).fetchone()
+    return int(row["queued"])
+
+
 async def store_result(
     pool: Pool,
     *,

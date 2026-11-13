@@ -133,3 +133,37 @@ def test_shutdown_is_idempotent() -> None:
 def test_console_exporter_configures() -> None:
     telemetry.configure_metrics(_settings(otel_metrics_exporter="console"))
     assert telemetry._provider is not None
+
+
+@pytest.mark.parametrize(
+    ("error", "ours", "expected"),
+    [
+        (None, False, "ok"),
+        ("server rejected WebSocket connection: HTTP 401", False, "auth"),
+        ("task_failed: [1008] insufficient balance", False, "credit"),
+        ("429 Too Many Requests", False, "rate_limit"),
+        ("upstream 503", False, "provider"),
+        ("TTFA measured over a cold connection", True, "ours"),
+        ("whisper: 429 Too Many Requests", True, "rate_limit"),
+    ],
+)
+def test_an_outcome_names_what_went_wrong(error: str | None, ours: bool, expected: str) -> None:
+    assert telemetry.outcome(error, ours=ours) == expected
+
+
+def test_probe_and_sweep_outcomes_are_counted_and_the_queue_is_reported() -> None:
+    reader = InMemoryMetricReader()
+    telemetry.configure_metrics(_settings(), readers=[reader])
+
+    telemetry.record_probe(kind="STT", provider="Deepgram", model="Nova-3", outcome="ok")
+    telemetry.record_sweep_item(kind="tts", provider="rime", model="arcana", outcome="credit")
+    telemetry.record_sweep_queued(kind="TTS", queued=12)
+    telemetry.record_sweep_queued(kind="TTS", queued=7)
+
+    assert sums(reader, telemetry.PROBES_COUNTER) == {
+        (("kind", "stt"), ("model", "nova-3"), ("outcome", "ok"), ("provider", "deepgram")): 1
+    }
+    assert sums(reader, telemetry.SWEEP_ITEMS_COUNTER) == {
+        (("kind", "tts"), ("model", "arcana"), ("outcome", "credit"), ("provider", "rime")): 1
+    }
+    assert sums(reader, telemetry.SWEEP_QUEUED_GAUGE) == {(("kind", "tts"),): 7}
