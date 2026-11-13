@@ -252,6 +252,7 @@ class Settings(BaseSettings):
     vapi_api_key: SecretStr | None = None
     telnyx_api_key: SecretStr | None = None
     retell_api_key: SecretStr | None = None
+    retell_llm_api_key: SecretStr | None = None
     # --- Mock tools appliance ---
     # The shared secret every platform's tool runner presents. Absent means the
     # endpoint refuses every call: an open mock would let anyone write rows into
