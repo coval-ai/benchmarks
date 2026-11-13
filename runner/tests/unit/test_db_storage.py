@@ -104,7 +104,7 @@ async def _observation(
 
 
 async def _evaluation(
-    writer: RunWriter, observation: Observation, *, metric: Metric = Metric.WER
+    writer: RunWriter, observation: Observation, *, metric: Metric | str = Metric.WER
 ) -> MetricEvaluation:
     queued = await writer.insert_metric_evaluation(
         MetricEvaluation(

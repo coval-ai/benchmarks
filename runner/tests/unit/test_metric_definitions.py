@@ -23,7 +23,7 @@ from .conftest import apply_migrations, open_pool
 metric_pg = postgresql("pg_proc")
 
 # seeded codes the registry doesn't have; metric rows can't be deleted
-_RETIRED = {"SemDistMiniLM": "SemDist (MiniLM)"}
+_RETIRED = {"SemDistMiniLM": "SemDist (MiniLM)", "JudgeJev": "JudgeJev"}
 
 _INSERT_BUCKET = """
 INSERT INTO benchmarks_v2.dashboard_rollups

@@ -19,7 +19,7 @@ from coval_bench.db.dashboard_rollups import (
 )
 from coval_bench.db.models import MetricValue, RunStatus
 from coval_bench.db.writer import RunWriter
-from coval_bench.registries import Benchmark, Metric, MetricValueRole
+from coval_bench.registries import Benchmark, MetricValueRole
 from coval_bench.s2s.conditions import (
     PLATFORM_SLUGS,
     ROOMS,
@@ -298,7 +298,7 @@ async def test_fill_keeps_word_sums_off_metrics_that_only_store_reference_words(
     try:
         writer = RunWriter(pool)
         run_id, observation = await storage._observation(writer, sample="a")
-        evaluation = await storage._evaluation(writer, observation, metric=Metric.JUDGE_JEV)
+        evaluation = await storage._evaluation(writer, observation, metric="JudgeJev")
         evaluation_id = storage._required(evaluation.id)
         values = [
             MetricValue(
