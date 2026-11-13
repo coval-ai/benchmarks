@@ -92,6 +92,8 @@ class _Output:
     timings: dict[str, Any] = field(default_factory=dict)
     audio_uri: str | None = None
     error: str | None = None
+    status_code: int | None = None
+    failed_at: Literal["provider", "whisper", "upload"] = "provider"
 
 
 def _stt_items(manifest: Manifest) -> list[STTManifestItem]:
@@ -219,18 +221,18 @@ async def _run_tts(
     audio_path = result.audio_path
     try:
         if result.error:
-            return _Output(timings=timings, error=result.error)
+            return _Output(timings=timings, error=result.error, status_code=result.status_code)
         if audio_path is None or not audio_path.exists():
             return _Output(timings=timings, error="no audio produced")
         try:
             transcript = await _transcribe_with_whisper(audio_path, settings)
         except Exception as exc:
-            return _Output(timings=timings, error=_truncate(f"whisper: {exc}"))
+            return _Output(timings=timings, error=_truncate(f"whisper: {exc}"), failed_at="whisper")
         key = f"sweeps/{sweep_id}/{item.sample_id}/{item.voice}{audio_path.suffix}"
         try:
             audio_uri = await asyncio.to_thread(upload, key, audio_path)
         except Exception as exc:
-            return _Output(timings=timings, error=_truncate(f"upload: {exc}"))
+            return _Output(timings=timings, error=_truncate(f"upload: {exc}"), failed_at="upload")
         return _Output(transcript=transcript, timings=timings, audio_uri=audio_uri)
     finally:
         if audio_path is not None:
@@ -278,14 +280,14 @@ async def _work_sweep(
         if output is None:
             continue
         summary.called += 1
-        whisper = output.error is not None and output.error.startswith("whisper:")
+        whisper = output.failed_at == "whisper"
         telemetry.record_sweep_item(
             kind=kind,
             provider="openai" if whisper else entry.provider,
             model="whisper-1" if whisper else entry.model,
-            outcome=telemetry.outcome(
-                output.error, ours=whisper or (output.error or "").startswith("upload:")
-            ),
+            outcome="ours"
+            if output.failed_at == "upload"
+            else telemetry.outcome(output.error, status_code=output.status_code, ours=whisper),
         )
         if output.error is not None:
             summary.failed += 1
@@ -319,6 +321,28 @@ async def _work_sweep(
         summary.completed += 1
         sweep_log.info("sweep_completed", items=len(manifest.items))
     return True
+
+
+async def _report_queued(
+    kind: Kind,
+    pool: Any,  # noqa: ANN401 — the connection pool
+    model_ids: list[int],
+    manifests: dict[str, Manifest],
+) -> None:
+    """Report what every current sweep of *kind* has queued, not just this run's models.
+
+    Runs on the way out of every run, so it never raises over whatever ended the run.
+    """
+    try:
+        current = [
+            sweep.id
+            for sweep in await unfinished_sweeps(pool, model_ids)
+            if sweep.dataset_id in manifests
+            and manifests[sweep.dataset_id].version == sweep.dataset_version
+        ]
+        telemetry.record_sweep_queued(kind=kind, queued=await queued_count(pool, current))
+    except Exception:
+        logger.warning("sweep_queue_not_reported", exc_info=True)
 
 
 async def run_sweeps(
@@ -393,8 +417,7 @@ async def run_sweeps(
                         )
                         if not in_time:
                             break
-            sweep_ids = [sweep.id for sweeps in by_claim.values() for sweep in sweeps]
-            telemetry.record_sweep_queued(kind=kind, queued=await queued_count(pool, sweep_ids))
         finally:
+            await _report_queued(kind, pool, [r.id for r in records], manifests)
             await _close_http_clients()
     return summary

@@ -352,7 +352,11 @@ async def test_each_stored_probe_is_counted_with_its_outcome(
         monkeypatch.setattr(
             latency_probe,
             "_get_tts_providers",
-            lambda: {"acme": _tts_provider(RuntimeError("rejected: HTTP 401"), [])},
+            lambda: {
+                "acme": _tts_provider(
+                    _tts_result(ttfa_ms=None, error="request failed", status_code=401), []
+                )
+            },
         )
         await latency_probe.run_latency_probes(settings=_SETTINGS, kind="tts")
         data = reader.get_metrics_data()

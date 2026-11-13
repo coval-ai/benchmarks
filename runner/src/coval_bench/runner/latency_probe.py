@@ -279,7 +279,11 @@ async def run_latency_probes(
                     kind=kind,
                     provider=entry.provider,
                     model=entry.model,
-                    outcome=telemetry.outcome(result.error, ours=result.failure_origin == "runner"),
+                    outcome=telemetry.outcome(
+                        result.error,
+                        status_code=result.status_code,
+                        ours=result.failure_origin == "runner",
+                    ),
                 )
                 log.info(
                     "latency_probe",
