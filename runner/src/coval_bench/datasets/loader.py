@@ -284,7 +284,7 @@ def _fetch_verified(
             return local_path
         logger.warning("cached_file_hash_mismatch", path=str(local_path))
 
-    logger.info("fetching_dataset_object", bucket=bucket, object=object_path)
+    logger.debug("fetching_dataset_object", bucket=bucket, object=object_path)
     _fetch_blob(client, bucket, object_path, local_path)
 
     actual = _sha256_file(local_path)

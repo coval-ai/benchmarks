@@ -15,6 +15,7 @@ from typing import Any, cast
 import pytest
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader, NumberDataPoint
 from pytest_postgresql.factories import postgresql
+from structlog.testing import capture_logs
 
 from coval_bench import telemetry
 from coval_bench.config import Settings
@@ -454,6 +455,47 @@ async def test_a_run_reports_each_items_outcome_and_what_it_left_queued(
         (telemetry.SWEEP_ITEMS_COUNTER, "acme", "ok"): 1,
         (telemetry.SWEEP_QUEUED_GAUGE, None, None): 1,
     }
+
+
+async def test_a_run_logs_what_it_found_its_progress_and_why_it_stopped(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pool = await _pool_with_model(pg_conn)
+    try:
+        _wire(monkeypatch, tmp_path, pool, {"ds-1": "1.0.0"})
+        monkeypatch.setattr(sweep, "_PROGRESS_EVERY_S", 0.0)
+        with capture_logs() as cut_short:
+            await _run(max_minutes=0)
+        with capture_logs() as whole:
+            await _run()
+    finally:
+        await pool.close()
+
+    def line(logs: list[Any], event: str) -> dict[str, Any]:
+        (found,) = [entry for entry in logs if entry["event"] == event]
+        return {k: v for k, v in found.items() if k not in ("event", "log_level", "duration_s")}
+
+    assert line(cut_short, "sweep_run_started") == {
+        "kind": "stt",
+        "models": 1,
+        "opened": 1,
+        "sweeps": 1,
+        "queued": 2,
+        "max_minutes": 0,
+    }
+    assert line(cut_short, "sweep_run_finished")["stopped"] == "out_of_time"
+    assert line(whole, "sweep_run_finished") == {
+        "kind": "stt",
+        "models": 1,
+        "opened": 0,
+        "called": 2,
+        "failed": 0,
+        "scored": 2,
+        "completed": 1,
+        "queued": 0,
+        "stopped": "finished",
+    }
+    assert [entry["left"] for entry in whole if entry["event"] == "sweep_progress"] == [2, 1]
 
 
 async def _tts(
