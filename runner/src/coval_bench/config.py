@@ -212,8 +212,6 @@ class Settings(BaseSettings):
     meta_api_key: SecretStr | None = None
     krisp_api_key: SecretStr | None = None
     saidwire_api_key: SecretStr | None = None
-    # Scores JudgeJev; without it the metric is skipped.
-    typesafe_api_key: SecretStr | None = None
 
     # Azure region hosting the Speech resource (e.g. "eastus"). Determines the
     # region-scoped WebSocket host; required only when the Azure STT provider runs.

@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pytest
@@ -26,8 +25,6 @@ def pytest_configure(config: pytest.Config) -> None:
 
     # Before collection, so module-level Settings never read a developer's .env either.
     Settings.model_config["env_file"] = None
-    # A key exported in the shell would send test transcripts to Jev.
-    os.environ.pop("TYPESAFE_API_KEY", None)
 
     # The default renderer pretty-prints exc_info tracebacks through Rich, which
     # costs a quarter second or more per logged exception.
