@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 import structlog
 
-from coval_bench import gcs
+from coval_bench import gcs, telemetry
 from coval_bench.config import require_capture_bucket
 from coval_bench.datasets.loader import dataset_manifest, stt_item_fetcher
 from coval_bench.datasets.suite import SWEEP_STT_DATASETS, SWEEP_TTS_DATASETS
@@ -42,6 +42,7 @@ from coval_bench.db.sweep_store import (
     Sweep,
     complete_sweep,
     open_sweeps,
+    queued_count,
     queued_items,
     record_failure,
     store_result,
@@ -277,6 +278,15 @@ async def _work_sweep(
         if output is None:
             continue
         summary.called += 1
+        whisper = output.error is not None and output.error.startswith("whisper:")
+        telemetry.record_sweep_item(
+            kind=kind,
+            provider="openai" if whisper else entry.provider,
+            model="whisper-1" if whisper else entry.model,
+            outcome=telemetry.outcome(
+                output.error, ours=whisper or (output.error or "").startswith("upload:")
+            ),
+        )
         if output.error is not None:
             summary.failed += 1
             await record_failure(
@@ -362,7 +372,10 @@ async def run_sweeps(
                 entry = entries[sweep.model_id]
                 key = model_lock_key(entry, providers.get(entry.provider))
                 by_claim.setdefault(key, []).append(sweep)
+            in_time = True
             for key, sweeps in by_claim.items():
+                if not in_time:
+                    break
                 async with model_claim(pool, key) as claimed:
                     if not claimed:
                         logger.info("sweep_model_skipped", claim=key, reason="another run has it")
@@ -379,7 +392,9 @@ async def run_sweeps(
                             summary=summary,
                         )
                         if not in_time:
-                            return summary
+                            break
+            sweep_ids = [sweep.id for sweeps in by_claim.values() for sweep in sweeps]
+            telemetry.record_sweep_queued(kind=kind, queued=await queued_count(pool, sweep_ids))
         finally:
             await _close_http_clients()
     return summary

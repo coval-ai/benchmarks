@@ -13,8 +13,10 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader, NumberDataPoint
 from pytest_postgresql.factories import postgresql
 
+from coval_bench import telemetry
 from coval_bench.config import Settings
 from coval_bench.db.model_lock import model_claim
 from coval_bench.db.registry_store import NewModel, RegistryStore
@@ -338,6 +340,44 @@ async def test_a_model_another_run_has_claimed_is_skipped_until_it_is_free(
     assert claimed is True
     assert (skipped.opened, skipped.called, skipped.completed, calls_while_claimed) == (1, 0, 0, 0)
     assert (freed.called, freed.completed) == (2, 1)
+
+
+async def test_a_run_reports_each_items_outcome_and_what_it_left_queued(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    reader = InMemoryMetricReader()
+    telemetry.configure_metrics(
+        Settings(database_url="postgresql://u:p@localhost:5432/x"), readers=[reader]
+    )
+    pool = await _pool_with_model(pg_conn)
+    try:
+        _wire(
+            monkeypatch,
+            tmp_path,
+            pool,
+            {"ds-1": "1.0.0"},
+            lambda n: RuntimeError("rejected: HTTP 401") if n == 1 else "hello world",
+        )
+        await _run()
+        data = reader.get_metrics_data()
+    finally:
+        await pool.close()
+        telemetry.shutdown_metrics()
+
+    assert data is not None
+    points = {
+        (metric.name, (point.attributes or {}).get("outcome")): point.value
+        for rm in data.resource_metrics
+        for sm in rm.scope_metrics
+        for metric in sm.metrics
+        for point in metric.data.data_points
+        if isinstance(point, NumberDataPoint)
+    }
+    assert points == {
+        (telemetry.SWEEP_ITEMS_COUNTER, "auth"): 1,
+        (telemetry.SWEEP_ITEMS_COUNTER, "ok"): 1,
+        (telemetry.SWEEP_QUEUED_GAUGE, None): 1,
+    }
 
 
 async def _tts(

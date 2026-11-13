@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 
+from coval_bench import telemetry
 from coval_bench.arena.provider_health import classify_failure
 from coval_bench.datasets.loader import load_stt_dataset
 from coval_bench.db.conn import lifespan_pool
@@ -274,6 +275,12 @@ async def run_latency_probes(
                     continue
                 stored += 1
                 failed += result.error is not None
+                telemetry.record_probe(
+                    kind=kind,
+                    provider=entry.provider,
+                    model=entry.model,
+                    outcome=telemetry.outcome(result.error, ours=result.failure_origin == "runner"),
+                )
                 log.info(
                     "latency_probe",
                     status=result.status,

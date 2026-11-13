@@ -18,7 +18,9 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader, NumberDataPoint
 
+from coval_bench import telemetry
 from coval_bench.config import Settings
 from coval_bench.providers.base import TranscriptionResult, TTSResult
 from coval_bench.registries import METRIC_EXCLUSIONS, Benchmark, Metric, RegisteredModel
@@ -333,6 +335,41 @@ def _wire_run(monkeypatch: pytest.MonkeyPatch, insert: Any) -> None:
     monkeypatch.setattr(
         latency_probe, "_get_tts_providers", lambda: {"acme": _tts_provider(_tts_result(), [])}
     )
+
+
+async def test_each_stored_probe_is_counted_with_its_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def insert(_pool: Any, _result: Any) -> bool:
+        return True
+
+    reader = InMemoryMetricReader()
+    telemetry.configure_metrics(
+        Settings(database_url="postgresql://u:p@localhost:5432/x"), readers=[reader]
+    )
+    try:
+        _wire_run(monkeypatch, insert)
+        monkeypatch.setattr(
+            latency_probe,
+            "_get_tts_providers",
+            lambda: {"acme": _tts_provider(RuntimeError("rejected: HTTP 401"), [])},
+        )
+        await latency_probe.run_latency_probes(settings=_SETTINGS, kind="tts")
+        data = reader.get_metrics_data()
+    finally:
+        telemetry.shutdown_metrics()
+
+    assert data is not None
+    counted = {
+        ((point.attributes or {})["model"], (point.attributes or {})["outcome"]): point.value
+        for rm in data.resource_metrics
+        for sm in rm.scope_metrics
+        for metric in sm.metrics
+        if metric.name == telemetry.PROBES_COUNTER
+        for point in metric.data.data_points
+        if isinstance(point, NumberDataPoint)
+    }
+    assert counted == {("fast-1", "auth"): 1, ("fast-2", "auth"): 1}
 
 
 async def test_one_failed_write_does_not_stop_the_other_models(
