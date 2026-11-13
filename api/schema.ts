@@ -372,6 +372,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/provider-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin Health
+         * @description Every model probed in the last 24 hours, the ones failing most first.
+         */
+        get: operations["admin_health_v1_admin_provider_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/models": {
         parameters: {
             query?: never;
@@ -540,6 +560,14 @@ export interface components {
             changed_at: string;
         };
         /**
+         * AdminHealthResponse
+         * @description Response schema for GET /v1/admin/provider-health.
+         */
+        AdminHealthResponse: {
+            /** Models */
+            models: components["schemas"]["AdminModelHealthOut"][];
+        };
+        /**
          * AdminModelCreate
          * @description POST body for /v1/admin/models. The defaults land the model Hidden.
          */
@@ -595,6 +623,34 @@ export interface components {
             display_name?: string | null;
             architecture?: components["schemas"]["Architecture"] | null;
             orchestration?: components["schemas"]["Orchestration"] | null;
+        };
+        /**
+         * AdminModelHealthOut
+         * @description One model's latency probes over the last 24 hours.
+         */
+        AdminModelHealthOut: {
+            /** Model Id */
+            model_id: number;
+            /** Modality */
+            modality: string;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Healthy */
+            healthy: boolean;
+            /** Probe Count */
+            probe_count: number;
+            /** Failed Count */
+            failed_count: number;
+            /**
+             * Last Probe At
+             * Format: date-time
+             */
+            last_probe_at: string;
+            /** Last Success At */
+            last_success_at: string | null;
+            last_failure: components["schemas"]["AdminProbeFailureOut"] | null;
         };
         /**
          * AdminModelOut
@@ -752,6 +808,31 @@ export interface components {
             as_of: string;
             /** Models */
             models: components["schemas"]["AdminModelPricingOut"][];
+        };
+        /**
+         * AdminProbeFailureOut
+         * @description A model's latest failed probe.
+         */
+        AdminProbeFailureOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "auth" | "credit" | "rate_limit" | "timeout" | "other";
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "provider" | "runner";
+            /** Status Code */
+            status_code: number | null;
+            /** Error */
+            error: string;
         };
         /**
          * AdminRateCreate
@@ -2124,6 +2205,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["S2SSampleAudioOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_health_v1_admin_provider_health_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminHealthResponse"];
                 };
             };
             /** @description Validation Error */
