@@ -199,7 +199,12 @@ async def _probe_tts(
             error = _ttfa_transport_gate(result)
             origin = "runner" if error else None
     if result is None or error is not None:
-        return row(sent_at, error=error or "no result", failure_origin=origin or "provider")
+        return row(
+            sent_at,
+            error=error or "no result",
+            failure_origin=origin or "provider",
+            status_code=result.status_code if result is not None else None,
+        )
     return row(sent_at, ttfa_ms=result.ttfa_ms)
 
 

@@ -345,6 +345,23 @@ def _load_schema(**connect_kwargs: Any) -> None:
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.probe_results (
+                id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                model_id       bigint NOT NULL REFERENCES benchmarks_v2.models (id),
+                voice          text,
+                scheduled_at   timestamptz NOT NULL,
+                sent_at        timestamptz NOT NULL,
+                ttft_ms        double precision,
+                ttfs_ms        double precision,
+                ttfa_ms        double precision,
+                status         text NOT NULL,
+                error          text,
+                failure_origin text,
+                status_code    integer,
+                UNIQUE (model_id, scheduled_at)
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.model_history (
                 id        bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 model_id  bigint NOT NULL,
