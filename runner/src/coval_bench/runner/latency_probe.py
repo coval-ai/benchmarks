@@ -14,6 +14,7 @@ side competes with the call being timed.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -217,6 +218,7 @@ async def run_latency_probes(
 ) -> ProbeSummary:
     """Probe every collected shared *kind* model once and store each outcome."""
     scheduled_at = _current_tick(settings)
+    started = time.monotonic()
     stored = failed = skipped = errored = 0
     async with lifespan_pool(settings) as pool:
         benchmark = Benchmark.STT if kind == "stt" else Benchmark.TTS
@@ -250,6 +252,12 @@ async def run_latency_probes(
                 entry, model_id=model_id, settings=settings, scheduled_at=scheduled_at
             )
 
+        logger.info(
+            "latency_probe_run_started",
+            kind=kind,
+            models=len(models),
+            scheduled_at=scheduled_at.isoformat(),
+        )
         try:
             await _warmup(models, settings)
             for entry in models:
@@ -296,6 +304,17 @@ async def run_latency_probes(
                 )
         finally:
             await _close_http_clients()
+    logger.info(
+        "latency_probe_run_finished",
+        kind=kind,
+        scheduled_at=scheduled_at.isoformat(),
+        probed=len(models),
+        stored=stored,
+        failed=failed,
+        skipped=skipped,
+        errored=errored,
+        duration_s=round(time.monotonic() - started, 1),
+    )
     return ProbeSummary(
         scheduled_at=scheduled_at,
         probed=len(models),

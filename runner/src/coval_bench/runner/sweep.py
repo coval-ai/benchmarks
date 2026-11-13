@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -84,6 +84,14 @@ class SweepSummary:
     failed: int = 0
     scored: int = 0
     completed: int = 0
+
+
+_PROGRESS_EVERY_S = 600.0
+
+
+@dataclass
+class _Progress:
+    next_at: float
 
 
 @dataclass(frozen=True)
@@ -249,8 +257,10 @@ async def _work_sweep(
     pool: Any,  # noqa: ANN401 — the connection pool
     deadline: float,
     summary: SweepSummary,
+    progress: _Progress,
 ) -> bool:
     """Run a sweep's queued items until they're done or time is up. False when time ran out."""
+    loop = asyncio.get_running_loop()
     if kind == "stt":
         fetch = stt_item_fetcher(sweep.dataset_id, settings=settings)
         run = partial(_run_stt, entry, fetch=fetch, settings=settings, pool=pool)
@@ -270,11 +280,19 @@ async def _work_sweep(
         dataset=sweep.dataset_id,
         sweep_id=sweep.id,
     )
-    for item in _items(kind, entry, manifest):
-        if (item.sample_id, item.voice) not in queued:
-            continue
-        if asyncio.get_running_loop().time() >= deadline:
+    pending = [i for i in _items(kind, entry, manifest) if (i.sample_id, i.voice) in queued]
+    for done, item in enumerate(pending):
+        if loop.time() >= deadline:
             return False
+        if loop.time() >= progress.next_at:
+            progress.next_at = loop.time() + _PROGRESS_EVERY_S
+            sweep_log.info(
+                "sweep_progress",
+                left=len(pending) - done,
+                called=summary.called,
+                failed=summary.failed,
+                scored=summary.scored,
+            )
         log = sweep_log.bind(sample_id=item.sample_id, voice=item.voice)
         output = await run(item, log=log)
         if output is None:
@@ -357,7 +375,8 @@ async def run_sweeps(
     datasets = SWEEP_STT_DATASETS if kind == "stt" else SWEEP_TTS_DATASETS
     summary = SweepSummary()
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + max_minutes * 60
+    started = loop.time()
+    deadline = started + max_minutes * 60
     async with lifespan_pool(settings) as pool:
         records = [r for r in await RegistryStore(pool).list_models() if r.modality is benchmark]
         ids = {(r.provider, r.model): r.id for r in records}
@@ -396,6 +415,17 @@ async def run_sweeps(
                 entry = entries[sweep.model_id]
                 key = model_lock_key(entry, providers.get(entry.provider))
                 by_claim.setdefault(key, []).append(sweep)
+            sweep_ids = [sweep.id for sweeps in by_claim.values() for sweep in sweeps]
+            logger.info(
+                "sweep_run_started",
+                kind=kind,
+                models=len(models),
+                opened=summary.opened,
+                sweeps=len(sweep_ids),
+                queued=await queued_count(pool, sweep_ids),
+                max_minutes=max_minutes,
+            )
+            progress = _Progress(next_at=loop.time() + _PROGRESS_EVERY_S)
             in_time = True
             for key, sweeps in by_claim.items():
                 if not in_time:
@@ -414,9 +444,18 @@ async def run_sweeps(
                             pool=pool,
                             deadline=deadline,
                             summary=summary,
+                            progress=progress,
                         )
                         if not in_time:
                             break
+            logger.info(
+                "sweep_run_finished",
+                kind=kind,
+                **asdict(summary),
+                queued=await queued_count(pool, sweep_ids),
+                duration_s=round(loop.time() - started, 1),
+                stopped="finished" if in_time else "out_of_time",
+            )
         finally:
             await _report_queued(kind, pool, [r.id for r in records], manifests)
             await _close_http_clients()
