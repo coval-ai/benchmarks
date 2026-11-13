@@ -56,10 +56,30 @@ def gemini_client(settings: Settings) -> TurnClient | None:
     )
 
 
+RETELL_BASE_URL = "https://api.retellai.com/v1"
+RETELL_MODEL = "tell-1"
+
+
+def retell_client(settings: Settings) -> TurnClient | None:
+    key = settings.retell_llm_api_key
+    if not (key and key.get_secret_value()):
+        return None
+    agent = load_agent(scenarios.ACTIVE.contract)
+    return OpenAICompatClient(
+        key.get_secret_value(),
+        RETELL_BASE_URL,
+        RETELL_MODEL,
+        agent.system_prompt,
+        list(agent.tools),
+        extra_body={"temperature": 0},
+    )
+
+
 CLIENT_FACTORIES: dict[str, Callable[[Settings], TurnClient | None]] = {
     "phonely": PhonelyClient.from_settings,
     "openai": openai_client,
     "google": gemini_client,
+    "retell": retell_client,
 }
 ITERATION_COUNT = 1
 TEMPLATE_MANAGED = ("agent_ids", "persona_ids", "test_set_ids", "metric_ids", "iteration_count")
