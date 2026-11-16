@@ -47,6 +47,7 @@ from coval_bench.s2s.samples import (
     audio_object_key,
     load_sample,
     load_sample_ids,
+    samples_dataset_id,
 )
 
 logger = structlog.get_logger("coval_bench.api.s2s_samples")
@@ -79,12 +80,16 @@ _DATASET_QUERY = Query(
 )
 
 
+def _samples_dataset(dataset: str | None = _DATASET_QUERY) -> str | None:
+    return samples_dataset_id(dataset)
+
+
 @router.get("/s2s/samples", response_model=list[str])
 @limiter.limit("60/minute")
 async def list_s2s_samples(
     request: Request,
     response: Response,
-    dataset: str | None = _DATASET_QUERY,
+    dataset: str | None = Depends(_samples_dataset),
     settings: Settings = Depends(get_settings),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
     models: Sequence[RegisteredModel] = Depends(get_models),
@@ -102,7 +107,7 @@ async def get_s2s_sample(
     request: Request,
     response: Response,
     sample_id: str = Path(pattern=_SAMPLE_ID),
-    dataset: str | None = _DATASET_QUERY,
+    dataset: str | None = Depends(_samples_dataset),
     settings: Settings = Depends(get_settings),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
     posthog_client: Posthog | None = Depends(get_posthog),
@@ -168,7 +173,7 @@ async def get_s2s_sample_audio(
     provider: str,
     model: str,
     sample_id: str = Path(pattern=_SAMPLE_ID),
-    dataset: str | None = _DATASET_QUERY,
+    dataset: str | None = Depends(_samples_dataset),
     settings: Settings = Depends(get_settings),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
 ) -> S2SSampleAudioOut:

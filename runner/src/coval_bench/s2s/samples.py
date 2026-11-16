@@ -30,6 +30,12 @@ from google.api_core.exceptions import NotFound
 
 from coval_bench.gcs import read_json
 from coval_bench.runner.retry import with_retry
+from coval_bench.s2s.conditions import (
+    SCENARIO_SLUGS,
+    Condition,
+    pooled_dataset_id,
+    scenario_dataset_id,
+)
 
 if TYPE_CHECKING:
     from random import Random
@@ -45,6 +51,17 @@ _DOWNLOAD_TIMEOUT = 120.0
 # Publish once a conversation has this many models; settle for the floor otherwise.
 _TARGET_RECORDINGS = 2
 _MIN_RECORDINGS = 1
+
+
+SAMPLES_CONDITION = Condition.CLEAN
+_SAMPLES_FOR_POOLED = {
+    pooled_dataset_id(slug): scenario_dataset_id(slug, SAMPLES_CONDITION) for slug in SCENARIO_SLUGS
+}
+
+
+def samples_dataset_id(dataset_id: str | None) -> str | None:
+    """Where *dataset_id*'s samples live: a pooled dataset reads its published caller's."""
+    return _SAMPLES_FOR_POOLED.get(dataset_id, dataset_id) if dataset_id else None
 
 
 def sample_prefix(dataset_id: str | None) -> str:

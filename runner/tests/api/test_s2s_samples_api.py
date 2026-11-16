@@ -29,6 +29,9 @@ _SAMPLE = "2026-07-30T00:00:00Z"
 _OTHER_SAMPLE = "2026-07-29T00:00:00Z"
 _DATASET = "instruction-adherence-cust-service-v1"
 _PARTITIONED_SAMPLE = "2026-09-11T00:00:00Z"
+_POOLED = "s2s-workflow-bank-all-conditions-v1"
+_CLEAN = "s2s-workflow-bank-v1"
+_CLEAN_SAMPLE = "2026-11-10T00:00:00Z"
 _SIGNED = "https://storage.googleapis.com/signed-for-test"
 
 _PARTNER_ORG = "org_s2s_partner"
@@ -88,6 +91,15 @@ _OBJECTS: dict[str, Any] = {
         "test_case_id": "tc-cs",
         "persona_name": "Standard Customer",
         "recordings": [_recording(*_LIVE, sample_id=_PARTITIONED_SAMPLE, dataset_id=_DATASET)],
+    },
+    f"s2s-samples/{_CLEAN}/index.json": [_CLEAN_SAMPLE],
+    f"s2s-samples/{_CLEAN}/{_CLEAN_SAMPLE}/manifest.json": {
+        "schema_version": 2,
+        "bucket_at": _CLEAN_SAMPLE,
+        "dataset_id": _CLEAN,
+        "test_case_id": "tc-bank",
+        "persona_name": "Standard Customer",
+        "recordings": [_recording(*_LIVE, sample_id=_CLEAN_SAMPLE, dataset_id=_CLEAN)],
     },
 }
 
@@ -374,6 +386,25 @@ async def test_partitioned_manifest_carries_its_dataset_into_the_audio_paths(
     assert (
         audio.json()["url"]
         == f"{_SIGNED}/s2s-samples/{_DATASET}/{_PARTITIONED_SAMPLE}/{_LIVE[0]}/{_LIVE[1]}.wav"
+    )
+
+
+async def test_pooled_dataset_serves_its_clean_callers_samples(
+    samples_client: AsyncClient,
+) -> None:
+    index = await samples_client.get("/v1/s2s/samples", params={"dataset": _POOLED})
+    assert index.json() == [_CLEAN_SAMPLE]
+
+    res = await samples_client.get(f"/v1/s2s/samples/{_CLEAN_SAMPLE}", params={"dataset": _POOLED})
+    assert res.status_code == 200
+    body = res.json()
+    assert _pairs(body) == [_LIVE]
+
+    audio = await samples_client.get(body["recordings"][0]["audio_path"])
+    assert audio.status_code == 200
+    assert (
+        audio.json()["url"]
+        == f"{_SIGNED}/s2s-samples/{_CLEAN}/{_CLEAN_SAMPLE}/{_LIVE[0]}/{_LIVE[1]}.wav"
     )
 
 
