@@ -138,7 +138,7 @@ async def fetch_latency(
 _POINTS = """
     SELECT model_id, provider, model,
            date_bin(%(bucket)s, scheduled_at, TIMESTAMPTZ '2000-01-01 00:00:00+00') AS scheduled_at,
-           avg(value) AS value
+           avg(value) FILTER (WHERE status = 'succeeded') AS value
     FROM (
         SELECT m.id AS model_id, m.provider, m.model, p.scheduled_at, p.status,
                CASE %(metric)s::text
@@ -167,9 +167,9 @@ async def fetch_latency_points(
 ) -> list[dict[str, Any]]:
     """One point per model and *bucket* since *since*: the mean of *metric* over its probes.
 
-    Buckets start on UTC boundaries. A bucket where every probe failed on the provider's
-    side has a null value. A failure the runner caused is left out. Raises
-    ``QueryCanceled`` after ten seconds.
+    Buckets start on UTC boundaries. Only probes that succeeded count toward the mean, and
+    a bucket where every probe failed on the provider's side has a null value. A failure
+    the runner caused is left out. Raises ``QueryCanceled`` after ten seconds.
     """
     params = {"modality": modality, "metric": metric, "since": since, "bucket": bucket}
     async with (

@@ -54,7 +54,7 @@ def _seed(postgresql: Any) -> tuple[int, int]:
         tts = _model_id(conn, "seed", "tts-a")
         for hours_ago, ttft in enumerate((100.0, 200.0, 300.0), start=1):
             _probe(conn, stt, hours_ago, ttft=ttft, ttfs=ttft / 2)
-        _probe(conn, stt, 4, error="timed out after 30s")
+        _probe(conn, stt, 4, error="no TTFS produced", ttft=250.0)
         _probe(conn, stt, 5, error="request failed", origin="runner", status_code=401)
         _probe(conn, stt, 6, error="clip did not load", origin="runner")
         _probe(conn, stt, 30, ttft=9000.0, ttfs=9000.0)
