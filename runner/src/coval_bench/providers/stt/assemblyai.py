@@ -63,7 +63,10 @@ def _is_agent(model: str) -> bool:
 
 
 def _speech_model(model: str) -> str:
-    return _SPEECH_MODEL_MAP.get(model) or model.replace(".", "-")
+    if model in _SPEECH_MODEL_MAP:
+        return _SPEECH_MODEL_MAP[model]
+    wire = model.replace(".", "-")
+    return f"assemblyai-{wire}" if _is_agent(model) else wire
 
 
 class AssemblyAIProvider(WebSocketSTTProvider):

@@ -147,7 +147,7 @@ async def test_agent_manual_mode_and_force_endpoint(stt_settings: Settings) -> N
         )
 
     url = mock_connect.call_args.args[0]
-    assert "speech_model=stt-1-2-realtime-agent" in url
+    assert "speech_model=assemblyai-stt-1-2-realtime-agent" in url
     assert "mode=manual" in url
     assert "end_of_turn_confidence_threshold" not in url
     assert "min_latency" not in url
