@@ -86,3 +86,50 @@ async def fetch_health(pool: AsyncConnectionPool[Any]) -> list[dict[str, Any]]:
         await cur.execute(_HEALTH)
         rows: list[dict[str, Any]] = await cur.fetchall()
         return rows
+
+
+_LATENCY = """
+    SELECT m.id AS model_id, m.modality, m.provider, m.model, v.metric,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY v.value) AS p50,
+           percentile_cont(0.9) WITHIN GROUP (ORDER BY v.value) AS p90,
+           percentile_cont(0.95) WITHIN GROUP (ORDER BY v.value) AS p95,
+           avg(v.value) AS mean, min(v.value) AS min, max(v.value) AS max,
+           count(*) AS sample_count
+    FROM benchmarks_v2.probe_results p
+    JOIN benchmarks_v2.models m ON m.id = p.model_id
+    CROSS JOIN LATERAL (
+        VALUES ('TTFT', p.ttft_ms), ('TTFS', p.ttfs_ms), ('TTFA', p.ttfa_ms)
+    ) AS v(metric, value)
+    WHERE p.status = 'succeeded' AND v.value IS NOT NULL AND p.scheduled_at >= %(since)s
+    GROUP BY m.id, v.metric
+"""
+
+_PROVIDER_FAILURES = """
+    SELECT m.id AS model_id, m.modality, m.provider, m.model, count(*) AS failed_count
+    FROM benchmarks_v2.probe_results p
+    JOIN benchmarks_v2.models m ON m.id = p.model_id
+    WHERE p.status = 'failed' AND p.failure_origin = 'provider'
+      AND p.scheduled_at >= %(since)s
+    GROUP BY m.id
+"""
+
+
+async def fetch_latency(
+    pool: AsyncConnectionPool[Any], *, since: datetime
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Latency since *since*: stats per model and metric, and provider failures per model.
+
+    Timings are milliseconds. A failure the runner caused is in neither list. Raises
+    ``QueryCanceled`` when the read takes longer than ten seconds.
+    """
+    async with (
+        pool.connection() as conn,
+        conn.transaction(),
+        conn.cursor(row_factory=dict_row) as cur,
+    ):
+        await cur.execute("SET LOCAL statement_timeout = '10s'")
+        await cur.execute(_LATENCY, {"since": since})
+        stats: list[dict[str, Any]] = await cur.fetchall()
+        await cur.execute(_PROVIDER_FAILURES, {"since": since})
+        failures: list[dict[str, Any]] = await cur.fetchall()
+        return stats, failures

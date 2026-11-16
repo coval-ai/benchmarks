@@ -34,9 +34,10 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from coval_bench import __version__
+from coval_bench.api import v3
 from coval_bench.api.cache import new_cache_locks, new_response_cache
 from coval_bench.api.compression import SelectiveGZipMiddleware
 from coval_bench.api.internal import never_shared
@@ -60,6 +61,7 @@ from coval_bench.api.routers import (
     runs,
     s2s_samples,
     tags,
+    v3_latency,
 )
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
@@ -84,16 +86,26 @@ async def _never_shared_http_error(request: Request, exc: Exception) -> Response
     embargoed recording answers 404 to the public and 302 to a partner at the very
     same URL, and without this a shared cache could hand the 404 to the partner.
     """
-    response = await http_exception_handler(request, cast("StarletteHTTPException", exc))
+    http_exc = cast("StarletteHTTPException", exc)
+    response: Response
+    if request.url.path.startswith(v3.PREFIX):
+        response = JSONResponse(
+            v3.http_error_body(http_exc), status_code=http_exc.status_code, headers=http_exc.headers
+        )
+    else:
+        response = await http_exception_handler(request, http_exc)
     never_shared(response)
     return response
 
 
 async def _never_shared_validation_error(request: Request, exc: Exception) -> Response:
     """A rejected request parameter, under the same cache policy as every error."""
-    response = await request_validation_exception_handler(
-        request, cast("RequestValidationError", exc)
-    )
+    validation_exc = cast("RequestValidationError", exc)
+    response: Response
+    if request.url.path.startswith(v3.PREFIX):
+        response = JSONResponse(v3.validation_error_body(validation_exc), status_code=400)
+    else:
+        response = await request_validation_exception_handler(request, validation_exc)
     never_shared(response)
     return response
 
@@ -234,6 +246,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_health.router, prefix="/v1")
     app.include_router(admin_models.router, prefix="/v1")
     app.include_router(admin_pricing.router, prefix="/v1")
+    app.include_router(v3_latency.router, prefix=v3.PREFIX)
     # Not under /v1 and not rate limited: an appliance the agents call, not
     # public read API. slowapi carries no default limit, so /mock and /llm are exempt
     # by construction — a 429 mid-conversation would be graded as the agent failing.
