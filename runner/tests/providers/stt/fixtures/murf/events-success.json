@@ -1,0 +1,5 @@
+[
+  {"type": "partial", "transcript": "Hello", "rawEvent": {"type": "TurnInfo", "request_id": "req-test", "event": "StartOfTurn", "turn_index": 0, "sequence_id": 0, "audio_window_start": 0.12, "audio_window_end": 0.6, "transcript": "Hello"}},
+  {"type": "partial", "transcript": "Hello world, how", "rawEvent": {"type": "TurnInfo", "request_id": "req-test", "event": "Update", "turn_index": 0, "sequence_id": 1, "audio_window_start": 0.12, "audio_window_end": 1.2, "transcript": "Hello world, how"}},
+  {"type": "final", "transcript": "Hello world, how are you?", "rawEvent": {"type": "TurnInfo", "request_id": "req-test", "event": "EndOfTurn", "turn_index": 0, "sequence_id": 2, "audio_window_start": 0.12, "audio_window_end": 2.8, "transcript": "Hello world, how are you?", "trigger": "manual", "words": []}}
+]
