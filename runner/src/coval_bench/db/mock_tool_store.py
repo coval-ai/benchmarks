@@ -32,6 +32,41 @@ _INSERT_SQL = """
     VALUES (%s, %s, %s, %s, %s, %s, %s)
 """
 
+_COUNT_BY_SIMULATION_SQL = """
+    SELECT count(*) AS calls FROM benchmarks_v2.mock_tool_calls WHERE simulation_id = %s
+"""
+
+_COUNT_BY_CALLER_SQL = """
+    SELECT count(*) AS calls FROM benchmarks_v2.mock_tool_calls
+    WHERE caller_number = %s AND created_at > now() - interval '15 minutes'
+"""
+
+
+async def count_calls(
+    pool: AsyncConnectionPool[Any],
+    *,
+    simulation_id: str | None = None,
+    caller_number: str | None = None,
+) -> int:
+    """How many tool calls this conversation has already logged; 0 when it cannot be told.
+
+    Counts by simulation id, else by caller number over the last 15 minutes. Never raises.
+    """
+    if simulation_id:
+        query, key = _COUNT_BY_SIMULATION_SQL, simulation_id
+    elif caller_number:
+        query, key = _COUNT_BY_CALLER_SQL, caller_number
+    else:
+        return 0
+    try:
+        async with pool.connection() as conn:
+            cursor = await conn.execute(query, (key,))
+            row = await cursor.fetchone()
+    except Exception:
+        logger.warning("mock_tool_calls_not_counted", simulation_id=simulation_id, exc_info=True)
+        return 0
+    return int(row["calls"]) if row else 0
+
 
 async def record_call(
     pool: AsyncConnectionPool[Any],

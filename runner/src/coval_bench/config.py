@@ -260,6 +260,7 @@ class Settings(BaseSettings):
     # constant across variants instead of a property of the seed that answered.
     mock_tools_latency_ms: float = Field(default=0.0, ge=0, le=10_000)
     mock_tools_suite: str = "id_roulette"
+    mock_tools_max_calls: int = Field(default=30, ge=1)
     # Where the deployed service reads the seeded world, since the image is
     # built from a git checkout and `_private/` is never in one. Empty means
     # local-only, which is every developer machine.
