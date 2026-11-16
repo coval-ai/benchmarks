@@ -63,7 +63,12 @@ from coval_bench.s2s.ingest import (
     resolve_import_generation,
 )
 from coval_bench.s2s.rows import VALUE_MAPPERS, ingestable_metrics
-from coval_bench.s2s.samples import SampleRun, model_labels, publish_tick_sample
+from coval_bench.s2s.samples import (
+    SAMPLES_CONDITION,
+    SampleRun,
+    model_labels,
+    publish_tick_sample,
+)
 from coval_bench.s2s.scenario_map import with_scenario_map
 from coval_bench.s2s.specs import (
     SCENARIO_MODELS,
@@ -88,7 +93,7 @@ def _expected_sample_models(settings: Settings, dataset_id: str) -> set[tuple[st
         for spec in s2s_specs(settings)
         if spec.agent_id
         and spec.publish_samples
-        and dataset_id_for(spec.family, Condition.CLEAN) == dataset_id
+        and dataset_id_for(spec.family, SAMPLES_CONDITION) == dataset_id
     }
 
 
@@ -242,7 +247,7 @@ async def _fetch_one_provider(
     statuses: list[RunStatus] = []
     candidates: dict[tuple[datetime, str], SampleRun] = {}
     # The clean caller, plus the legacy single-turn manifest which has no conditions.
-    publishable = {DATASET_ID, dataset_id_for(spec.family, Condition.CLEAN)}
+    publishable = {DATASET_ID, dataset_id_for(spec.family, SAMPLES_CONDITION)}
     newest_data_at: datetime | None = None
     data_seen = False
 
