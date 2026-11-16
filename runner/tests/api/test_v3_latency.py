@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""GET /v3/latency over HTTP."""
+"""GET /v3/latency and /v3/latency/points over HTTP."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def _seed(postgresql: Any) -> tuple[int, int]:
         tts = _model_id(conn, "seed", "tts-a")
         for hours_ago, ttft in enumerate((100.0, 200.0, 300.0), start=1):
             _probe(conn, stt, hours_ago, ttft=ttft, ttfs=ttft / 2)
-        _probe(conn, stt, 4, error="timed out after 30s")
+        _probe(conn, stt, 4, error="no TTFS produced", ttft=250.0)
         _probe(conn, stt, 5, error="request failed", origin="runner", status_code=401)
         _probe(conn, stt, 6, error="clip did not load", origin="runner")
         _probe(conn, stt, 30, ttft=9000.0, ttfs=9000.0)
@@ -146,3 +146,68 @@ async def test_an_unknown_v3_path_is_a_not_found_error(client: AsyncClient) -> N
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
+
+
+async def test_points_are_one_per_tick_with_a_null_for_a_provider_failure(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    stt, _ = _seed(postgresql)
+
+    response = await client.get("/v3/latency/points?metric=TTFT")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["metric"], body["unit"], body["bucket_seconds"]) == ("TTFT", "milliseconds", 1800)
+    assert {point["model_id"] for point in body["points"]} == {stt}
+    assert {(point["provider"], point["model"]) for point in body["points"]} == {("seed", "stt")}
+    assert [point["value"] for point in body["points"]] == [None, 300.0, 200.0, 100.0]
+    times = [point["scheduled_at"] for point in body["points"]]
+    assert times == sorted(times)
+
+
+async def test_longer_windows_average_points_into_buckets(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        tts = _model_id(conn, "seed", "tts-a")
+        day = NOW.replace(hour=12, minute=0, second=0, microsecond=0) - timedelta(days=3)
+        for minute, ttfa in ((0, 100.0), (30, 300.0)):
+            _probe(conn, tts, (NOW - day).total_seconds() / 3600 - minute / 60, ttfa=ttfa)
+
+    week = (await client.get("/v3/latency/points?metric=TTFA&window=7d")).json()
+    month = (await client.get("/v3/latency/points?metric=TTFA&window=30d")).json()
+
+    assert week["bucket_seconds"] == 3600
+    assert [point["value"] for point in week["points"]] == [200.0]
+    assert week["points"][0]["scheduled_at"].startswith(day.strftime("%Y-%m-%dT12:00:00"))
+    assert month["bucket_seconds"] == 86400
+    assert [point["value"] for point in month["points"]] == [200.0]
+    assert month["points"][0]["scheduled_at"].startswith(day.strftime("%Y-%m-%dT00:00:00"))
+
+
+async def test_points_need_a_metric_and_hide_unpublished_models(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    add_models(
+        postgresql,
+        RegisteredModel(
+            benchmark=Benchmark.STT,
+            provider=EA_PROVIDER,
+            model=EA_MODEL,
+            collected=True,
+            published=False,
+        ),
+    )
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        _probe(conn, _model_id(conn, EA_PROVIDER, EA_MODEL), 1, ttft=150.0)
+
+    missing = await client.get("/v3/latency/points")
+    public = await client.get("/v3/latency/points?metric=TTFT")
+    partner = await client.get(
+        "/v3/latency/points?metric=TTFT", headers=bearer(sub="u", org_id=EA_ORG)
+    )
+
+    assert missing.status_code == 400
+    assert missing.json()["error"]["param"] == "metric"
+    assert public.json()["points"] == []
+    assert [point["value"] for point in partner.json()["points"]] == [150.0]

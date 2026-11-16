@@ -707,6 +707,25 @@ class LatencyResponse(BaseModel):
     latency: list[LatencyOut]
 
 
+class LatencyPointOut(BaseModel):
+    """One model's latency at one point in time. A null value means every probe failed."""
+
+    model_id: int
+    provider: str
+    model: str
+    scheduled_at: datetime
+    value: float | None
+
+
+class LatencyPointsResponse(BaseModel):
+    """Response schema for GET /v3/latency/points."""
+
+    metric: Literal["TTFT", "TTFS", "TTFA"]
+    unit: Literal["milliseconds"] = "milliseconds"
+    bucket_seconds: int
+    points: list[LatencyPointOut]
+
+
 class ErrorOut(BaseModel):
     """What went wrong with a ``/v3`` request."""
 

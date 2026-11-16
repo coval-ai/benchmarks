@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from psycopg.rows import dict_row
@@ -133,3 +133,51 @@ async def fetch_latency(
         await cur.execute(_PROVIDER_FAILURES, {"since": since})
         failures: list[dict[str, Any]] = await cur.fetchall()
         return stats, failures
+
+
+_POINTS = """
+    SELECT model_id, provider, model,
+           date_bin(%(bucket)s, scheduled_at, TIMESTAMPTZ '2000-01-01 00:00:00+00') AS scheduled_at,
+           avg(value) FILTER (WHERE status = 'succeeded') AS value
+    FROM (
+        SELECT m.id AS model_id, m.provider, m.model, p.scheduled_at, p.status,
+               CASE %(metric)s::text
+                   WHEN 'TTFT' THEN p.ttft_ms
+                   WHEN 'TTFS' THEN p.ttfs_ms
+                   ELSE p.ttfa_ms
+               END AS value
+        FROM benchmarks_v2.probe_results p
+        JOIN benchmarks_v2.models m ON m.id = p.model_id
+        WHERE m.modality = %(modality)s AND p.scheduled_at >= %(since)s
+          AND (p.status = 'succeeded' OR p.failure_origin = 'provider')
+    ) probes
+    WHERE status = 'failed' OR value IS NOT NULL
+    GROUP BY model_id, provider, model, 4
+    ORDER BY model_id, 4
+"""
+
+
+async def fetch_latency_points(
+    pool: AsyncConnectionPool[Any],
+    *,
+    modality: str,
+    metric: str,
+    since: datetime,
+    bucket: timedelta,
+) -> list[dict[str, Any]]:
+    """One point per model and *bucket* since *since*: the mean of *metric* over its probes.
+
+    Buckets start on UTC boundaries. Only probes that succeeded count toward the mean, and
+    a bucket where every probe failed on the provider's side has a null value. A failure
+    the runner caused is left out. Raises ``QueryCanceled`` after ten seconds.
+    """
+    params = {"modality": modality, "metric": metric, "since": since, "bucket": bucket}
+    async with (
+        pool.connection() as conn,
+        conn.transaction(),
+        conn.cursor(row_factory=dict_row) as cur,
+    ):
+        await cur.execute("SET LOCAL statement_timeout = '10s'")
+        await cur.execute(_POINTS, params)
+        rows: list[dict[str, Any]] = await cur.fetchall()
+        return rows
