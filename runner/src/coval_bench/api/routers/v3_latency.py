@@ -15,7 +15,7 @@ from starlette.requests import Request
 
 from coval_bench.api.common import WINDOW_DURATIONS, WindowLiteral
 from coval_bench.api.deps import get_pool, get_settings
-from coval_bench.api.internal import hidden_early_access
+from coval_bench.api.internal import hidden_early_access, visible_metrics
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
     ErrorResponse,
@@ -45,6 +45,7 @@ async def get_latency(
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    visible_metric_codes: frozenset[str] = Depends(visible_metrics),
 ) -> LatencyResponse:
     """One row per model and metric: percentiles over the probes that succeeded in the window.
 
@@ -65,6 +66,7 @@ async def get_latency(
     def wanted(row: dict[str, Any], code: str) -> bool:
         return (
             (row["provider"], row["model"]) not in hidden
+            and code in visible_metric_codes
             and modality in (None, row["modality"])
             and metric in (None, code)
             and not is_metric_excluded(row["provider"], row["model"], code)
@@ -123,6 +125,7 @@ async def get_latency_points(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     settings: Settings = Depends(get_settings),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    visible_metric_codes: frozenset[str] = Depends(visible_metrics),
 ) -> LatencyPointsResponse:
     """Every model's *metric* over the window, as points for a chart.
 
@@ -156,6 +159,7 @@ async def get_latency_points(
         )
         for row in rows
         if (row["provider"], row["model"]) not in hidden
+        and metric in visible_metric_codes
         and not is_metric_excluded(row["provider"], row["model"], metric)
     ]
     return LatencyPointsResponse(

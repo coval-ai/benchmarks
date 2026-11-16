@@ -20,7 +20,7 @@ from starlette.requests import Request
 
 from coval_bench.api.common import WINDOW_DURATIONS, BenchmarkLiteral, WindowLiteral
 from coval_bench.api.deps import get_pool, get_settings
-from coval_bench.api.internal import hidden_early_access
+from coval_bench.api.internal import hidden_early_access, visible_metrics
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.results_cursor import CursorError, CursorKeyError, validate_key
 from coval_bench.api.results_cursor import decode as decode_cursor
@@ -138,6 +138,7 @@ async def list_results(
     cursor_key: SecretStr = Depends(_require_cursor_key),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    visible_metric_codes: frozenset[str] = Depends(visible_metrics),
 ) -> ResultsV2Response:
     """Return one successful primary evaluation per result."""
     del request
@@ -186,6 +187,7 @@ async def list_results(
         "run_status": parent_statuses,
         "time": requested_time,
         "hidden": sorted(hidden),
+        "visible_metrics": sorted(visible_metric_codes),
     }
     fingerprint = _fingerprint(filter_payload)
     if cursor is not None and expected != fingerprint:
@@ -231,6 +233,8 @@ async def list_results(
         )
         params[f"hidden_provider_{index}"] = hidden_provider
         params[f"hidden_model_{index}"] = hidden_model
+    conditions.append("m.code = ANY(%(visible_metrics)s::text[])")
+    params["visible_metrics"] = sorted(visible_metric_codes)
     if cursor is not None:
         conditions.append("o.captured_at <= %(anchor_time)s")
         conditions.append("(o.captured_at, e.id) < (%(anchor_time)s, %(anchor_id)s)")

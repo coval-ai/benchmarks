@@ -12,7 +12,15 @@ from httpx import AsyncClient
 
 from coval_bench.registries import RegisteredModel
 from coval_bench.registries.benchmarks import Benchmark
-from tests.api.conftest import EA_MODEL, EA_ORG, EA_PROVIDER, _make_db_url, add_models, bearer
+from tests.api.conftest import (
+    COVAL_ORG,
+    EA_MODEL,
+    EA_ORG,
+    EA_PROVIDER,
+    _make_db_url,
+    add_models,
+    bearer,
+)
 
 
 def _model_id(conn: Any, provider: str, model: str) -> int:
@@ -149,3 +157,29 @@ async def test_a_completed_sweep_with_nothing_scored_keeps_the_previous_score(
     rows = (await client.get("/v3/quality")).json()["quality"]
 
     assert [(row["model_version"], row["value"]) for row in rows] == [(1, 10.0)]
+
+
+async def test_a_coval_only_metric_is_left_out_for_the_public(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        _sweep(conn, _model_id(conn, "seed", "stt"), [("a", "", 1, 10)])
+        conn.execute("UPDATE benchmarks_v2.metrics SET visibility = 'coval' WHERE code = 'WER'")
+
+    public = await client.get("/v3/quality")
+    internal = await client.get("/v3/quality", headers=bearer(org_id=COVAL_ORG))
+
+    assert public.json()["quality"] == []
+    assert [row["metric"] for row in internal.json()["quality"]] == ["WER"]
+
+
+async def test_a_metric_with_no_registry_row_is_served_to_no_one(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        _sweep(conn, _model_id(conn, "seed", "stt"), [("a", "", 1, 10)])
+        conn.execute("UPDATE benchmarks_v2.sweep_scores SET metric = 'Unregistered'")
+
+    response = await client.get("/v3/quality", headers=bearer(org_id=COVAL_ORG))
+
+    assert response.json()["quality"] == []

@@ -14,7 +14,7 @@ from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
 from coval_bench.api.deps import get_pool
-from coval_bench.api.internal import hidden_early_access
+from coval_bench.api.internal import hidden_early_access, visible_metrics
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ErrorResponse, QualityOut, QualityResponse
 from coval_bench.db.sweep_store import fetch_quality
@@ -32,6 +32,7 @@ async def get_quality(
     modality: ModalityLiteral | None = Query(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    visible_metric_codes: frozenset[str] = Depends(visible_metrics),
 ) -> QualityResponse:
     """One row per model, dataset and metric, from the model's latest completed sweep.
 
@@ -68,6 +69,7 @@ async def get_quality(
         )
         for row in rows
         if (row["provider"], row["model"]) not in hidden
+        and row["metric"] in visible_metric_codes
         and modality in (None, row["modality"])
         and not is_metric_excluded(row["provider"], row["model"], row["metric"])
     ]

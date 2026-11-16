@@ -15,7 +15,7 @@ import functools
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import jwt
 import structlog
@@ -23,6 +23,8 @@ import structlog
 from coval_bench.config import Settings
 
 logger = structlog.get_logger("coval_bench.api.clerk")
+
+CallerLevel = Literal["public", "partner", "coval"]
 
 
 @dataclass(frozen=True)
@@ -208,3 +210,29 @@ def allowed_pairs(
     if settings.clerk_coval_org and org_id == settings.clerk_coval_org:
         return embargoed
     return frozenset()
+
+
+def caller_level(authorization: str | None, settings: Settings) -> CallerLevel:
+    """Who is asking: a mapped or exclusive org is a partner, even for coval staff.
+
+    A mapped org whose entry names nothing is public, so a malformed entry narrows a view.
+    """
+    claims = bearer_claims(authorization, settings)
+    if claims is None:
+        return "public"
+    org_id = claims.get("org_id")
+    if not isinstance(org_id, str):
+        return "public"
+    if settings.clerk_org_exclusive is not None:
+        exclusive = _parse_exclusive(settings.clerk_org_exclusive)
+        if exclusive is None:
+            return "public"
+        if org_id in exclusive:
+            return "partner"
+    if settings.clerk_org_providers is not None and _parse_org_entries(
+        settings.clerk_org_providers
+    ).get(org_id):
+        return "partner"
+    if settings.clerk_coval_org and org_id == settings.clerk_coval_org:
+        return "coval"
+    return "public"

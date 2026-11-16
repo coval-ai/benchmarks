@@ -13,7 +13,15 @@ from httpx import AsyncClient
 
 from coval_bench.registries import RegisteredModel
 from coval_bench.registries.benchmarks import Benchmark
-from tests.api.conftest import EA_MODEL, EA_ORG, EA_PROVIDER, _make_db_url, add_models, bearer
+from tests.api.conftest import (
+    COVAL_ORG,
+    EA_MODEL,
+    EA_ORG,
+    EA_PROVIDER,
+    _make_db_url,
+    add_models,
+    bearer,
+)
 
 NOW = datetime.now(UTC)
 
@@ -211,3 +219,24 @@ async def test_points_need_a_metric_and_hide_unpublished_models(
     assert missing.json()["error"]["param"] == "metric"
     assert public.json()["points"] == []
     assert [point["value"] for point in partner.json()["points"]] == [150.0]
+
+
+async def test_a_coval_only_metric_is_left_out_for_the_public(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    stt, _ = _seed(postgresql)
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        conn.execute("UPDATE benchmarks_v2.metrics SET visibility = 'coval' WHERE code = 'TTFS'")
+    staff = bearer(org_id=COVAL_ORG)
+
+    public = {
+        (row["model_id"], row["metric"])
+        for row in (await client.get("/v3/latency")).json()["latency"]
+    }
+    internal = (await client.get("/v3/latency", headers=staff)).json()["latency"]
+
+    assert (stt, "TTFT") in public
+    assert (stt, "TTFS") not in public
+    assert (stt, "TTFS") in {(row["model_id"], row["metric"]) for row in internal}
+    assert (await client.get("/v3/latency/points?metric=TTFS")).json()["points"] == []
+    assert (await client.get("/v3/latency/points?metric=TTFS", headers=staff)).json()["points"]

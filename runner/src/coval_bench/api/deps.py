@@ -19,6 +19,7 @@ import structlog
 from cachetools import TTLCache
 from fastapi import Depends, Header, HTTPException
 from posthog import Posthog
+from psycopg.rows import tuple_row
 from psycopg_pool import AsyncConnectionPool
 from pydantic import SecretStr
 from starlette.requests import Request
@@ -139,6 +140,22 @@ async def get_models(
     except Exception as exc:
         logger.error("model_roster_unavailable", exc_info=True)
         raise HTTPException(503, "the model registry is unavailable") from exc
+
+
+async def get_metric_visibility(
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+) -> dict[str, str]:
+    """Each metric's visibility level, read fresh on every request like the roster.
+
+    Raises 503 rather than guessing: a made-up level could serve a hidden metric.
+    """
+    try:
+        async with pool.connection() as conn, conn.cursor(row_factory=tuple_row) as cur:
+            await cur.execute("SELECT code, visibility FROM benchmarks_v2.metrics")
+            return dict(await cur.fetchall())
+    except Exception as exc:
+        logger.error("metric_visibility_unavailable", exc_info=True)
+        raise HTTPException(503, "metric visibility is unavailable") from exc
 
 
 async def get_proxied_model(
