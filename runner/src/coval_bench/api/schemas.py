@@ -687,6 +687,8 @@ class LatencyOut(BaseModel):
     """One model's latency on one metric over a time range."""
 
     model_id: int
+    provider: str
+    model: str
     metric: Literal["TTFT", "TTFS", "TTFA"]
     unit: Literal["milliseconds"] = "milliseconds"
     p50: float | None = None
@@ -703,3 +705,17 @@ class LatencyResponse(BaseModel):
     """Response schema for GET /v3/latency."""
 
     latency: list[LatencyOut]
+
+
+class ErrorOut(BaseModel):
+    """What went wrong with a ``/v3`` request."""
+
+    code: str
+    message: str
+    param: str | None = None
+
+
+class ErrorResponse(BaseModel):
+    """The body of every ``/v3`` error."""
+
+    error: ErrorOut

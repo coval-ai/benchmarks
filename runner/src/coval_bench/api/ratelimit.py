@@ -28,6 +28,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
+from coval_bench.api import v3
+
 limiter: Limiter = Limiter(
     key_func=get_remote_address,
     default_limits=[],  # no global default — only /v1/* routes carry explicit limits
@@ -36,4 +38,6 @@ limiter: Limiter = Limiter(
 
 async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     """Return a 429 JSON response when the rate limit is exceeded."""
+    if request.url.path.startswith(v3.PREFIX):
+        return JSONResponse(v3.error_body(429, "rate limit exceeded"), status_code=429)
     return JSONResponse({"detail": "rate limit exceeded"}, status_code=429)

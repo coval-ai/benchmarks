@@ -55,7 +55,7 @@ def _seed(postgresql: Any) -> tuple[int, int]:
         for hours_ago, ttft in enumerate((100.0, 200.0, 300.0), start=1):
             _probe(conn, stt, hours_ago, ttft=ttft, ttfs=ttft / 2)
         _probe(conn, stt, 4, error="timed out after 30s")
-        _probe(conn, stt, 5, error="request failed", status_code=401)
+        _probe(conn, stt, 5, error="request failed", origin="runner", status_code=401)
         _probe(conn, stt, 6, error="clip did not load", origin="runner")
         _probe(conn, stt, 30, ttft=9000.0, ttfs=9000.0)
         _probe(conn, tts, 1, error="connection reset")
@@ -74,6 +74,8 @@ async def test_latency_is_percentiles_per_model_and_metric(
     assert set(rows) == {(stt, "TTFT"), (stt, "TTFS"), (tts, "TTFA")}
     assert rows[(stt, "TTFT")] == {
         "model_id": stt,
+        "provider": "seed",
+        "model": "stt",
         "metric": "TTFT",
         "unit": "milliseconds",
         "p50": 200.0,
@@ -137,3 +139,10 @@ async def test_a_bad_parameter_is_named_in_the_error(client: AsyncClient) -> Non
     error = response.json()["error"]
     assert (error["code"], error["param"]) == ("invalid_parameter", "modality")
     assert "STT" in error["message"]
+
+
+async def test_an_unknown_v3_path_is_a_not_found_error(client: AsyncClient) -> None:
+    response = await client.get("/v3/nope")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"

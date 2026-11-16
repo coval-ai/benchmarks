@@ -105,22 +105,29 @@ _LATENCY = """
 """
 
 _PROVIDER_FAILURES = """
-    SELECT m.id AS model_id, m.modality, m.provider, m.model, p.error, p.status_code
+    SELECT m.id AS model_id, m.modality, m.provider, m.model, count(*) AS failed_count
     FROM benchmarks_v2.probe_results p
     JOIN benchmarks_v2.models m ON m.id = p.model_id
     WHERE p.status = 'failed' AND p.failure_origin = 'provider'
       AND p.scheduled_at >= %(since)s
+    GROUP BY m.id
 """
 
 
 async def fetch_latency(
     pool: AsyncConnectionPool[Any], *, since: datetime
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Latency since *since*: stats per model and metric, and each probe the provider failed.
+    """Latency since *since*: stats per model and metric, and provider failures per model.
 
-    Timings are milliseconds. A failure the runner caused is in neither list.
+    Timings are milliseconds. A failure the runner caused is in neither list. Raises
+    ``QueryCanceled`` when the read takes longer than ten seconds.
     """
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+    async with (
+        pool.connection() as conn,
+        conn.transaction(),
+        conn.cursor(row_factory=dict_row) as cur,
+    ):
+        await cur.execute("SET LOCAL statement_timeout = '10s'")
         await cur.execute(_LATENCY, {"since": since})
         stats: list[dict[str, Any]] = await cur.fetchall()
         await cur.execute(_PROVIDER_FAILURES, {"since": since})
