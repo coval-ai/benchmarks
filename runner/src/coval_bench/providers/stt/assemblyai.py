@@ -3,7 +3,8 @@
 
 """AssemblyAI real-time STT provider (v3 streaming API).
 
-Models: universal-streaming, universal-streaming-multilingual, universal-N.M-pro
+Models: universal-streaming, universal-streaming-multilingual, universal-N.M-pro,
+stt-N.M-realtime-agent
 Wire protocol: WebSocket, wss://streaming.assemblyai.com/v3/ws
 Auth: Authorization: <key>
 Close: {"type": "Terminate"}
@@ -29,6 +30,7 @@ _SPEECH_MODEL_MAP: dict[str, str] = {
 # Pro releases (universal-3.5-pro, universal-3.6-pro, ...) need no code change: the
 # registry id maps to the API's speech_model by swapping dots for dashes.
 _PRO_MODEL = re.compile(r"^universal-\d+(?:\.\d+)?-pro$")
+_AGENT_MODEL = re.compile(r"^stt-\d+(?:\.\d+)?-realtime-agent$")
 _WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
 
 # 1.0 = pure VAD silence-latency mode: the model never declares end-of-turn on a
@@ -47,9 +49,17 @@ _END_OF_TURN_CONFIDENCE_THRESHOLD = 1.0
 # https://www.assemblyai.com/docs/streaming/prompting-and-keyterms
 _PRO_EXTRA_PARAMS: dict[str, str] = {"mode": "min_latency"}
 
+# mode=manual turns off the model's own turn detection, so the only endpoint is our
+# ForceEndpoint at speech-end. That makes the confidence threshold moot.
+_AGENT_EXTRA_PARAMS: dict[str, str] = {"mode": "manual"}
+
 
 def _is_pro(model: str) -> bool:
     return _PRO_MODEL.match(model) is not None
+
+
+def _is_agent(model: str) -> bool:
+    return _AGENT_MODEL.match(model) is not None
 
 
 def _speech_model(model: str) -> str:
@@ -62,13 +72,14 @@ class AssemblyAIProvider(WebSocketSTTProvider):
     _SAMPLE_RATE = 16000
 
     def _model_supported(self, model: str) -> bool:
-        return model in _SPEECH_MODEL_MAP or _is_pro(model)
+        return model in _SPEECH_MODEL_MAP or _is_pro(model) or _is_agent(model)
 
     def __init__(self, settings: Settings, model: str = "universal-streaming") -> None:
         if not self._model_supported(model):
             raise ValueError(
                 f"Invalid AssemblyAI model {model!r}. "
-                f"Valid: {sorted(_SPEECH_MODEL_MAP)} or universal-N.M-pro"
+                f"Valid: {sorted(_SPEECH_MODEL_MAP)}, universal-N.M-pro "
+                "or stt-N.M-realtime-agent"
             )
         super().__init__(settings, model)
         self._api_key = self._require_secret("assemblyai_api_key")
@@ -82,13 +93,15 @@ class AssemblyAIProvider(WebSocketSTTProvider):
         if _is_pro(self._model):
             url += f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
             url += "&" + urlencode(_PRO_EXTRA_PARAMS)
+        elif _is_agent(self._model):
+            url += "&" + urlencode(_AGENT_EXTRA_PARAMS)
         return url
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": self._api_key.get_secret_value()}
 
     async def _end_audio(self, ws: Any, tx: Transcription) -> None:
-        if _is_pro(self._model):
+        if _is_pro(self._model) or _is_agent(self._model):
             await self._send_and_wait(ws, json.dumps({"type": "ForceEndpoint"}), tx)
         await ws.send(json.dumps({"type": "Terminate"}))
 

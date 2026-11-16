@@ -20,6 +20,7 @@ from tests.providers.stt.conftest import load_fixture_events, make_settings
 
 # A synthetic Pro id: the tests pin the id-to-wire rule, not any registry entry.
 PRO_MODEL = "universal-1.2-pro"
+AGENT_MODEL = "stt-1.2-realtime-agent"
 
 
 def make_provider() -> AssemblyAIProvider:
@@ -127,6 +128,36 @@ async def test_pro_force_endpoint_before_terminate(stt_settings: Settings) -> No
     assert result.audio_to_final_seconds is not None
 
 
+@pytest.mark.asyncio
+async def test_agent_manual_mode_and_force_endpoint(stt_settings: Settings) -> None:
+    sent: list[Any] = []
+    final = {"type": "Turn", "end_of_turn": True, "transcript": "hello world"}
+    cm = fake_connect([final], sent)
+    provider = AssemblyAIProvider(stt_settings, model=AGENT_MODEL)
+
+    with patch(
+        "coval_bench.providers.stt._streaming.ws_client.connect", return_value=cm
+    ) as mock_connect:
+        result = await provider.measure_ttft(
+            audio_data=b"\x00" * 640,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    url = mock_connect.call_args.args[0]
+    assert "speech_model=stt-1-2-realtime-agent" in url
+    assert "mode=manual" in url
+    assert "end_of_turn_confidence_threshold" not in url
+    assert "min_latency" not in url
+
+    text = [m for m in sent if isinstance(m, str)]
+    assert '"ForceEndpoint"' in text[-2]
+    assert '"Terminate"' in text[-1]
+    assert result.audio_to_final_seconds is not None
+
+
 # ---------------------------------------------------------------------------
 # Provider name
 # ---------------------------------------------------------------------------
@@ -197,7 +228,9 @@ async def test_universal_streaming_multilingual_url_uses_api_speech_model(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("model", ["bad-model", f"{PRO_MODEL}-x", "universal-pro"])
+@pytest.mark.parametrize(
+    "model", ["bad-model", f"{PRO_MODEL}-x", "universal-pro", f"{AGENT_MODEL}-x"]
+)
 def test_invalid_model_raises(model: str) -> None:
     with pytest.raises(ValueError, match="Invalid AssemblyAI model"):
         AssemblyAIProvider(make_settings(), model=model)
