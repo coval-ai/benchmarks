@@ -37,7 +37,8 @@ async def get_quality(
 
     ``value`` is pooled: ``errors`` over ``reference_units`` across every item, as a
     percent. ``sample_count`` against ``expected_sample_count`` is how much of the dataset
-    was scored. A model with no completed sweep is not listed.
+    was scored. A model with no completed sweep is not listed. A sweep scored under more
+    than one metric version has a row for each.
     """
     try:
         rows = await fetch_quality(pool)

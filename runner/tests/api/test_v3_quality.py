@@ -136,3 +136,16 @@ async def test_an_unpublished_model_is_only_in_its_own_orgs_quality(
 
     assert public.json()["quality"] == []
     assert [row["provider"] for row in partner.json()["quality"]] == [EA_PROVIDER]
+
+
+async def test_a_completed_sweep_with_nothing_scored_keeps_the_previous_score(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        stt = _model_id(conn, "seed", "stt")
+        _sweep(conn, stt, [("a", "", 1, 10)])
+        _sweep(conn, stt, [], model_version=2, gave_up=3)
+
+    rows = (await client.get("/v3/quality")).json()["quality"]
+
+    assert [(row["model_version"], row["value"]) for row in rows] == [(1, 10.0)]

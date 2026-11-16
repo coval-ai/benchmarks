@@ -204,8 +204,13 @@ _QUALITY = """
            s.completed_at AS measured_at
     FROM (
         SELECT DISTINCT ON (model_id, dataset_id) *
-        FROM benchmarks_v2.sweeps
+        FROM benchmarks_v2.sweeps sw
         WHERE completed_at IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM benchmarks_v2.sweep_results r
+            JOIN benchmarks_v2.sweep_scores sc ON sc.sweep_result_id = r.id
+            WHERE r.sweep_id = sw.id
+          )
         ORDER BY model_id, dataset_id, model_version DESC, completed_at DESC
     ) s
     JOIN benchmarks_v2.models m ON m.id = s.model_id
@@ -220,8 +225,9 @@ _QUALITY = """
 async def fetch_quality(pool: Pool) -> list[dict[str, Any]]:
     """Each model's score on each dataset, from its latest completed sweep.
 
-    The latest is the highest model version with a completed sweep, so a model keeps its
-    previous score while a new version is still being swept. Errors and reference units
+    The latest is the highest model version with a completed sweep that scored anything,
+    so a model keeps its previous score while a new version is being swept, and when every
+    item of the new sweep failed. Errors and reference units
     are summed over every scored item, voices included. Raises ``QueryCanceled`` after
     ten seconds.
     """
