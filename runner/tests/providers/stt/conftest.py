@@ -90,6 +90,7 @@ _STT_KEY_FIELDS = (
     "meta_api_key",
     "mistral_api_key",
     "modulate_api_key",
+    "murfai_api_key",
     "nari_api_key",
     "openai_api_key",
     "reson8_api_key",
