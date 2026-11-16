@@ -726,6 +726,32 @@ class LatencyPointsResponse(BaseModel):
     points: list[LatencyPointOut]
 
 
+class QualityOut(BaseModel):
+    """One model's score on one dataset, pooled over every item of its latest completed sweep."""
+
+    model_id: int
+    provider: str
+    model: str
+    model_version: int
+    dataset: str
+    dataset_version: str
+    metric: str
+    metric_version: str
+    value: float | None
+    unit: Literal["percent"] = "percent"
+    errors: int
+    reference_units: int
+    sample_count: int
+    expected_sample_count: int
+    measured_at: datetime
+
+
+class QualityResponse(BaseModel):
+    """Response schema for GET /v3/quality."""
+
+    quality: list[QualityOut]
+
+
 class ErrorOut(BaseModel):
     """What went wrong with a ``/v3`` request."""
 
