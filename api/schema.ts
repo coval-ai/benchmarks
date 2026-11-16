@@ -460,6 +460,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v3/latency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Latency
+         * @description One row per model and metric: percentiles over the probes that succeeded in the window.
+         *
+         *     ``sample_count`` and ``failed_count`` together are the model's availability. Only
+         *     failures on the provider's side count. A probe that failed because of our key, our
+         *     credit or our rate limit is in neither. ``failed_count`` is the model's, so it is the
+         *     same on each of a model's rows and adding it up across them counts it twice.
+         */
+        get: operations["get_latency_v3_latency_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v3/latency/points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Latency Points
+         * @description Every model's *metric* over the window, as points for a chart.
+         *
+         *     The last 24 hours has one point per probe tick. Seven days is averaged by the hour and
+         *     thirty by the day, and ``bucket_seconds`` says which. A point with a null value is a
+         *     tick or bucket where every probe failed on the provider's side.
+         */
+        get: operations["get_latency_points_v3_latency_points_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v3/quality": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quality
+         * @description One row per model, dataset and metric, from the model's latest completed sweep.
+         *
+         *     ``value`` is pooled: ``errors`` over ``reference_units`` across every item, as a
+         *     percent. ``sample_count`` against ``expected_sample_count`` is how much of the dataset
+         *     was scored. A model with no completed sweep is not listed. A sweep scored under more
+         *     than one metric version has a row for each.
+         */
+        get: operations["get_quality_v3_quality_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mock/{platform}": {
         parameters: {
             query?: never;
@@ -1039,6 +1113,25 @@ export interface components {
             anchor: "latency" | "judge";
         };
         /**
+         * ErrorOut
+         * @description What went wrong with a ``/v3`` request.
+         */
+        ErrorOut: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Param */
+            param?: string | null;
+        };
+        /**
+         * ErrorResponse
+         * @description The body of every ``/v3`` error.
+         */
+        ErrorResponse: {
+            error: components["schemas"]["ErrorOut"];
+        };
+        /**
          * Gender
          * @description Perceived gender of a voice — an editorial label, not ground truth.
          *
@@ -1052,6 +1145,93 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * LatencyOut
+         * @description One model's latency on one metric over a time range.
+         */
+        LatencyOut: {
+            /** Model Id */
+            model_id: number;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "TTFT" | "TTFS" | "TTFA";
+            /**
+             * Unit
+             * @default milliseconds
+             * @constant
+             */
+            unit: "milliseconds";
+            /** P50 */
+            p50?: number | null;
+            /** P90 */
+            p90?: number | null;
+            /** P95 */
+            p95?: number | null;
+            /** Mean */
+            mean?: number | null;
+            /** Min */
+            min?: number | null;
+            /** Max */
+            max?: number | null;
+            /** Sample Count */
+            sample_count: number;
+            /** Failed Count */
+            failed_count: number;
+        };
+        /**
+         * LatencyPointOut
+         * @description One model's latency at one point in time. A null value means every probe failed.
+         */
+        LatencyPointOut: {
+            /** Model Id */
+            model_id: number;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /**
+             * Scheduled At
+             * Format: date-time
+             */
+            scheduled_at: string;
+            /** Value */
+            value: number | null;
+        };
+        /**
+         * LatencyPointsResponse
+         * @description Response schema for GET /v3/latency/points.
+         */
+        LatencyPointsResponse: {
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "TTFT" | "TTFS" | "TTFA";
+            /**
+             * Unit
+             * @default milliseconds
+             * @constant
+             */
+            unit: "milliseconds";
+            /** Bucket Seconds */
+            bucket_seconds: number;
+            /** Points */
+            points: components["schemas"]["LatencyPointOut"][];
+        };
+        /**
+         * LatencyResponse
+         * @description Response schema for GET /v3/latency.
+         */
+        LatencyResponse: {
+            /** Latency */
+            latency: components["schemas"]["LatencyOut"][];
         };
         /**
          * LeaderboardEntry
@@ -1298,6 +1478,57 @@ export interface components {
             llm: components["schemas"]["ProviderInfo"][];
             /** Tag Categories */
             tag_categories: components["schemas"]["TagCategoryOut"][];
+        };
+        /**
+         * QualityOut
+         * @description One model's score on one dataset, pooled over every item of its latest completed sweep.
+         */
+        QualityOut: {
+            /** Model Id */
+            model_id: number;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Model Version */
+            model_version: number;
+            /** Dataset */
+            dataset: string;
+            /** Dataset Version */
+            dataset_version: string;
+            /** Metric */
+            metric: string;
+            /** Metric Version */
+            metric_version: string;
+            /** Value */
+            value: number | null;
+            /**
+             * Unit
+             * @default percent
+             * @constant
+             */
+            unit: "percent";
+            /** Errors */
+            errors: number;
+            /** Reference Units */
+            reference_units: number;
+            /** Sample Count */
+            sample_count: number;
+            /** Expected Sample Count */
+            expected_sample_count: number;
+            /**
+             * Measured At
+             * Format: date-time
+             */
+            measured_at: string;
+        };
+        /**
+         * QualityResponse
+         * @description Response schema for GET /v3/quality.
+         */
+        QualityResponse: {
+            /** Quality */
+            quality: components["schemas"]["QualityOut"][];
         };
         /** ResultComponentOut */
         ResultComponentOut: {
@@ -2406,6 +2637,135 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminModelPricingOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_latency_v3_latency_get: {
+        parameters: {
+            query?: {
+                modality?: ("STT" | "TTS") | null;
+                metric?: ("TTFT" | "TTFS" | "TTFA") | null;
+                window?: "24h" | "7d" | "30d";
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LatencyResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_latency_points_v3_latency_points_get: {
+        parameters: {
+            query: {
+                metric: "TTFT" | "TTFS" | "TTFA";
+                window?: "24h" | "7d" | "30d";
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LatencyPointsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quality_v3_quality_get: {
+        parameters: {
+            query?: {
+                modality?: ("STT" | "TTS") | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */
