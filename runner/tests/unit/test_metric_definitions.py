@@ -89,6 +89,33 @@ def test_identity_and_retention_are_enforced(
     )
 
 
+def test_visibility_hides_internal_metrics_and_new_ones(
+    metric_pg: psycopg.Connection[Any],
+) -> None:
+    apply_migrations(metric_pg)
+    metric_pg.autocommit = True
+    levels = dict(
+        metric_pg.execute("SELECT code, visibility FROM benchmarks_v2.metrics").fetchall()
+    )
+    assert {code for code, level in levels.items() if level == "coval"} == {
+        "InterruptionCueLanded",
+        "InterruptionYielded",
+        "BackchannelContinued",
+        "InterruptionRate",
+        "CharacterErrorRate",
+        "ToolCallCount",
+    }
+    assert set(levels.values()) == {"public", "coval"}
+    metric_pg.execute(
+        "INSERT INTO benchmarks_v2.metrics (code, display_name) VALUES ('Fresh', 'Fresh')"
+    )
+    assert metric_pg.execute(
+        "SELECT visibility FROM benchmarks_v2.metrics WHERE code = 'Fresh'"
+    ).fetchone() == ("coval",)
+    with pytest.raises(psycopg.errors.CheckViolation), metric_pg.transaction():
+        metric_pg.execute("UPDATE benchmarks_v2.metrics SET visibility = 'secret'")
+
+
 def test_bucket_foreign_key_and_version_variant_identity(
     metric_pg: psycopg.Connection[Any],
 ) -> None:
