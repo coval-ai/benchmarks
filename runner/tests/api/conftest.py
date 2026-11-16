@@ -362,6 +362,41 @@ def _load_schema(**connect_kwargs: Any) -> None:
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.sweeps (
+                id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                model_id        bigint NOT NULL REFERENCES benchmarks_v2.models (id),
+                model_version   integer NOT NULL,
+                dataset_id      text NOT NULL,
+                dataset_version text NOT NULL,
+                created_at      timestamptz NOT NULL DEFAULT now(),
+                completed_at    timestamptz,
+                UNIQUE (model_id, model_version, dataset_id, dataset_version)
+            );
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.sweep_results (
+                id        bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                sweep_id  bigint NOT NULL REFERENCES benchmarks_v2.sweeps (id),
+                sample_id text NOT NULL,
+                voice     text NOT NULL DEFAULT '',
+                UNIQUE (sweep_id, sample_id, voice)
+            );
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.sweep_scores (
+                id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                sweep_result_id bigint NOT NULL REFERENCES benchmarks_v2.sweep_results (id),
+                metric          text NOT NULL,
+                metric_version  text NOT NULL,
+                errors          integer NOT NULL,
+                reference_units integer NOT NULL,
+                UNIQUE (sweep_result_id, metric, metric_version)
+            );
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.sweep_queue (
+                sweep_id   bigint NOT NULL REFERENCES benchmarks_v2.sweeps (id),
+                sample_id  text NOT NULL,
+                voice      text NOT NULL DEFAULT '',
+                tries_left integer NOT NULL DEFAULT 3,
+                PRIMARY KEY (sweep_id, sample_id, voice)
+            );
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.model_history (
                 id        bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 model_id  bigint NOT NULL,

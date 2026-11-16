@@ -1,0 +1,138 @@
+# Copyright 2026 The Coval Benchmarks Authors
+# SPDX-License-Identifier: Apache-2.0
+
+"""GET /v3/quality over HTTP."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import psycopg
+from httpx import AsyncClient
+
+from coval_bench.registries import RegisteredModel
+from coval_bench.registries.benchmarks import Benchmark
+from tests.api.conftest import EA_MODEL, EA_ORG, EA_PROVIDER, _make_db_url, add_models, bearer
+
+
+def _model_id(conn: Any, provider: str, model: str) -> int:
+    row = conn.execute(
+        "SELECT id FROM benchmarks_v2.models WHERE provider = %s AND model = %s", (provider, model)
+    ).fetchone()
+    return int(row[0])
+
+
+def _sweep(
+    conn: Any,
+    model_id: int,
+    scores: list[tuple[str, str, int, int]],
+    *,
+    dataset: str = "stt-v3",
+    model_version: int = 1,
+    completed: bool = True,
+    gave_up: int = 0,
+) -> None:
+    """A sweep with one scored result per (sample, voice, errors, reference units)."""
+    sweep_id = conn.execute(
+        "INSERT INTO benchmarks_v2.sweeps"
+        " (model_id, model_version, dataset_id, dataset_version, completed_at)"
+        " VALUES (%s, %s, %s, '1.1.0', CASE WHEN %s THEN now() END) RETURNING id",
+        (model_id, model_version, dataset, completed),
+    ).fetchone()[0]
+    for sample, voice, errors, units in scores:
+        result_id = conn.execute(
+            "INSERT INTO benchmarks_v2.sweep_results (sweep_id, sample_id, voice)"
+            " VALUES (%s, %s, %s) RETURNING id",
+            (sweep_id, sample, voice),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO benchmarks_v2.sweep_scores"
+            " (sweep_result_id, metric, metric_version, errors, reference_units)"
+            " VALUES (%s, 'WER', '4', %s, %s)",
+            (result_id, errors, units),
+        )
+    for index in range(gave_up):
+        conn.execute(
+            "INSERT INTO benchmarks_v2.sweep_queue (sweep_id, sample_id, tries_left)"
+            " VALUES (%s, %s, 0)",
+            (sweep_id, f"gave-up-{index}"),
+        )
+
+
+async def test_quality_is_pooled_over_the_latest_completed_sweep(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        stt = _model_id(conn, "seed", "stt")
+        tts = _model_id(conn, "seed", "tts-a")
+        _sweep(conn, stt, [("a", "", 1, 10), ("b", "", 2, 30)], gave_up=1)
+        _sweep(conn, stt, [("a", "", 9, 10)], dataset="stt-wildasr-clean", completed=False)
+        _sweep(conn, tts, [("a", "f", 0, 20), ("a", "m", 1, 20)], dataset="tts-v2")
+
+    response = await client.get("/v3/quality")
+
+    assert response.status_code == 200
+    rows = {(row["model_id"], row["dataset"]): row for row in response.json()["quality"]}
+    assert set(rows) == {(stt, "stt-v3"), (tts, "tts-v2")}
+    measured_at = rows[(stt, "stt-v3")].pop("measured_at")
+    assert measured_at.endswith("Z")
+    assert rows[(stt, "stt-v3")] == {
+        "model_id": stt,
+        "provider": "seed",
+        "model": "stt",
+        "model_version": 1,
+        "dataset": "stt-v3",
+        "dataset_version": "1.1.0",
+        "metric": "WER",
+        "metric_version": "4",
+        "value": 7.5,
+        "unit": "percent",
+        "errors": 3,
+        "reference_units": 40,
+        "sample_count": 2,
+        "expected_sample_count": 3,
+    }
+    pooled = rows[(tts, "tts-v2")]
+    assert (pooled["value"], pooled["errors"], pooled["sample_count"]) == (2.5, 1, 2)
+    only_tts = (await client.get("/v3/quality?modality=TTS")).json()["quality"]
+    assert [row["model_id"] for row in only_tts] == [tts]
+
+
+async def test_a_model_keeps_its_previous_score_while_a_new_version_is_swept(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        stt = _model_id(conn, "seed", "stt")
+        _sweep(conn, stt, [("a", "", 1, 10)])
+        _sweep(conn, stt, [("a", "", 5, 10)], model_version=2, completed=False)
+
+    before = (await client.get("/v3/quality")).json()["quality"]
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        conn.execute("UPDATE benchmarks_v2.sweeps SET completed_at = now() WHERE model_version = 2")
+    after = (await client.get("/v3/quality")).json()["quality"]
+
+    assert [(row["model_version"], row["value"]) for row in before] == [(1, 10.0)]
+    assert [(row["model_version"], row["value"]) for row in after] == [(2, 50.0)]
+
+
+async def test_an_unpublished_model_is_only_in_its_own_orgs_quality(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    add_models(
+        postgresql,
+        RegisteredModel(
+            benchmark=Benchmark.STT,
+            provider=EA_PROVIDER,
+            model=EA_MODEL,
+            collected=True,
+            published=False,
+        ),
+    )
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        _sweep(conn, _model_id(conn, EA_PROVIDER, EA_MODEL), [("a", "", 1, 10)])
+
+    public = await client.get("/v3/quality")
+    partner = await client.get("/v3/quality", headers=bearer(sub="u", org_id=EA_ORG))
+
+    assert public.json()["quality"] == []
+    assert [row["provider"] for row in partner.json()["quality"]] == [EA_PROVIDER]
