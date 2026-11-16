@@ -109,3 +109,13 @@ async def test_a_signed_in_caller_outside_any_mapped_org_is_public(
     seen = await _where_ttft_shows(client, bearer(org_id="org_test_stranger"))
 
     assert not any(seen.values())
+
+
+async def test_unreadable_levels_fail_score_routes_but_not_the_roster(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        conn.execute("ALTER TABLE benchmarks_v2.metrics DROP COLUMN visibility")
+
+    assert (await client.get("/v1/results/aggregates", params=_STT)).status_code == 503
+    assert (await client.get("/v1/providers")).status_code == 200
