@@ -24,6 +24,39 @@ router = APIRouter(tags=["quality"])
 
 ModalityLiteral = Literal["STT", "TTS"]
 
+_POOL_KEY = (
+    "model_id",
+    "model_version",
+    "benchmark",
+    "benchmark_version",
+    "metric",
+    "metric_version",
+)
+
+
+def _pooled(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per model, benchmark and metric, summed over the benchmark's conditions.
+
+    A metric version that didn't score every condition is dropped: its sum would
+    cover only part of the benchmark.
+    """
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault(tuple(row[key] for key in _POOL_KEY), []).append(row)
+    return [
+        {
+            **group[0],
+            "condition": None,
+            "errors": sum(row["errors"] for row in group),
+            "reference_units": sum(row["reference_units"] for row in group),
+            "sample_count": sum(row["sample_count"] for row in group),
+            "expected_sample_count": sum(row["expected_sample_count"] for row in group),
+            "measured_at": max(row["measured_at"] for row in group),
+        }
+        for group in groups.values()
+        if len(group) == group[0]["conditions"]
+    ]
+
 
 @router.get("/quality", response_model=QualityResponse, responses={400: {"model": ErrorResponse}})
 @limiter.limit("60/minute")
@@ -31,24 +64,40 @@ async def get_quality(
     request: Request,  # required by slowapi
     modality: ModalityLiteral | None = Query(default=None),
     benchmark: str | None = Query(default=None),
+    breakdown: Literal["condition"] | None = Query(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
     visible_metric_codes: frozenset[str] = Depends(visible_metrics),
 ) -> QualityResponse:
-    """One row per model, benchmark, condition and metric, from the model's latest completed
-    sweep.
+    """One row per model, benchmark and metric, pooled across the benchmark's conditions.
 
-    ``value`` is pooled: ``errors`` over ``reference_units`` across every item, as a
-    percent. ``sample_count`` against ``expected_sample_count`` is how much of the dataset
-    was scored, and ``benchmark_version`` is the version of that dataset. ``condition`` is
-    null for a benchmark without conditions. A model with no completed sweep is not listed.
-    A sweep scored under more than one metric version has a row for each.
+    ``breakdown=condition`` returns one row per condition instead, each naming its
+    ``condition``; a response never holds both levels. ``value`` is pooled: ``errors``
+    over ``reference_units`` across every item, as a percent. ``sample_count`` against
+    ``expected_sample_count`` is how much of the benchmark was scored, and
+    ``benchmark_version`` is the version of its datasets.
+
+    A model's rows come from its newest version with a completed sweep of every
+    condition, so it keeps its previous scores until the last condition finishes and is
+    not listed for a benchmark it has never finished. A sweep scored under more than one
+    metric version has a row for each.
     """
     try:
         rows = await fetch_quality(pool)
     except psycopg.Error as exc:
         raise HTTPException(503, "quality results are unavailable") from exc
 
+    rows = [
+        row
+        for row in rows
+        if (row["provider"], row["model"]) not in hidden
+        and row["metric"] in visible_metric_codes
+        and modality in (None, row["modality"])
+        and benchmark in (None, row["benchmark"])
+        and not is_metric_excluded(row["provider"], row["model"], row["metric"])
+    ]
+    if breakdown is None:
+        rows = _pooled(rows)
     quality = [
         QualityOut(
             model_id=row["model_id"],
@@ -72,10 +121,5 @@ async def get_quality(
             measured_at=row["measured_at"].astimezone(UTC),
         )
         for row in rows
-        if (row["provider"], row["model"]) not in hidden
-        and row["metric"] in visible_metric_codes
-        and modality in (None, row["modality"])
-        and benchmark in (None, row["benchmark"])
-        and not is_metric_excluded(row["provider"], row["model"], row["metric"])
     ]
     return QualityResponse(quality=quality)

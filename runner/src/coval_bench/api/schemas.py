@@ -728,8 +728,8 @@ class LatencyPointsResponse(BaseModel):
 
 
 class QualityOut(BaseModel):
-    """One model's score on one condition of a benchmark, pooled over every item of its latest
-    completed sweep. ``condition`` is null for a benchmark without conditions."""
+    """One model's score on a benchmark, pooled over every scored item. ``condition`` is set
+    only on a per-condition row."""
 
     model_id: int
     provider: str
