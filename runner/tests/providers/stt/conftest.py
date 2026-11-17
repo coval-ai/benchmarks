@@ -73,6 +73,7 @@ def _fast_streaming(monkeypatch: pytest.MonkeyPatch) -> None:
 _TEST_KEY = SecretStr("test-api-key-00000000000000000000")
 
 _STT_KEY_FIELDS = (
+    "aircaps_api_key",
     "assemblyai_api_key",
     "azure_api_key",
     "baseten_api_key",
