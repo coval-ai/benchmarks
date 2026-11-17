@@ -372,6 +372,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/benchmarks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Admin Benchmarks
+         * @description Every benchmark with the datasets it owns.
+         */
+        get: operations["list_admin_benchmarks_v1_admin_benchmarks_get"];
+        put?: never;
+        /**
+         * Create Admin Benchmark
+         * @description Register a benchmark. It owns no datasets until they are added.
+         */
+        post: operations["create_admin_benchmark_v1_admin_benchmarks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/benchmarks/{slug}/datasets/{dataset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Admin Benchmark Dataset
+         * @description Add a dataset to the benchmark, or change the condition of one it owns.
+         */
+        put: operations["put_admin_benchmark_dataset_v1_admin_benchmarks__slug__datasets__dataset_id__put"];
+        post?: never;
+        /**
+         * Delete Admin Benchmark Dataset
+         * @description Detach a dataset from the benchmark.
+         */
+        delete: operations["delete_admin_benchmark_dataset_v1_admin_benchmarks__slug__datasets__dataset_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/provider-health": {
         parameters: {
             query?: never;
@@ -606,6 +654,33 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AdminBenchmarkCreate
+         * @description POST body for /v1/admin/benchmarks.
+         */
+        AdminBenchmarkCreate: {
+            /** Slug */
+            slug: string;
+            modality: components["schemas"]["Benchmark"];
+            /** Name */
+            name: string;
+        };
+        /**
+         * AdminBenchmarkDatasetPut
+         * @description PUT body for a benchmark's dataset; a null condition is its one unconditioned dataset.
+         */
+        AdminBenchmarkDatasetPut: {
+            /** Condition */
+            condition?: string | null;
+        };
+        /**
+         * AdminBenchmarksResponse
+         * @description Response schema for GET /v1/admin/benchmarks.
+         */
+        AdminBenchmarksResponse: {
+            /** Benchmarks */
+            benchmarks: components["schemas"]["RegisteredBenchmark"][];
+        };
         /**
          * AdminChangeOut
          * @description One history row, embedded under its model. ``old`` is NULL on create.
@@ -1040,6 +1115,13 @@ export interface components {
          * @enum {string}
          */
         Benchmark: "STT" | "TTS" | "S2S" | "LLM";
+        /** BenchmarkDataset */
+        BenchmarkDataset: {
+            /** Dataset Id */
+            dataset_id: string;
+            /** Condition */
+            condition: string | null;
+        };
         /** ChatRequest */
         ChatRequest: {
             /** Model */
@@ -1529,6 +1611,26 @@ export interface components {
         QualityResponse: {
             /** Quality */
             quality: components["schemas"]["QualityOut"][];
+        };
+        /** RegisteredBenchmark */
+        RegisteredBenchmark: {
+            /** Slug */
+            slug: string;
+            /** Modality */
+            modality: string;
+            /** Name */
+            name: string;
+            /** Datasets */
+            datasets: components["schemas"]["BenchmarkDataset"][];
+            /** Updated By User Id */
+            updated_by_user_id: string;
+            /** Updated By Email */
+            updated_by_email: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** ResultComponentOut */
         ResultComponentOut: {
@@ -2436,6 +2538,144 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["S2SSampleAudioOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_admin_benchmarks_v1_admin_benchmarks_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminBenchmarksResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_admin_benchmark_v1_admin_benchmarks_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminBenchmarkCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegisteredBenchmark"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_admin_benchmark_dataset_v1_admin_benchmarks__slug__datasets__dataset_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                slug: string;
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminBenchmarkDatasetPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegisteredBenchmark"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_admin_benchmark_dataset_v1_admin_benchmarks__slug__datasets__dataset_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                slug: string;
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegisteredBenchmark"];
                 };
             };
             /** @description Validation Error */
