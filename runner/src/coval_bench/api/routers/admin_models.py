@@ -45,7 +45,7 @@ from coval_bench.db.registry_store import (
     RegistryStore,
     StaleEdit,
 )
-from coval_bench.registries import Benchmark, Gender
+from coval_bench.registries import Benchmark, Gender, Visibility
 from coval_bench.registries.metrics import METRIC_EXCLUSIONS
 from coval_bench.registries.provider_keys import provider_names
 from coval_bench.s2s.sync_trigger import start_s2s_sync
@@ -67,9 +67,15 @@ def _model_out(record: ModelRecord, history: list[ModelChange]) -> AdminModelOut
     return AdminModelOut.model_validate(
         {
             **record.model_dump(),
+            "published": record.visibility == "public",
             "history": [AdminChangeOut.model_validate(change.model_dump()) for change in history],
         }
     )
+
+
+def _level(published: bool) -> Visibility:
+    """The level the older ``published`` flag asks for."""
+    return "public" if published else "partner"
 
 
 def _implemented_providers(modality: Benchmark) -> frozenset[str] | None:
@@ -171,7 +177,9 @@ async def create_admin_model(
     """Create a model. It starts collecting immediately; nothing is public yet."""
     never_shared(response)
     store = RegistryStore(pool)
-    new = NewModel.model_validate(body.model_dump())
+    new = NewModel.model_validate(
+        {**body.model_dump(), "visibility": body.visibility or _level(body.published)}
+    )
     await _validate_model(new, store)
     try:
         record = await store.insert_model(
@@ -248,6 +256,9 @@ async def update_admin_model(
         raise HTTPException(404, "no such model")
     if changes.get("version", current.version + 1) != current.version + 1:
         raise HTTPException(422, f"version only moves up by one, to {current.version + 1}")
+    published = changes.pop("published", None)
+    if published is not None and published != (current.visibility == "public"):
+        changes.setdefault("visibility", _level(published))
     candidate = ModelRecord.model_validate({**current.model_dump(), **changes})
     await _validate_model(candidate, store)
     try:

@@ -86,7 +86,7 @@ async def _seed_model(postgresql: Any, **overrides: Any) -> int:
         "voices": Jsonb([]),
         "region": None,
         "collected": True,
-        "published": False,
+        "visibility": "partner",
         "tags": (),
     }
     fields.update(overrides)
@@ -95,7 +95,7 @@ async def _seed_model(postgresql: Any, **overrides: Any) -> int:
         postgresql,
         """
         INSERT INTO benchmarks_v2.models
-            (modality, provider, model, voice, voices, region, collected, published,
+            (modality, provider, model, voice, voices, region, collected, visibility,
              updated_by_user_id, updated_by_email)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'user_seed', 'seed@coval.dev')
         RETURNING id
@@ -108,7 +108,7 @@ async def _seed_model(postgresql: Any, **overrides: Any) -> int:
             fields["voices"],
             fields["region"],
             fields["collected"],
-            fields["published"],
+            fields["visibility"],
         ),
     )
     model_id = int(row[0])
@@ -226,7 +226,7 @@ async def test_a_tag_added_through_the_api_reaches_the_catalogue(
         postgresql,
         provider="acme",
         model="stt-tagged",
-        published=True,
+        visibility="public",
         tags=("turbo-mode", "keyterm-biasing"),
     )
 
@@ -257,6 +257,20 @@ def test_the_real_provider_registries_resolve() -> None:
     # Optional-SDK providers resolve even where their extras are not installed.
     assert tts is not None and "google" in tts
     assert _real_implemented(Benchmark.S2S) is None
+
+
+async def test_a_model_can_be_made_coval_only_and_the_old_flag_still_publishes_it(
+    client: AsyncClient,
+) -> None:
+    created = (await _post_model(client, visibility="coval")).json()
+    assert (created["visibility"], created["published"]) == ("coval", False)
+
+    unchanged = await _patch(client, created["id"], created["updated_at"], {"published": False})
+    assert unchanged.json()["model"]["visibility"] == "coval"
+
+    stamp = unchanged.json()["model"]["updated_at"]
+    published = await _patch(client, created["id"], stamp, {"published": True})
+    assert published.json()["model"]["visibility"] == "public"
 
 
 async def test_create_defaults_to_hidden(client: AsyncClient) -> None:
@@ -297,7 +311,7 @@ async def test_create_rejects_duplicates_and_bad_input(client: AsyncClient) -> N
 
 async def test_a_stopped_model_may_name_a_dead_provider(client: AsyncClient) -> None:
     """History rows for providers whose code is gone stay importable, never collectable."""
-    created = await _post_model(client, provider="gone", collected=False, published=False)
+    created = await _post_model(client, provider="gone", collected=False, visibility="partner")
     assert created.status_code == 201
     body = created.json()
     revive = await _patch(client, body["id"], f'"{body["updated_at"]}"', {"collected": True})
@@ -377,7 +391,7 @@ async def test_patch_flips_state_and_records_history(client: AsyncClient) -> Non
     assert payload["model"]["published"] is True
     assert payload["model"]["updated_at"] != created["updated_at"]
     newest = payload["model"]["history"][0]
-    assert (newest["old"]["published"], newest["new"]["published"]) == (False, True)
+    assert (newest["old"]["visibility"], newest["new"]["visibility"]) == ("partner", "public")
 
 
 async def test_patch_requires_the_precondition_tag(client: AsyncClient) -> None:
@@ -425,7 +439,7 @@ async def test_a_color_is_stored_lowercase_and_reaches_the_catalogue(
     client: AsyncClient,
 ) -> None:
     """However it is typed, the row and the public roster say #rrggbb in lowercase."""
-    created = (await _post_model(client, published=True, color="#1DB098")).json()
+    created = (await _post_model(client, visibility="public", color="#1DB098")).json()
     assert created["color"] == "#1db098"
     assert created["history"][0]["new"]["color"] == "#1db098"
 
@@ -463,7 +477,7 @@ async def test_a_color_is_six_hex_digits_or_nothing(client: AsyncClient, color: 
 
 
 async def test_display_name_is_set_cleared_and_reaches_the_catalogue(client: AsyncClient) -> None:
-    created = (await _post_model(client, published=True, display_name="Acme One")).json()
+    created = (await _post_model(client, visibility="public", display_name="Acme One")).json()
     assert created["display_name"] == "Acme One"
     assert created["history"][0]["new"]["display_name"] == "Acme One"
 

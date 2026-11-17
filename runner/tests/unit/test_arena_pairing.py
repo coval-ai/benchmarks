@@ -31,7 +31,7 @@ def _model(name: str) -> RegisteredModel:
         model=name,
         voice="v",
         collected=True,
-        published=True,
+        visibility="public",
     )
 
 
@@ -47,7 +47,7 @@ def _gendered_model(provider: str, model: str) -> RegisteredModel:
             Voice(id=f"{model}-m", gender=Gender.MALE),
         ),
         collected=True,
-        published=True,
+        visibility="public",
     )
 
 
@@ -162,10 +162,10 @@ def test_select_pair_rejects_non_positive_scale() -> None:
 _LIVE = _gendered_model("live", "m")
 _OPTED_OUT = _gendered_model("shy", "m").model_copy(update={"arena_enabled": False})
 _PAUSED = _gendered_model("paused", "m").model_copy(update={"collected": False})
-_EMBARGOED = _gendered_model("early", "m").model_copy(update={"published": False})
+_EMBARGOED = _gendered_model("early", "m").model_copy(update={"visibility": "partner"})
 _NO_POOL = _model("tiers")
 _STT = RegisteredModel(
-    benchmark=Benchmark.STT, provider="stt", model="m", collected=True, published=True
+    benchmark=Benchmark.STT, provider="stt", model="m", collected=True, visibility="public"
 )
 _MIXED = [_LIVE, _OPTED_OUT, _PAUSED, _EMBARGOED, _NO_POOL, _STT]
 
@@ -199,7 +199,7 @@ def test_voice_for_returns_the_matching_half() -> None:
         voice="v",
         voices=(Voice(id="她", gender=Gender.FEMALE), Voice(id="他", gender=Gender.MALE)),
         collected=True,
-        published=True,
+        visibility="public",
     )
     assert voice_for(model, Gender.FEMALE).id == "她"
     assert voice_for(model, Gender.MALE).id == "他"
@@ -213,7 +213,7 @@ def test_voice_for_raises_when_the_model_cannot_field_the_gender() -> None:
         voice="v",
         voices=(Voice(id="only-female", gender=Gender.FEMALE),),
         collected=True,
-        published=True,
+        visibility="public",
     )
     with pytest.raises(ValueError, match="no male voice"):
         voice_for(model, Gender.MALE)

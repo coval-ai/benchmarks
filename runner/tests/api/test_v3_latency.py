@@ -125,7 +125,7 @@ async def test_an_unpublished_model_is_only_in_its_own_orgs_latency(
             provider=EA_PROVIDER,
             model=EA_MODEL,
             collected=True,
-            published=False,
+            visibility="partner",
         ),
     )
     set_company_org(postgresql, EA_PROVIDER, "org_test_linked")
@@ -204,7 +204,7 @@ async def test_points_need_a_metric_and_hide_unpublished_models(
             provider=EA_PROVIDER,
             model=EA_MODEL,
             collected=True,
-            published=False,
+            visibility="partner",
         ),
     )
     set_company_org(postgresql, EA_PROVIDER, "org_test_linked")

@@ -4,7 +4,7 @@
 """Who may see what on ``/v3``.
 
 The proof is a bearer Clerk session token. The coval org sees everything. An org set
-on a company sees that company's unpublished models, and partner-level metrics on that
+on a company sees that company's partner-level models, and partner-level metrics on that
 company's models. Anyone else gets the public view. Which org belongs to which company
 is read from the ``companies`` table on each request, so a change takes effect at once.
 """
@@ -23,19 +23,17 @@ from coval_bench.api import clerk
 from coval_bench.api.deps import get_metric_visibility, get_models, get_pool, get_settings
 from coval_bench.api.internal import EA_STATUS_HEADER, PUBLIC_CACHE_CONTROL, VARY_HEADERS
 from coval_bench.config import Settings
-from coval_bench.registries import RegisteredModel
+from coval_bench.registries import RegisteredModel, Visibility
 
 
 @dataclass(frozen=True)
 class Caller:
-    """Who is asking: their level, and the company whose unpublished models they see."""
+    """Who is asking: their level, and the company whose partner-level results they see."""
 
     proof: Literal["absent", "unknown", "accepted"]
     level: clerk.CallerLevel = "public"
     company: str | None = None
 
-
-Visibility = Literal["public", "partner", "coval"]
 
 _LOOSEST_FIRST: tuple[Visibility, ...] = ("public", "partner", "coval")
 
@@ -93,7 +91,7 @@ def visible(
     who: Caller = Depends(caller),
     models: Sequence[RegisteredModel] = Depends(get_models),
     metric_levels: dict[str, str] = Depends(get_metric_visibility),
-) -> Callable[[str, str, str], bool]:
+) -> Callable[[str, str, str, str], bool]:
     """A check of whether this caller may see a model's result for a metric.
 
     A result takes the stricter level of its model and its metric. A metric with no
@@ -106,13 +104,13 @@ def visible(
         response.headers["Cache-Control"] = "private, no-store"
     elif authorization is None:
         response.headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
-    unpublished = {(m.provider, m.model) for m in models if not m.published}
+    model_levels = {(str(m.benchmark), m.provider, m.model): m.visibility for m in models}
 
-    def sees(provider: str, model: str, metric: str) -> bool:
-        if metric not in metric_levels:
+    def sees(modality: str, provider: str, model: str, metric: str) -> bool:
+        key = (modality, provider, model)
+        if metric not in metric_levels or key not in model_levels:
             return False
-        model_level: Visibility = "partner" if (provider, model) in unpublished else "public"
-        level = strictest(model_level, cast("Visibility", metric_levels[metric]))
+        level = strictest(model_levels[key], cast("Visibility", metric_levels[metric]))
         return can_see(who, level, provider)
 
     return sees

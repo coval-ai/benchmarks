@@ -66,7 +66,7 @@ def _serve_model(app: FastAPI, *, collected: bool = True, published: bool = True
         provider=EA_PROVIDER,
         model=EA_MODEL,
         collected=collected,
-        published=published,
+        visibility="public" if published else "partner",
     )
     app.dependency_overrides[deps.get_models] = lambda: [*TEST_ROSTER, model]
 

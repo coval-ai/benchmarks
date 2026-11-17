@@ -23,7 +23,7 @@ def _entry(voices: tuple[str, ...] = ()) -> RegisteredModel:
             Voice(id=v, gender=Gender.FEMALE if v.startswith("f") else Gender.MALE) for v in voices
         ),
         collected=True,
-        published=True,
+        visibility="public",
     )
 
 

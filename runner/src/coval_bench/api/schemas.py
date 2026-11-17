@@ -29,6 +29,7 @@ from coval_bench.registries import (
     Orchestration,
     Source,
     TagCategory,
+    Visibility,
     Voice,
 )
 from coval_bench.scenarios import binding_for_dataset
@@ -535,6 +536,7 @@ class AdminModelOut(BaseModel):
     region: Literal["us", "eu", "asia"] | None = None
     arena_enabled: bool
     collected: bool
+    visibility: Visibility
     published: bool
     tags: list[str] = []
     color: str | None = None
@@ -555,7 +557,11 @@ class AdminModelsResponse(BaseModel):
 
 
 class AdminModelCreate(BaseModel):
-    """POST body for /v1/admin/models. The defaults land the model Hidden."""
+    """POST body for /v1/admin/models. The defaults land the model Hidden.
+
+    ``visibility`` is the level. ``published`` is the older way to say public or
+    partner, and is only read when ``visibility`` is left out.
+    """
 
     modality: Benchmark
     provider: str = Field(min_length=1)
@@ -569,6 +575,7 @@ class AdminModelCreate(BaseModel):
     region: Literal["us", "eu", "asia"] | None = None
     arena_enabled: bool = True
     collected: bool = True
+    visibility: Visibility | None = None
     published: bool = False
     tags: list[str] = []
     color: HexColor = None
@@ -595,6 +602,7 @@ class AdminModelPatch(BaseModel):
     region: Literal["us", "eu", "asia"] | None = None
     arena_enabled: bool | None = None
     collected: bool | None = None
+    visibility: Visibility | None = None
     published: bool | None = None
     tags: list[str] | None = None
     color: HexColor = None

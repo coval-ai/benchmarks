@@ -96,6 +96,9 @@ class Voice(BaseModel, frozen=True, extra="forbid"):
     accent: str | None = None
 
 
+Visibility = Literal["public", "partner", "coval"]
+
+
 class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     """A single benchmarked model: identity, display metadata, run config."""
 
@@ -120,9 +123,8 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     # Do we spend money measuring it: the orchestrator schedules runs for it and
     # the arena may pair it.
     collected: bool
-    # Are its results public. An unpublished model's results are served only to
-    # the org its grant names, never to everyone.
-    published: bool
+    # Who its results are served to: everyone, its own company and coval, or coval.
+    visibility: Visibility
     arena_enabled: bool = True  # in the arena roster? independent of `collected`
     # The series color the site draws the model in, as lowercase ``#rrggbb``.
     # None means the site picks one from its built-in palette.
@@ -135,3 +137,8 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     architecture: Architecture | None = None
     orchestration: Orchestration | None = None
     version: int = 1
+
+    @property
+    def published(self) -> bool:
+        """Whether its results are public."""
+        return self.visibility == "public"

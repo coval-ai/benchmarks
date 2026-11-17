@@ -437,6 +437,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
         companies = import_module("coval_bench.db.migrations.versions.20261117_0066_companies")
         with patch.object(companies, "op", SimpleNamespace(execute=conn.execute)):
             companies.upgrade()
+        model_visibility = import_module(
+            "coval_bench.db.migrations.versions.20261117_0067_model_visibility"
+        )
+        with patch.object(model_visibility, "op", SimpleNamespace(execute=conn.execute)):
+            model_visibility.upgrade()
         # Pricing log (mirrors migration 20260903_0027).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.pricing_rates (
@@ -496,7 +501,7 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
             """
             INSERT INTO benchmarks_v2.models
                 (modality, provider, model, voice, voices, creator, source, licensing,
-                 on_prem, region, arena_enabled, collected, published, color,
+                 on_prem, region, arena_enabled, collected, visibility, color,
                  display_name, architecture, orchestration, updated_by_user_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'tests')
             RETURNING id
@@ -514,7 +519,7 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
                 model.region,
                 model.arena_enabled,
                 model.collected,
-                model.published,
+                model.visibility,
                 model.color,
                 model.display_name,
                 model.architecture,

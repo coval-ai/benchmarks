@@ -51,7 +51,11 @@ def test_a_single_connection_provider_shares_one_lock_across_its_models() -> Non
 
     def key(model: str, provider_cls: Any) -> str:
         entry = RegisteredModel(
-            benchmark=Benchmark.STT, provider="acme", model=model, collected=True, published=True
+            benchmark=Benchmark.STT,
+            provider="acme",
+            model=model,
+            collected=True,
+            visibility="public",
         )
         return model_lock_key(entry, provider_cls)
 

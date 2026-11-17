@@ -114,14 +114,14 @@ def s2s_samples_env(monkeypatch: pytest.MonkeyPatch, postgresql: Any) -> None:
             provider=_LIVE[0],
             model=_LIVE[1],
             collected=True,
-            published=True,
+            visibility="public",
         ),
         RegisteredModel(
             benchmark=Benchmark.S2S,
             provider=_EMBARGOED[0],
             model=_EMBARGOED[1],
             collected=True,
-            published=False,
+            visibility="partner",
         ),
     )
 

@@ -56,7 +56,7 @@ def _llm_model(provider: str, *, collected: bool) -> RegisteredModel:
         provider=provider,
         model=f"{provider}-agent",
         collected=collected,
-        published=False,
+        visibility="partner",
     )
 
 
