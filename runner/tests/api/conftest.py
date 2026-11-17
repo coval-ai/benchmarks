@@ -429,6 +429,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
             CREATE INDEX IF NOT EXISTS model_history_model_id_changed_at
                 ON benchmarks_v2.model_history (model_id, changed_at DESC)
         """)
+        benchmark_registry = import_module(
+            "coval_bench.db.migrations.versions.20261117_0065_benchmark_registry"
+        )
+        with patch.object(benchmark_registry, "op", SimpleNamespace(execute=conn.execute)):
+            benchmark_registry.upgrade()
         # Pricing log (mirrors migration 20260903_0027).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.pricing_rates (
