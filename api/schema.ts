@@ -420,6 +420,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/companies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Admin Companies
+         * @description Every company with its Clerk org, if it has one.
+         */
+        get: operations["list_admin_companies_v1_admin_companies_get"];
+        put?: never;
+        /**
+         * Create Admin Company
+         * @description Add a company. Its slug is the provider string its models carry.
+         */
+        post: operations["create_admin_company_v1_admin_companies_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/companies/{slug}/org": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Admin Company Org
+         * @description Set the company's Clerk org, so that org sees the company's unpublished models.
+         */
+        put: operations["set_admin_company_org_v1_admin_companies__slug__org_put"];
+        post?: never;
+        /**
+         * Clear Admin Company Org
+         * @description Remove the company's Clerk org.
+         */
+        delete: operations["clear_admin_company_org_v1_admin_companies__slug__org_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/provider-health": {
         parameters: {
             query?: never;
@@ -713,6 +761,32 @@ export interface components {
              * Format: date-time
              */
             changed_at: string;
+        };
+        /**
+         * AdminCompaniesResponse
+         * @description Response schema for GET /v1/admin/companies.
+         */
+        AdminCompaniesResponse: {
+            /** Companies */
+            companies: components["schemas"]["Company"][];
+        };
+        /**
+         * AdminCompanyCreate
+         * @description POST body for /v1/admin/companies.
+         */
+        AdminCompanyCreate: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * AdminCompanyOrgPut
+         * @description PUT body for /v1/admin/companies/{slug}/org.
+         */
+        AdminCompanyOrgPut: {
+            /** Org Id */
+            org_id: string;
         };
         /**
          * AdminHealthResponse
@@ -1140,6 +1214,24 @@ export interface components {
             simulation_id?: string | null;
             /** Stream */
             stream?: boolean | null;
+        };
+        /** Company */
+        Company: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Org Id */
+            org_id: string | null;
+            /** Updated By User Id */
+            updated_by_user_id: string;
+            /** Updated By Email */
+            updated_by_email: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** DashboardMaterialization */
         DashboardMaterialization: {
@@ -2698,6 +2790,142 @@ export interface operations {
             };
         };
     };
+    list_admin_companies_v1_admin_companies_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCompaniesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_admin_company_v1_admin_companies_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCompanyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Company"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_admin_company_org_v1_admin_companies__slug__org_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCompanyOrgPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Company"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_admin_company_org_v1_admin_companies__slug__org_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Company"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     admin_health_v1_admin_provider_health_get: {
         parameters: {
             query?: never;
@@ -2991,6 +3219,8 @@ export interface operations {
             query?: {
                 modality?: ("STT" | "TTS") | null;
                 benchmark?: string | null;
+                metric?: string | null;
+                model_id?: number | null;
                 breakdown?: "condition" | null;
             };
             header?: {
