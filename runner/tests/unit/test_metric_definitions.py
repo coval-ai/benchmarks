@@ -110,8 +110,11 @@ def test_visibility_hides_internal_metrics_and_new_ones(
         "INSERT INTO benchmarks_v2.metrics (code, display_name) VALUES ('Fresh', 'Fresh')"
     )
     assert metric_pg.execute(
-        "SELECT visibility FROM benchmarks_v2.metrics WHERE code = 'Fresh'"
-    ).fetchone() == ("coval",)
+        "SELECT visibility, collected FROM benchmarks_v2.metrics WHERE code = 'Fresh'"
+    ).fetchone() == ("coval", True)
+    assert metric_pg.execute(
+        "SELECT bool_and(collected) FROM benchmarks_v2.metrics"
+    ).fetchone() == (True,)
     with pytest.raises(psycopg.errors.CheckViolation), metric_pg.transaction():
         metric_pg.execute("UPDATE benchmarks_v2.metrics SET visibility = 'secret'")
 
