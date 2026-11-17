@@ -434,6 +434,9 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(benchmark_registry, "op", SimpleNamespace(execute=conn.execute)):
             benchmark_registry.upgrade()
+        companies = import_module("coval_bench.db.migrations.versions.20261117_0066_companies")
+        with patch.object(companies, "op", SimpleNamespace(execute=conn.execute)):
+            companies.upgrade()
         # Pricing log (mirrors migration 20260903_0027).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.pricing_rates (
@@ -567,6 +570,17 @@ def add_models(postgresql: Any, *models: RegisteredModel) -> None:
     """Add models to one test's database, on top of the seeded registry."""
     with psycopg.connect(_make_db_url(postgresql)) as conn:
         _insert_models(conn, models)
+        conn.commit()
+
+
+def set_company_org(postgresql: Any, company: str, org_id: str) -> None:
+    """Give *company* the Clerk org *org_id* in one test's database."""
+    with psycopg.connect(_make_db_url(postgresql)) as conn:
+        conn.execute(
+            "INSERT INTO benchmarks_v2.companies (slug, name, clerk_org_id, updated_by_user_id)"
+            " VALUES (%s, %s, %s, 'tests')",
+            (company, company, org_id),
+        )
         conn.commit()
 
 
