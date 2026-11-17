@@ -566,12 +566,18 @@ export interface paths {
         };
         /**
          * Get Quality
-         * @description One row per model, dataset and metric, from the model's latest completed sweep.
+         * @description One row per model, benchmark and metric, pooled across the benchmark's conditions.
          *
-         *     ``value`` is pooled: ``errors`` over ``reference_units`` across every item, as a
-         *     percent. ``sample_count`` against ``expected_sample_count`` is how much of the dataset
-         *     was scored. A model with no completed sweep is not listed. A sweep scored under more
-         *     than one metric version has a row for each.
+         *     ``breakdown=condition`` returns one row per condition instead, each naming its
+         *     ``condition``; a response never holds both levels. ``value`` is pooled: ``errors``
+         *     over ``reference_units`` across every item, as a percent. ``sample_count`` against
+         *     ``expected_sample_count`` is how much of the benchmark was scored, and
+         *     ``benchmark_version`` is the version of its datasets.
+         *
+         *     A model's rows come from its newest version with a completed sweep of every
+         *     condition, so it keeps its previous scores until the last condition finishes and is
+         *     not listed for a benchmark it has never finished. A sweep scored under more than one
+         *     metric version has a row for each.
          */
         get: operations["get_quality_v3_quality_get"];
         put?: never;
@@ -1563,7 +1569,8 @@ export interface components {
         };
         /**
          * QualityOut
-         * @description One model's score on one dataset, pooled over every item of its latest completed sweep.
+         * @description One model's score on a benchmark, pooled over every scored item. ``condition`` is set
+         *     only on a per-condition row.
          */
         QualityOut: {
             /** Model Id */
@@ -1574,10 +1581,12 @@ export interface components {
             model: string;
             /** Model Version */
             model_version: number;
-            /** Dataset */
-            dataset: string;
-            /** Dataset Version */
-            dataset_version: string;
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Version */
+            benchmark_version: string;
+            /** Condition */
+            condition: string | null;
             /** Metric */
             metric: string;
             /** Metric Version */
@@ -2981,6 +2990,8 @@ export interface operations {
         parameters: {
             query?: {
                 modality?: ("STT" | "TTS") | null;
+                benchmark?: string | null;
+                breakdown?: "condition" | null;
             };
             header?: {
                 authorization?: string | null;
