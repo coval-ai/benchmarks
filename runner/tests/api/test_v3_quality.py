@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 import psycopg
+import pytest
 from httpx import AsyncClient
 
 from coval_bench.registries import RegisteredModel
@@ -21,6 +22,24 @@ from tests.api.conftest import (
     add_models,
     bearer,
 )
+
+
+@pytest.fixture(autouse=True)
+def registry(postgresql: Any) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        conn.execute(
+            """INSERT INTO benchmarks_v2.benchmarks (slug, modality, name, updated_by_user_id)
+               VALUES ('stt-v3', 'STT', 'STT v3', 'tests'),
+                      ('stt-wildasr', 'STT', 'WildASR', 'tests'),
+                      ('tts-v2', 'TTS', 'TTS v2', 'tests')"""
+        )
+        conn.execute(
+            """INSERT INTO benchmarks_v2.benchmark_datasets (dataset_id, benchmark, condition)
+               VALUES ('stt-v3', 'stt-v3', NULL),
+                      ('stt-wildasr-clean', 'stt-wildasr', 'clean'),
+                      ('stt-wildasr-farfield', 'stt-wildasr', 'farfield'),
+                      ('tts-v2', 'tts-v2', NULL)"""
+        )
 
 
 def _model_id(conn: Any, provider: str, model: str) -> int:
@@ -80,7 +99,7 @@ async def test_quality_is_pooled_over_the_latest_completed_sweep(
     response = await client.get("/v3/quality")
 
     assert response.status_code == 200
-    rows = {(row["model_id"], row["dataset"]): row for row in response.json()["quality"]}
+    rows = {(row["model_id"], row["benchmark"]): row for row in response.json()["quality"]}
     assert set(rows) == {(stt, "stt-v3"), (tts, "tts-v2")}
     measured_at = rows[(stt, "stt-v3")].pop("measured_at")
     assert measured_at.endswith("Z")
@@ -89,8 +108,9 @@ async def test_quality_is_pooled_over_the_latest_completed_sweep(
         "provider": "seed",
         "model": "stt",
         "model_version": 1,
-        "dataset": "stt-v3",
-        "dataset_version": "1.1.0",
+        "benchmark": "stt-v3",
+        "benchmark_version": "1.1.0",
+        "condition": None,
         "metric": "WER",
         "metric_version": "4",
         "value": 7.5,
@@ -104,6 +124,27 @@ async def test_quality_is_pooled_over_the_latest_completed_sweep(
     assert (pooled["value"], pooled["errors"], pooled["sample_count"]) == (2.5, 1, 2)
     only_tts = (await client.get("/v3/quality?modality=TTS")).json()["quality"]
     assert [row["model_id"] for row in only_tts] == [tts]
+
+
+async def test_a_row_names_its_benchmark_and_condition(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        stt = _model_id(conn, "seed", "stt")
+        _sweep(conn, stt, [("a", "", 1, 10)])
+        _sweep(conn, stt, [("a", "", 2, 10)], dataset="stt-wildasr-clean")
+        _sweep(conn, stt, [("a", "", 5, 10)], dataset="stt-wildasr-farfield")
+        _sweep(conn, stt, [("a", "", 9, 10)], dataset="stt-unregistered")
+
+    everything = (await client.get("/v3/quality")).json()["quality"]
+    wildasr = (await client.get("/v3/quality?benchmark=stt-wildasr")).json()["quality"]
+
+    assert [(row["benchmark"], row["condition"], row["value"]) for row in everything] == [
+        ("stt-v3", None, 10.0),
+        ("stt-wildasr", "clean", 20.0),
+        ("stt-wildasr", "farfield", 50.0),
+    ]
+    assert [row["condition"] for row in wildasr] == ["clean", "farfield"]
 
 
 async def test_a_model_keeps_its_previous_score_while_a_new_version_is_swept(

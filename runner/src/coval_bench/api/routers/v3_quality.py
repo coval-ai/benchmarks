@@ -30,16 +30,19 @@ ModalityLiteral = Literal["STT", "TTS"]
 async def get_quality(
     request: Request,  # required by slowapi
     modality: ModalityLiteral | None = Query(default=None),
+    benchmark: str | None = Query(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
     visible_metric_codes: frozenset[str] = Depends(visible_metrics),
 ) -> QualityResponse:
-    """One row per model, dataset and metric, from the model's latest completed sweep.
+    """One row per model, benchmark, condition and metric, from the model's latest completed
+    sweep.
 
     ``value`` is pooled: ``errors`` over ``reference_units`` across every item, as a
     percent. ``sample_count`` against ``expected_sample_count`` is how much of the dataset
-    was scored. A model with no completed sweep is not listed. A sweep scored under more
-    than one metric version has a row for each.
+    was scored, and ``benchmark_version`` is the version of that dataset. ``condition`` is
+    null for a benchmark without conditions. A model with no completed sweep is not listed.
+    A sweep scored under more than one metric version has a row for each.
     """
     try:
         rows = await fetch_quality(pool)
@@ -52,8 +55,9 @@ async def get_quality(
             provider=row["provider"],
             model=row["model"],
             model_version=row["model_version"],
-            dataset=row["dataset"],
-            dataset_version=row["dataset_version"],
+            benchmark=row["benchmark"],
+            benchmark_version=row["benchmark_version"],
+            condition=row["condition"],
             metric=row["metric"],
             metric_version=row["metric_version"],
             value=(
@@ -71,6 +75,7 @@ async def get_quality(
         if (row["provider"], row["model"]) not in hidden
         and row["metric"] in visible_metric_codes
         and modality in (None, row["modality"])
+        and benchmark in (None, row["benchmark"])
         and not is_metric_excluded(row["provider"], row["model"], row["metric"])
     ]
     return QualityResponse(quality=quality)
