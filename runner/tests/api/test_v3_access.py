@@ -8,8 +8,10 @@ from __future__ import annotations
 from typing import Any
 
 import psycopg
+import pytest
 from httpx import AsyncClient
 
+from coval_bench.api.v3_access import Caller, Visibility, can_see
 from coval_bench.registries import RegisteredModel
 from coval_bench.registries.benchmarks import Benchmark
 from tests.api.conftest import (
@@ -32,6 +34,18 @@ def _unpublished(provider: str, model: str) -> RegisteredModel:
     )
 
 
+def _probe_every_model(postgresql: Any) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        for (model_id,) in conn.execute("SELECT id FROM benchmarks_v2.models").fetchall():
+            conn.execute(
+                "INSERT INTO benchmarks_v2.probe_results"
+                " (model_id, scheduled_at, sent_at, status, ttft_ms, ttfa_ms)"
+                " VALUES (%s, now() - interval '1 hour', now() - interval '1 hour',"
+                " 'succeeded', 100, 100)",
+                (model_id,),
+            )
+
+
 async def _providers(client: AsyncClient, org_id: str | None) -> set[str]:
     headers = {} if org_id is None else bearer(sub="u", org_id=org_id)
     response = await client.get("/v3/latency", headers=headers)
@@ -44,15 +58,7 @@ async def test_an_org_sees_its_own_companys_unpublished_models_and_no_one_elses(
 ) -> None:
     add_models(postgresql, _unpublished(EA_PROVIDER, EA_MODEL), _unpublished("rival", "next"))
     set_company_org(postgresql, EA_PROVIDER, LINKED)
-    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
-        for (model_id,) in conn.execute("SELECT id FROM benchmarks_v2.models").fetchall():
-            conn.execute(
-                "INSERT INTO benchmarks_v2.probe_results"
-                " (model_id, scheduled_at, sent_at, status, ttft_ms, ttfa_ms)"
-                " VALUES (%s, now() - interval '1 hour', now() - interval '1 hour',"
-                " 'succeeded', 100, 100)",
-                (model_id,),
-            )
+    _probe_every_model(postgresql)
 
     public = await _providers(client, None)
     linked = await _providers(client, LINKED)
@@ -63,3 +69,45 @@ async def test_an_org_sees_its_own_companys_unpublished_models_and_no_one_elses(
     assert linked == public | {EA_PROVIDER}
     assert settings_only == public
     assert staff == public | {EA_PROVIDER, "rival"}
+
+
+async def test_a_partner_level_metric_shows_only_on_the_callers_own_models(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    add_models(
+        postgresql,
+        RegisteredModel(
+            benchmark=Benchmark.STT,
+            provider=EA_PROVIDER,
+            model=EA_MODEL,
+            collected=True,
+            published=True,
+        ),
+    )
+    set_company_org(postgresql, EA_PROVIDER, LINKED)
+    _probe_every_model(postgresql)
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        conn.execute("UPDATE benchmarks_v2.metrics SET visibility = 'partner'")
+
+    assert await _providers(client, None) == set()
+    assert await _providers(client, LINKED) == {EA_PROVIDER}
+    assert await _providers(client, COVAL_ORG) > {EA_PROVIDER}
+
+
+ANONYMOUS = Caller("absent")
+OWNER = Caller("accepted", "partner", "acme")
+RIVAL = Caller("accepted", "partner", "rival")
+STAFF = Caller("accepted", "coval")
+
+
+@pytest.mark.parametrize(
+    ("level", "who_sees_it"),
+    [
+        ("public", {ANONYMOUS, OWNER, RIVAL, STAFF}),
+        ("partner", {OWNER, STAFF}),
+        ("coval", {STAFF}),
+    ],
+)
+def test_who_sees_a_result_on_acmes_model(level: Visibility, who_sees_it: set[Caller]) -> None:
+    callers = (ANONYMOUS, OWNER, RIVAL, STAFF)
+    assert {who for who in callers if can_see(who, level, "acme")} == who_sees_it
