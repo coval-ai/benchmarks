@@ -195,7 +195,8 @@ async def complete_sweep(pool: Pool, sweep_id: int) -> bool:
 
 _QUALITY = """
     SELECT m.id AS model_id, m.modality, m.provider, m.model, s.model_version,
-           s.dataset_id AS dataset, s.dataset_version, sc.metric, sc.metric_version,
+           bd.benchmark, s.dataset_version AS benchmark_version, bd.condition,
+           sc.metric, sc.metric_version,
            sum(sc.errors) AS errors, sum(sc.reference_units) AS reference_units,
            count(*) AS sample_count,
            (SELECT count(*) FROM benchmarks_v2.sweep_results r WHERE r.sweep_id = s.id)
@@ -214,16 +215,20 @@ _QUALITY = """
         ORDER BY model_id, dataset_id, model_version DESC, completed_at DESC
     ) s
     JOIN benchmarks_v2.models m ON m.id = s.model_id
+    JOIN benchmarks_v2.benchmark_datasets bd ON bd.dataset_id = s.dataset_id
     JOIN benchmarks_v2.sweep_results r ON r.sweep_id = s.id
     JOIN benchmarks_v2.sweep_scores sc ON sc.sweep_result_id = r.id
-    GROUP BY m.id, s.id, s.model_version, s.dataset_id, s.dataset_version, s.completed_at,
-             sc.metric, sc.metric_version
-    ORDER BY m.id, s.dataset_id, sc.metric, sc.metric_version
+    GROUP BY m.id, s.id, s.model_version, s.dataset_version, s.completed_at,
+             bd.benchmark, bd.condition, sc.metric, sc.metric_version
+    ORDER BY m.id, bd.benchmark, bd.condition NULLS FIRST, sc.metric, sc.metric_version
 """
 
 
 async def fetch_quality(pool: Pool) -> list[dict[str, Any]]:
-    """Each model's score on each dataset, from its latest completed sweep.
+    """Each model's score on each registered dataset, from its latest completed sweep.
+
+    A row names the benchmark and condition its dataset belongs to. A dataset the
+    benchmark registry doesn't know is left out.
 
     The latest is the highest model version with a completed sweep that scored anything,
     so a model keeps its previous score while a new version is being swept, and when every
