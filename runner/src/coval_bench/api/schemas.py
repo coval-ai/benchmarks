@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from coval_bench.api.common import BenchmarkLiteral, StatisticLiteral, WindowLiteral
 from coval_bench.arena.domains import ArenaDomain
+from coval_bench.db.benchmark_store import RegisteredBenchmark
 from coval_bench.registries import (
     Architecture,
     Benchmark,
@@ -764,3 +765,26 @@ class ErrorResponse(BaseModel):
     """The body of every ``/v3`` error."""
 
     error: ErrorOut
+
+
+_SLUG = r"^[a-z0-9]+(-[a-z0-9]+)*$"
+
+
+class AdminBenchmarkCreate(BaseModel):
+    """POST body for /v1/admin/benchmarks."""
+
+    slug: str = Field(pattern=_SLUG)
+    modality: Benchmark
+    name: str = Field(min_length=1)
+
+
+class AdminBenchmarkDatasetPut(BaseModel):
+    """PUT body for a benchmark's dataset; a null condition is its one unconditioned dataset."""
+
+    condition: str | None = Field(default=None, pattern=_SLUG)
+
+
+class AdminBenchmarksResponse(BaseModel):
+    """Response schema for GET /v1/admin/benchmarks."""
+
+    benchmarks: list[RegisteredBenchmark]
