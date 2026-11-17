@@ -13,7 +13,9 @@ Mounted outside ``/v1``: this is not part of the public read API, it is an
 appliance the agents talk to. It carries a shared secret rather than Clerk —
 the caller is a voice platform's tool runner, not a browser — and it is not rate
 limited, because a burst of calls is a scenario doing its job and a 429
-mid-conversation would be graded as the agent breaking.
+mid-conversation would be graded as the agent breaking. One conversation is capped
+at ``mock_tools_max_calls`` tool calls; past that every call is answered with a
+``tool_call_limit_reached`` error in the platform's reply shape and nothing else.
 """
 
 from __future__ import annotations
@@ -30,9 +32,9 @@ from starlette.responses import JSONResponse
 
 from coval_bench.api.deps import get_pool, get_settings, secret_matches
 from coval_bench.config import Settings
-from coval_bench.db.mock_tool_store import record_call
+from coval_bench.db.mock_tool_store import count_calls, record_call
 from coval_bench.mocktools.codecs import Codec, codec_for
-from coval_bench.mocktools.dispatch import Suite
+from coval_bench.mocktools.dispatch import Outcome, Suite
 from coval_bench.mocktools.scoring import schedule_scoring
 from coval_bench.mocktools.traces import schedule_export
 
@@ -103,16 +105,36 @@ async def _answer(
     started_ns = time.time_ns()
     calls = codec.decode(body, request.headers, tool)
     correlation = codec.correlate(body, request.headers)
-    outcomes = [suite.dispatcher.call(call.tool, call.args) for call in calls]
+    limit = settings.mock_tools_max_calls
+    used = await count_calls(
+        pool, simulation_id=correlation.simulation_id, caller_number=correlation.caller_number
+    )
+    answered = calls[: max(limit - used, 0)]
+    answered_outcomes = [suite.dispatcher.call(call.tool, call.args) for call in answered]
+    refused = len(calls) - len(answered)
+    outcomes = (
+        answered_outcomes
+        + [Outcome(response={"error": "tool_call_limit_reached", "limit": limit}, http_status=429)]
+        * refused
+    )
+    if refused:
+        logger.warning(
+            "mock_tool_call_limit_reached",
+            platform=codec.name,
+            limit=limit,
+            refused=refused,
+            simulation_id=correlation.simulation_id,
+            correlation_source=correlation.source,
+        )
 
-    budget_s = len(calls) * settings.mock_tools_latency_ms / 1000
+    budget_s = len(answered) * settings.mock_tools_latency_ms / 1000
     remaining = budget_s - (time.perf_counter() - started)
     if remaining > 0:
         await asyncio.sleep(remaining)
-    latency_ms = (time.perf_counter() - started) * 1000 / max(len(calls), 1)
+    latency_ms = (time.perf_counter() - started) * 1000 / max(len(answered), 1)
     ended_ns = time.time_ns()
 
-    for call, outcome in zip(calls, outcomes, strict=True):
+    for call, outcome in zip(answered, answered_outcomes, strict=True):
         background.add_task(
             record_call,
             pool,
@@ -136,7 +158,7 @@ async def _answer(
         )
     if not calls:
         logger.warning("mock_tool_call_empty", platform=codec.name)
-    elif correlation.simulation_id:
+    elif answered and correlation.simulation_id:
         provider = getattr(request.app.state, "tracer_provider", None)
         if provider is None:
             logger.warning(
@@ -149,8 +171,8 @@ async def _answer(
                 provider=provider,
                 simulation_id=correlation.simulation_id,
                 platform=codec.name,
-                calls=calls,
-                outcomes=outcomes,
+                calls=answered,
+                outcomes=answered_outcomes,
                 started_ns=started_ns,
                 ended_ns=ended_ns,
             )
@@ -162,11 +184,11 @@ async def _answer(
                     simulation_id=correlation.simulation_id,
                     platform=codec.name,
                     checks=suite.checks,
-                    calls=calls,
+                    calls=answered,
                     started_ns=started_ns,
                     ended_ns=ended_ns,
                 )
-    else:
+    elif answered:
         logger.debug("mock_tool_spans_skipped", platform=codec.name, reason="no simulation id")
 
     payload, status = codec.encode(calls, outcomes)

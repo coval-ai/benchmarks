@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 import psycopg.rows
@@ -19,6 +19,7 @@ from httpx import AsyncClient
 
 import coval_bench.scenarios as contracts_module
 from coval_bench.api.routers import mocktools as mocktools_router
+from coval_bench.db.mock_tool_store import count_calls
 from coval_bench.mocktools.dispatch import Dispatcher, Suite, load_tool_specs
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture
 from tests.api.conftest import MOCK_TOOLS_KEY, _make_db_url
@@ -494,3 +495,76 @@ async def test_vapi_nested_function_shape_reaches_the_seed(
     )
     response = await client.post("/mock/vapi", json=body, headers=AUTH)
     assert json.loads(response.json()["results"][0]["result"]) == BULKY
+
+
+# --- the per-conversation cap ----------------------------------------------
+
+LIMIT_REACHED = {"error": "tool_call_limit_reached", "limit": 3}
+SIMULATION = {**AUTH, "X-Coval-Simulation-Id": SIMULATION_ID}
+
+
+@pytest.fixture
+def capped_app(mock_app: FastAPI) -> FastAPI:
+    mock_app.state.settings = mock_app.state.settings.model_copy(update={"mock_tools_max_calls": 3})
+    return mock_app
+
+
+async def _lookup(client: AsyncClient, headers: dict[str, str]) -> Any:
+    response = await client.post(
+        "/mock/generic/lookup_patient", json={"phone": PHONE}, headers=headers
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+async def test_a_call_past_the_cap_is_refused_and_not_logged(
+    client: AsyncClient, capped_app: FastAPI, postgresql: Any
+) -> None:
+    answers = [await _lookup(client, SIMULATION) for _ in range(5)]
+    assert answers == [BULKY, BULKY, BULKY, LIMIT_REACHED, LIMIT_REACHED]
+    assert len(await _rows(postgresql)) == 3
+
+
+async def test_the_cap_is_per_simulation(client: AsyncClient, capped_app: FastAPI) -> None:
+    for _ in range(3):
+        await _lookup(client, SIMULATION)
+    other = {**AUTH, "X-Coval-Simulation-Id": "sim_other"}
+    assert await _lookup(client, other) == BULKY
+
+
+async def test_the_cap_falls_back_to_the_caller_number(
+    client: AsyncClient, capped_app: FastAPI
+) -> None:
+    caller = {**AUTH, "X-Coval-Caller-Number": PHONE}
+    answers = [await _lookup(client, caller) for _ in range(4)]
+    assert answers == [BULKY, BULKY, BULKY, LIMIT_REACHED]
+
+
+async def test_an_uncorrelated_call_is_never_capped(
+    client: AsyncClient, capped_app: FastAPI
+) -> None:
+    answers = [await _lookup(client, AUTH) for _ in range(5)]
+    assert answers == [BULKY] * 5
+
+
+async def test_a_vapi_batch_is_cut_at_the_cap(
+    client: AsyncClient, capped_app: FastAPI, postgresql: Any
+) -> None:
+    body = _vapi(
+        *(
+            {"id": f"tc_{n}", "name": "lookup_patient", "arguments": {"phone": PHONE}}
+            for n in range(4)
+        )
+    )
+    response = await client.post("/mock/vapi", json=body, headers=SIMULATION)
+    results = [json.loads(result["result"]) for result in response.json()["results"]]
+    assert results == [BULKY, BULKY, BULKY, LIMIT_REACHED]
+    assert len(await _rows(postgresql)) == 3
+
+
+async def test_a_failed_count_leaves_the_call_answered() -> None:
+    class BrokenPool:
+        def connection(self) -> Any:
+            raise RuntimeError("database is down")
+
+    assert await count_calls(cast(Any, BrokenPool()), simulation_id=SIMULATION_ID) == 0
