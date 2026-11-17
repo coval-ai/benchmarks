@@ -64,6 +64,8 @@ async def get_quality(
     request: Request,  # required by slowapi
     modality: ModalityLiteral | None = Query(default=None),
     benchmark: str | None = Query(default=None),
+    metric: str | None = Query(default=None),
+    model_id: int | None = Query(default=None),
     breakdown: Literal["condition"] | None = Query(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
@@ -94,6 +96,8 @@ async def get_quality(
         and row["metric"] in visible_metric_codes
         and modality in (None, row["modality"])
         and benchmark in (None, row["benchmark"])
+        and metric in (None, row["metric"])
+        and model_id in (None, row["model_id"])
         and not is_metric_excluded(row["provider"], row["model"], row["metric"])
     ]
     if breakdown is None:
