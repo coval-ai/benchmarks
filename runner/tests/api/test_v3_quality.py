@@ -16,11 +16,11 @@ from coval_bench.registries.benchmarks import Benchmark
 from tests.api.conftest import (
     COVAL_ORG,
     EA_MODEL,
-    EA_ORG,
     EA_PROVIDER,
     _make_db_url,
     add_models,
     bearer,
+    set_company_org,
 )
 
 
@@ -218,11 +218,12 @@ async def test_an_unpublished_model_is_only_in_its_own_orgs_quality(
             published=False,
         ),
     )
+    set_company_org(postgresql, EA_PROVIDER, "org_test_linked")
     with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
         _sweep(conn, _model_id(conn, EA_PROVIDER, EA_MODEL), [("a", "", 1, 10)])
 
     public = await client.get("/v3/quality")
-    partner = await client.get("/v3/quality", headers=bearer(sub="u", org_id=EA_ORG))
+    partner = await client.get("/v3/quality", headers=bearer(sub="u", org_id="org_test_linked"))
 
     assert public.json()["quality"] == []
     assert [row["provider"] for row in partner.json()["quality"]] == [EA_PROVIDER]

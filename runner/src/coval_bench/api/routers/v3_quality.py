@@ -14,9 +14,9 @@ from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
 from coval_bench.api.deps import get_pool
-from coval_bench.api.internal import hidden_early_access, visible_metrics
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ErrorResponse, QualityOut, QualityResponse
+from coval_bench.api.v3_access import hidden_models, visible_metrics
 from coval_bench.db.sweep_store import fetch_quality
 from coval_bench.registries import is_metric_excluded
 
@@ -68,7 +68,7 @@ async def get_quality(
     model_id: int | None = Query(default=None),
     breakdown: Literal["condition"] | None = Query(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
-    hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    hidden: frozenset[tuple[str, str]] = Depends(hidden_models),
     visible_metric_codes: frozenset[str] = Depends(visible_metrics),
 ) -> QualityResponse:
     """One row per model, benchmark and metric, pooled across the benchmark's conditions.

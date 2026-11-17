@@ -16,11 +16,11 @@ from coval_bench.registries.benchmarks import Benchmark
 from tests.api.conftest import (
     COVAL_ORG,
     EA_MODEL,
-    EA_ORG,
     EA_PROVIDER,
     _make_db_url,
     add_models,
     bearer,
+    set_company_org,
 )
 
 NOW = datetime.now(UTC)
@@ -128,12 +128,13 @@ async def test_an_unpublished_model_is_only_in_its_own_orgs_latency(
             published=False,
         ),
     )
+    set_company_org(postgresql, EA_PROVIDER, "org_test_linked")
     with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
         hidden = _model_id(conn, EA_PROVIDER, EA_MODEL)
         _probe(conn, hidden, 1, ttft=150.0, ttfs=80.0)
 
     public = await client.get("/v3/latency")
-    partner = await client.get("/v3/latency", headers=bearer(sub="u", org_id=EA_ORG))
+    partner = await client.get("/v3/latency", headers=bearer(sub="u", org_id="org_test_linked"))
 
     assert hidden not in {row["model_id"] for row in public.json()["latency"]}
     assert hidden in {row["model_id"] for row in partner.json()["latency"]}
@@ -206,13 +207,14 @@ async def test_points_need_a_metric_and_hide_unpublished_models(
             published=False,
         ),
     )
+    set_company_org(postgresql, EA_PROVIDER, "org_test_linked")
     with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
         _probe(conn, _model_id(conn, EA_PROVIDER, EA_MODEL), 1, ttft=150.0)
 
     missing = await client.get("/v3/latency/points")
     public = await client.get("/v3/latency/points?metric=TTFT")
     partner = await client.get(
-        "/v3/latency/points?metric=TTFT", headers=bearer(sub="u", org_id=EA_ORG)
+        "/v3/latency/points?metric=TTFT", headers=bearer(sub="u", org_id="org_test_linked")
     )
 
     assert missing.status_code == 400

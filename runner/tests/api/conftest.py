@@ -573,6 +573,17 @@ def add_models(postgresql: Any, *models: RegisteredModel) -> None:
         conn.commit()
 
 
+def set_company_org(postgresql: Any, company: str, org_id: str) -> None:
+    """Give *company* the Clerk org *org_id* in one test's database."""
+    with psycopg.connect(_make_db_url(postgresql)) as conn:
+        conn.execute(
+            "INSERT INTO benchmarks_v2.companies (slug, name, clerk_org_id, updated_by_user_id)"
+            " VALUES (%s, %s, %s, 'tests')",
+            (company, company, org_id),
+        )
+        conn.commit()
+
+
 postgresql_proc = factories.postgresql_proc(load=[_load_schema, _seed_registry])
 postgresql = factories.postgresql("postgresql_proc")
 
