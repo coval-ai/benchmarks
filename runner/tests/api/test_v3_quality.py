@@ -154,6 +154,24 @@ async def test_conditions_pool_into_one_row_unless_broken_down(
     ]
 
 
+async def test_quality_filters_by_model_and_metric(client: AsyncClient, postgresql: Any) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        stt = _model_id(conn, "seed", "stt")
+        tts = _model_id(conn, "seed", "tts-a")
+        _sweep(conn, stt, [("a", "", 1, 10)])
+        _sweep(conn, tts, [("a", "f", 0, 20)], dataset="tts-v2")
+
+    one_model = (await client.get(f"/v3/quality?model_id={tts}")).json()["quality"]
+    wer = (await client.get("/v3/quality?metric=WER")).json()["quality"]
+    other_metric = (await client.get("/v3/quality?metric=TTFS")).json()["quality"]
+    bad_id = await client.get("/v3/quality?model_id=abc")
+
+    assert [row["model_id"] for row in one_model] == [tts]
+    assert {row["model_id"] for row in wer} == {stt, tts}
+    assert other_metric == []
+    assert bad_id.status_code == 400
+
+
 async def test_a_benchmark_stays_on_the_version_that_finished_every_condition(
     client: AsyncClient, postgresql: Any
 ) -> None:
