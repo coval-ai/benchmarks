@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from coval_bench.api.common import BenchmarkLiteral, StatisticLiteral, WindowLiteral
 from coval_bench.arena.domains import ArenaDomain
 from coval_bench.db.benchmark_store import RegisteredBenchmark
+from coval_bench.db.company_store import Company
 from coval_bench.registries import (
     Architecture,
     Benchmark,
@@ -790,3 +791,22 @@ class AdminBenchmarksResponse(BaseModel):
     """Response schema for GET /v1/admin/benchmarks."""
 
     benchmarks: list[RegisteredBenchmark]
+
+
+class AdminCompanyCreate(BaseModel):
+    """POST body for /v1/admin/companies."""
+
+    slug: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+
+
+class AdminCompanyOrgPut(BaseModel):
+    """PUT body for /v1/admin/companies/{slug}/org."""
+
+    org_id: str = Field(pattern=r"^org_[A-Za-z0-9]+$")
+
+
+class AdminCompaniesResponse(BaseModel):
+    """Response schema for GET /v1/admin/companies."""
+
+    companies: list[Company]

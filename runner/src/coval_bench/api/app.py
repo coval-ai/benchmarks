@@ -45,6 +45,7 @@ from coval_bench.api.ratelimit import _rate_limit_handler, limiter
 from coval_bench.api.request_logging import RequestLoggingMiddleware
 from coval_bench.api.routers import (
     admin_benchmarks,
+    admin_companies,
     admin_health,
     admin_models,
     admin_pricing,
@@ -246,6 +247,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(s2s_samples.router, prefix="/v1")
     app.include_router(arena.router, prefix="/v1")
     app.include_router(admin_benchmarks.router, prefix="/v1")
+    app.include_router(admin_companies.router, prefix="/v1")
     app.include_router(admin_health.router, prefix="/v1")
     app.include_router(admin_models.router, prefix="/v1")
     app.include_router(admin_pricing.router, prefix="/v1")
