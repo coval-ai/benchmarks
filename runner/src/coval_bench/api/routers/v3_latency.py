@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -23,7 +24,7 @@ from coval_bench.api.schemas import (
     LatencyPointsResponse,
     LatencyResponse,
 )
-from coval_bench.api.v3_access import hidden_models, visible_metrics
+from coval_bench.api.v3_access import visible
 from coval_bench.config import Settings
 from coval_bench.db.probe_store import fetch_latency, fetch_latency_points
 from coval_bench.registries import is_metric_excluded
@@ -44,8 +45,7 @@ async def get_latency(
     metric: MetricLiteral | None = Query(default=None),
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
-    hidden: frozenset[tuple[str, str]] = Depends(hidden_models),
-    visible_metric_codes: frozenset[str] = Depends(visible_metrics),
+    sees: Callable[[str, str, str], bool] = Depends(visible),
 ) -> LatencyResponse:
     """One row per model and metric: percentiles over the probes that succeeded in the window.
 
@@ -65,8 +65,7 @@ async def get_latency(
 
     def wanted(row: dict[str, Any], code: str) -> bool:
         return (
-            (row["provider"], row["model"]) not in hidden
-            and code in visible_metric_codes
+            sees(row["provider"], row["model"], code)
             and modality in (None, row["modality"])
             and metric in (None, code)
             and not is_metric_excluded(row["provider"], row["model"], code)
@@ -124,8 +123,7 @@ async def get_latency_points(
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     settings: Settings = Depends(get_settings),
-    hidden: frozenset[tuple[str, str]] = Depends(hidden_models),
-    visible_metric_codes: frozenset[str] = Depends(visible_metrics),
+    sees: Callable[[str, str, str], bool] = Depends(visible),
 ) -> LatencyPointsResponse:
     """Every model's *metric* over the window, as points for a chart.
 
@@ -158,8 +156,7 @@ async def get_latency_points(
             value=None if row["value"] is None else round(row["value"], 1),
         )
         for row in rows
-        if (row["provider"], row["model"]) not in hidden
-        and metric in visible_metric_codes
+        if sees(row["provider"], row["model"], metric)
         and not is_metric_excluded(row["provider"], row["model"], metric)
     ]
     return LatencyPointsResponse(

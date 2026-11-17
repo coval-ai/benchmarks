@@ -4,16 +4,16 @@
 """Who may see what on ``/v3``.
 
 The proof is a bearer Clerk session token. The coval org sees everything. An org set
-on a company sees that company's unpublished models and partner-level metrics. Anyone
-else gets the public view. Which org belongs to which company is read from the
-``companies`` table on each request, so a change takes effect at once.
+on a company sees that company's unpublished models, and partner-level metrics on that
+company's models. Anyone else gets the public view. Which org belongs to which company
+is read from the ``companies`` table on each request, so a change takes effect at once.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import psycopg
 from fastapi import Depends, Header, HTTPException, Response
@@ -21,14 +21,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.api import clerk
 from coval_bench.api.deps import get_metric_visibility, get_models, get_pool, get_settings
-from coval_bench.api.internal import (
-    _VISIBLE_TO,
-    EA_STATUS_HEADER,
-    PUBLIC_CACHE_CONTROL,
-    VARY_HEADERS,
-    embargoed_pairs,
-    with_retired_keys,
-)
+from coval_bench.api.internal import EA_STATUS_HEADER, PUBLIC_CACHE_CONTROL, VARY_HEADERS
 from coval_bench.config import Settings
 from coval_bench.registries import RegisteredModel
 
@@ -40,6 +33,27 @@ class Caller:
     proof: Literal["absent", "unknown", "accepted"]
     level: clerk.CallerLevel = "public"
     company: str | None = None
+
+
+Visibility = Literal["public", "partner", "coval"]
+
+_LOOSEST_FIRST: tuple[Visibility, ...] = ("public", "partner", "coval")
+
+
+def strictest(*levels: Visibility) -> Visibility:
+    """The level a result takes from its parts: the model, the metric and so on."""
+    return max(levels, key=_LOOSEST_FIRST.index)
+
+
+def can_see(who: Caller, level: Visibility, owner: str) -> bool:
+    """May this caller see a result at *level* for a model that *owner* owns.
+
+    Public is for everyone and coval is for coval staff. Partner is for coval staff
+    and the owning company, so a partner never sees it on someone else's model.
+    """
+    if level == "public" or who.level == "coval":
+        return True
+    return level == "partner" and who.company == owner
 
 
 async def caller(
@@ -73,34 +87,32 @@ async def caller(
     return Caller("accepted")
 
 
-def hidden_models(
+def visible(
     response: Response,
     authorization: str | None = Header(default=None),
     who: Caller = Depends(caller),
     models: Sequence[RegisteredModel] = Depends(get_models),
-) -> frozenset[tuple[str, str]]:
-    """The ``(provider, model)`` pairs this caller's responses must not contain.
+    metric_levels: dict[str, str] = Depends(get_metric_visibility),
+) -> Callable[[str, str, str], bool]:
+    """A check of whether this caller may see a model's result for a metric.
 
-    Sets the cache headers too, so no route can serve embargoed rows without them.
+    A result takes the stricter level of its model and its metric. A metric with no
+    row in the metrics table is served to no one. Sets the cache headers too, so no
+    route can serve a hidden result without them.
     """
     response.headers.append("Vary", VARY_HEADERS)
     response.headers[EA_STATUS_HEADER] = who.proof
-    embargoed = embargoed_pairs(models)
-    if who.proof != "accepted":
-        if authorization is None:
-            response.headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
-        return embargoed
-    response.headers["Cache-Control"] = "private, no-store"
-    if who.level == "coval":
-        return frozenset()
-    own = frozenset(pair for pair in embargoed if pair[0] == who.company)
-    return embargoed - with_retired_keys(own)
+    if who.proof == "accepted":
+        response.headers["Cache-Control"] = "private, no-store"
+    elif authorization is None:
+        response.headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
+    unpublished = {(m.provider, m.model) for m in models if not m.published}
 
+    def sees(provider: str, model: str, metric: str) -> bool:
+        if metric not in metric_levels:
+            return False
+        model_level: Visibility = "partner" if (provider, model) in unpublished else "public"
+        level = strictest(model_level, cast("Visibility", metric_levels[metric]))
+        return can_see(who, level, provider)
 
-def visible_metrics(
-    who: Caller = Depends(caller),
-    visibility: dict[str, str] = Depends(get_metric_visibility),
-    _cache_headers: frozenset[tuple[str, str]] = Depends(hidden_models),
-) -> frozenset[str]:
-    """The only metric codes this caller's responses may contain."""
-    return frozenset(code for code, shown in visibility.items() if shown in _VISIBLE_TO[who.level])
+    return sees
