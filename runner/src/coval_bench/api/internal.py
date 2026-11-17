@@ -20,7 +20,7 @@ from collections.abc import Sequence
 from fastapi import Depends, Header, Response
 
 from coval_bench.api import clerk
-from coval_bench.api.deps import get_models, get_settings
+from coval_bench.api.deps import get_metric_visibility, get_models, get_settings
 from coval_bench.config import Settings
 from coval_bench.registries import RegisteredModel
 
@@ -126,3 +126,30 @@ def hidden_early_access(
     response.headers[EA_STATUS_HEADER] = "accepted"
     response.headers["Cache-Control"] = "private, no-store"
     return embargoed - with_retired_keys(bearer)
+
+
+_VISIBLE_TO: dict[clerk.CallerLevel, frozenset[str]] = {
+    "public": frozenset({"public"}),
+    "partner": frozenset({"public", "partner"}),
+    "coval": frozenset({"public", "partner", "coval"}),
+}
+
+
+def visible_metrics(
+    authorization: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+    visibility: dict[str, str] = Depends(get_metric_visibility),
+    _cache_headers: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+) -> frozenset[str]:
+    """The only metric codes this caller's responses may contain.
+
+    An allowlist, so a code with no row in the metrics table is never served.
+    Depends on ``hidden_early_access`` so a route cannot filter metrics per
+    caller without also getting that caller's cache headers.
+    """
+    level: clerk.CallerLevel = (
+        "public"
+        if authorization is None or settings.clerk_issuer is None
+        else clerk.caller_level(authorization, settings)
+    )
+    return frozenset(code for code, shown in visibility.items() if shown in _VISIBLE_TO[level])

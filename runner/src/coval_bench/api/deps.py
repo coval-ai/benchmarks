@@ -25,7 +25,11 @@ from starlette.requests import Request
 
 from coval_bench.api import clerk, google_auth
 from coval_bench.config import Settings
-from coval_bench.db.registry_store import RegistryStore, TagRecord, fetch_models
+from coval_bench.db.registry_store import (
+    RegistryStore,
+    TagRecord,
+    fetch_models_and_metric_levels,
+)
 from coval_bench.llm.benchmark import ProxiedModel, llm_models
 from coval_bench.llm.turn import TurnClient
 from coval_bench.registries import RegisteredModel
@@ -121,24 +125,44 @@ def get_cache(request: Request) -> TTLCache[Any, Any]:
     return cast("TTLCache[Any, Any]", request.app.state.response_cache)
 
 
-async def get_models(
+async def read_registry(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
-) -> list[RegisteredModel]:
-    """The model roster, read fresh on every request.
+) -> tuple[list[RegisteredModel], dict[str, str] | None]:
+    """The model roster and metric visibility levels, read fresh on one connection per request.
 
-    Deliberately uncached. The roster decides who may see an embargoed model,
-    and a cached copy is per-instance: unpublishing one would stay visible on
-    every other instance until its copy aged out. The read is a few
-    milliseconds against a table of this size.
+    Deliberately uncached. They decide who may see an embargoed model or a hidden
+    metric, and a cached copy is per-instance: unpublishing one would stay visible
+    on every other instance until its copy aged out. The read is a few
+    milliseconds against tables of this size.
 
     Raises 503 rather than falling back to a default: a made-up roster could
     serve an embargoed model to the public.
     """
     try:
-        return await fetch_models(pool)
+        return await fetch_models_and_metric_levels(pool)
     except Exception as exc:
         logger.error("model_roster_unavailable", exc_info=True)
         raise HTTPException(503, "the model registry is unavailable") from exc
+
+
+async def get_models(
+    registry: tuple[list[RegisteredModel], dict[str, str] | None] = Depends(read_registry),
+) -> list[RegisteredModel]:
+    """The model roster."""
+    return registry[0]
+
+
+async def get_metric_visibility(
+    registry: tuple[list[RegisteredModel], dict[str, str] | None] = Depends(read_registry),
+) -> dict[str, str]:
+    """Each metric's visibility level.
+
+    Raises 503 rather than guessing: a made-up level could serve a hidden metric.
+    """
+    if registry[1] is None:
+        logger.error("metric_visibility_unavailable")
+        raise HTTPException(503, "metric visibility is unavailable")
+    return registry[1]
 
 
 async def get_proxied_model(

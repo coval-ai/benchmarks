@@ -52,6 +52,7 @@ from coval_bench.config import Settings
 from coval_bench.db.dashboard_rollups import rebuild_slots
 from coval_bench.db.dashboard_windows import refresh_window_views
 from coval_bench.registries import RegisteredModel
+from coval_bench.registries.metrics import METRIC_SPECS
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 from tests.roster import TEST_ROSTER
 
@@ -301,6 +302,18 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(pooled_workflow, "op", SimpleNamespace(execute=conn.execute)):
             pooled_workflow.upgrade()
+        # Prod had every registry metric before visibility arrived, so they stayed public.
+        for metric, spec in METRIC_SPECS.items():
+            conn.execute(
+                "INSERT INTO benchmarks_v2.metrics (code, display_name) VALUES (%s, %s)"
+                " ON CONFLICT (code) DO NOTHING",
+                (metric.value, spec.display_name),
+            )
+        visibility = import_module(
+            "coval_bench.db.migrations.versions.20261116_0064_metric_visibility"
+        )
+        with patch.object(visibility, "op", SimpleNamespace(execute=conn.execute)):
+            visibility.upgrade()
         # Model/tag registry tables (mirrors migration 20260824_0020).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.models (

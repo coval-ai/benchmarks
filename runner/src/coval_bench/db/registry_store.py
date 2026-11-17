@@ -249,6 +249,25 @@ class RegistryStore:
             rows = await self._select_models(conn, "ORDER BY m.id", ())
         return [_record(row) for row in rows]
 
+    async def list_models_and_metric_levels(
+        self,
+    ) -> tuple[list[ModelRecord], dict[str, str] | None]:
+        """The roster and each metric's visibility level, read on one connection.
+
+        The levels are ``None`` when they cannot be read, so the roster still loads.
+        """
+        async with self._pool.connection() as conn:
+            rows = await self._select_models(conn, "ORDER BY m.id", ())
+            try:
+                level_rows = await (
+                    await conn.execute("SELECT code, visibility FROM benchmarks_v2.metrics")
+                ).fetchall()
+            except psycopg.Error:
+                await conn.rollback()
+                return [_record(row) for row in rows], None
+        levels = {row["code"]: row["visibility"] for row in level_rows}
+        return [_record(row) for row in rows], levels
+
     async def get_model(self, model_id: int) -> ModelRecord | None:
         async with self._pool.connection() as conn:
             rows = await self._select_models(conn, "WHERE m.id = %s", (model_id,))
@@ -515,6 +534,14 @@ async def fetch_models(pool: RegistryPool) -> list[RegisteredModel]:
     ``/v1/providers`` serves per modality.
     """
     return [_registered(record) for record in await RegistryStore(pool).list_models()]
+
+
+async def fetch_models_and_metric_levels(
+    pool: RegistryPool,
+) -> tuple[list[RegisteredModel], dict[str, str] | None]:
+    """Every registered model plus each metric's visibility level, on one connection."""
+    records, levels = await RegistryStore(pool).list_models_and_metric_levels()
+    return [_registered(record) for record in records], levels
 
 
 async def fetch_models_with_ids(pool: RegistryPool) -> list[tuple[int, RegisteredModel]]:

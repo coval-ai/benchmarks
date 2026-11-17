@@ -35,7 +35,7 @@ from coval_bench.api.common import (
 )
 from coval_bench.api.dashboard_windows import dashboard_read, require_window_state
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
-from coval_bench.api.internal import hidden_early_access
+from coval_bench.api.internal import hidden_early_access, visible_metrics
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
 from coval_bench.config import DATASET_ALL
@@ -91,6 +91,7 @@ async def get_leaderboard(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    visible_metric_codes: frozenset[str] = Depends(visible_metrics),
 ) -> LeaderboardResponse:
     """Return leaderboard entries sorted ascending by average metric value.
 
@@ -133,6 +134,7 @@ async def get_leaderboard(
         )
         for r in entry_rows
         if (r["provider"], r["model"]) not in hidden
+        and metric in visible_metric_codes
         and not is_metric_excluded(r["provider"], r["model"], metric)
     ]
     capture_api_event(
