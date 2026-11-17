@@ -126,25 +126,48 @@ async def test_quality_is_pooled_over_the_latest_completed_sweep(
     assert [row["model_id"] for row in only_tts] == [tts]
 
 
-async def test_a_row_names_its_benchmark_and_condition(
+async def test_conditions_pool_into_one_row_unless_broken_down(
     client: AsyncClient, postgresql: Any
 ) -> None:
     with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
         stt = _model_id(conn, "seed", "stt")
         _sweep(conn, stt, [("a", "", 1, 10)])
         _sweep(conn, stt, [("a", "", 2, 10)], dataset="stt-wildasr-clean")
-        _sweep(conn, stt, [("a", "", 5, 10)], dataset="stt-wildasr-farfield")
+        _sweep(conn, stt, [("a", "", 5, 30), ("b", "", 0, 10)], dataset="stt-wildasr-farfield")
         _sweep(conn, stt, [("a", "", 9, 10)], dataset="stt-unregistered")
 
-    everything = (await client.get("/v3/quality")).json()["quality"]
+    pooled = (await client.get("/v3/quality")).json()["quality"]
     wildasr = (await client.get("/v3/quality?benchmark=stt-wildasr")).json()["quality"]
+    by_condition = (await client.get("/v3/quality?breakdown=condition")).json()["quality"]
 
-    assert [(row["benchmark"], row["condition"], row["value"]) for row in everything] == [
+    assert [(row["benchmark"], row["condition"], row["value"]) for row in pooled] == [
+        ("stt-v3", None, 10.0),
+        ("stt-wildasr", None, 14.0),
+    ]
+    assert [(row["errors"], row["reference_units"], row["sample_count"]) for row in wildasr] == [
+        (7, 50, 3)
+    ]
+    assert [(row["benchmark"], row["condition"], row["value"]) for row in by_condition] == [
         ("stt-v3", None, 10.0),
         ("stt-wildasr", "clean", 20.0),
-        ("stt-wildasr", "farfield", 50.0),
+        ("stt-wildasr", "farfield", 12.5),
     ]
-    assert [row["condition"] for row in wildasr] == ["clean", "farfield"]
+
+
+async def test_a_benchmark_stays_on_the_version_that_finished_every_condition(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        stt = _model_id(conn, "seed", "stt")
+        _sweep(conn, stt, [("a", "", 2, 10)], dataset="stt-wildasr-clean")
+        unfinished = (await client.get("/v3/quality?breakdown=condition")).json()["quality"]
+        _sweep(conn, stt, [("a", "", 4, 10)], dataset="stt-wildasr-farfield")
+        _sweep(conn, stt, [("a", "", 0, 10)], dataset="stt-wildasr-clean", model_version=2)
+
+    rows = (await client.get("/v3/quality")).json()["quality"]
+
+    assert unfinished == []
+    assert [(row["model_version"], row["value"]) for row in rows] == [(1, 30.0)]
 
 
 async def test_a_model_keeps_its_previous_score_while_a_new_version_is_swept(

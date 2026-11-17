@@ -194,8 +194,29 @@ async def complete_sweep(pool: Pool, sweep_id: int) -> bool:
 
 
 _QUALITY = """
+    WITH scored AS (
+        SELECT sw.*, bd.benchmark, bd.condition
+        FROM benchmarks_v2.sweeps sw
+        JOIN benchmarks_v2.benchmark_datasets bd ON bd.dataset_id = sw.dataset_id
+        WHERE sw.completed_at IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM benchmarks_v2.sweep_results r
+            JOIN benchmarks_v2.sweep_scores sc ON sc.sweep_result_id = r.id
+            WHERE r.sweep_id = sw.id
+          )
+    ), sizes AS (
+        SELECT benchmark, count(*) AS conditions
+        FROM benchmarks_v2.benchmark_datasets GROUP BY benchmark
+    ), complete AS (
+        SELECT DISTINCT ON (s.model_id, s.benchmark)
+               s.model_id, s.benchmark, s.model_version, s.dataset_version, z.conditions
+        FROM scored s JOIN sizes z USING (benchmark)
+        GROUP BY s.model_id, s.benchmark, s.model_version, s.dataset_version, z.conditions
+        HAVING count(*) = z.conditions
+        ORDER BY s.model_id, s.benchmark, s.model_version DESC, max(s.completed_at) DESC
+    )
     SELECT m.id AS model_id, m.modality, m.provider, m.model, s.model_version,
-           bd.benchmark, s.dataset_version AS benchmark_version, bd.condition,
+           s.benchmark, s.dataset_version AS benchmark_version, s.condition, c.conditions,
            sc.metric, sc.metric_version,
            sum(sc.errors) AS errors, sum(sc.reference_units) AS reference_units,
            count(*) AS sample_count,
@@ -203,38 +224,27 @@ _QUALITY = """
              + (SELECT count(*) FROM benchmarks_v2.sweep_queue q WHERE q.sweep_id = s.id)
              AS expected_sample_count,
            s.completed_at AS measured_at
-    FROM (
-        SELECT DISTINCT ON (model_id, dataset_id) *
-        FROM benchmarks_v2.sweeps sw
-        WHERE completed_at IS NOT NULL
-          AND EXISTS (
-            SELECT 1 FROM benchmarks_v2.sweep_results r
-            JOIN benchmarks_v2.sweep_scores sc ON sc.sweep_result_id = r.id
-            WHERE r.sweep_id = sw.id
-          )
-        ORDER BY model_id, dataset_id, model_version DESC, completed_at DESC
-    ) s
+    FROM scored s
+    JOIN complete c USING (model_id, benchmark, model_version, dataset_version)
     JOIN benchmarks_v2.models m ON m.id = s.model_id
-    JOIN benchmarks_v2.benchmark_datasets bd ON bd.dataset_id = s.dataset_id
     JOIN benchmarks_v2.sweep_results r ON r.sweep_id = s.id
     JOIN benchmarks_v2.sweep_scores sc ON sc.sweep_result_id = r.id
     GROUP BY m.id, s.id, s.model_version, s.dataset_version, s.completed_at,
-             bd.benchmark, bd.condition, sc.metric, sc.metric_version
-    ORDER BY m.id, bd.benchmark, bd.condition NULLS FIRST, sc.metric, sc.metric_version
+             s.benchmark, s.condition, c.conditions, sc.metric, sc.metric_version
+    ORDER BY m.id, s.benchmark, s.condition NULLS FIRST, sc.metric, sc.metric_version
 """
 
 
 async def fetch_quality(pool: Pool) -> list[dict[str, Any]]:
-    """Each model's score on each registered dataset, from its latest completed sweep.
+    """Each model's score on each condition of each benchmark, one row per registered dataset.
 
-    A row names the benchmark and condition its dataset belongs to. A dataset the
-    benchmark registry doesn't know is left out.
-
-    The latest is the highest model version with a completed sweep that scored anything,
-    so a model keeps its previous score while a new version is being swept, and when every
-    item of the new sweep failed. Errors and reference units
-    are summed over every scored item, voices included. Raises ``QueryCanceled`` after
-    ten seconds.
+    A model's rows for a benchmark come from its highest version that has a completed
+    sweep, with something scored, of every dataset the benchmark owns at one dataset
+    version. So a model keeps its previous scores until the last condition of a new
+    version finishes, and has no rows for a benchmark it has never finished.
+    ``conditions`` is how many datasets the benchmark owns. A dataset the benchmark
+    registry doesn't know is left out. Errors and reference units are summed over every
+    scored item, voices included. Raises ``QueryCanceled`` after ten seconds.
     """
     async with (
         pool.connection() as conn,
