@@ -229,10 +229,10 @@ def caller_level(authorization: str | None, settings: Settings) -> CallerLevel:
             return "public"
         if org_id in exclusive:
             return "partner"
-    if settings.clerk_org_providers is not None and _parse_org_entries(
-        settings.clerk_org_providers
-    ).get(org_id):
-        return "partner"
+    if settings.clerk_org_providers is not None:
+        entries = _parse_org_entries(settings.clerk_org_providers).get(org_id)
+        if entries is not None:
+            return "partner" if entries else "public"
     if settings.clerk_coval_org and org_id == settings.clerk_coval_org:
         return "coval"
     return "public"

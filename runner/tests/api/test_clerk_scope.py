@@ -180,6 +180,18 @@ def test_caller_level_is_partner_only_for_an_org_that_names_something(
     assert clerk.caller_level(None, named) == "public"
 
 
+def test_caller_level_keeps_an_empty_mapping_public_even_for_the_coval_org(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = f"Bearer {_mint({'org_id': _ORG_ID})}"
+    staff = _settings(monkeypatch, coval_org=_ORG_ID)
+    assert clerk.caller_level(token, staff) == "coval"
+    mapped_empty = _settings(
+        monkeypatch, coval_org=_ORG_ID, org_providers=json.dumps({_ORG_ID: []})
+    )
+    assert clerk.caller_level(token, mapped_empty) == "public"
+
+
 def test_malformed_org_entry_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: ["xai", 7]}))
     token = _mint({"org_id": _ORG_ID, "email": "partner@example.com"})
