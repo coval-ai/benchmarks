@@ -6,8 +6,9 @@
 Each clip first asks ``api.aircaps.com`` for the WebSocket URL, then opens it
 with the same Bearer key. A ``start`` frame is answered by ``ready``; audio is
 raw 16 kHz PCM. Turns end on our ``finalize``, and ``finish`` closes the session
-with one last final and ``finished``. Every ``transcript`` frame carries the
-whole session's text, so the latest final replaces the earlier ones.
+with a repeat of that final and ``finished``; the repeat is ignored. Every
+``transcript`` frame carries the whole session's text, so the latest final
+replaces the earlier ones.
 """
 
 from __future__ import annotations
@@ -15,12 +16,14 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import AbstractAsyncContextManager
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, cast
 
 import httpx
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
+from coval_bench.providers.base import TranscriptionResult
 from coval_bench.providers.stt._streaming import Transcription, WebSocketSTTProvider
 
 _ENDPOINT_URL = "https://api.aircaps.com/v1/realtime/endpoint"
@@ -32,6 +35,11 @@ def _error_message(msg: dict[str, Any]) -> str:
     detail = str(msg.get("message") or "AirCaps STT error")
     code = msg.get("code")
     return f"{code}: {detail}" if code else detail
+
+
+@dataclass
+class _AircapsTranscription(Transcription):
+    finalized: bool = False
 
 
 class AircapsSTTProvider(WebSocketSTTProvider):
@@ -46,6 +54,9 @@ class AircapsSTTProvider(WebSocketSTTProvider):
     @property
     def name(self) -> str:
         return "aircaps"
+
+    def _new_transcription(self, result: TranscriptionResult) -> Transcription:
+        return _AircapsTranscription(result)
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
@@ -101,15 +112,19 @@ class AircapsSTTProvider(WebSocketSTTProvider):
             ) from exc
 
     async def _end_audio(self, ws: Any, tx: Transcription) -> None:
-        await self._send_and_wait(ws, json.dumps({"type": "finalize"}), tx)
+        tx = cast(_AircapsTranscription, tx)
+        tx.finalized = await self._send_and_wait(ws, json.dumps({"type": "finalize"}), tx)
         await ws.send(json.dumps({"type": "finish"}))
 
     def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
+        tx = cast(_AircapsTranscription, tx)
         msg_type = str(msg.get("type", ""))
 
         if msg_type == "transcript":
             text = str(msg.get("text") or "").strip()
             if msg.get("is_final"):
+                if tx.finalized:
+                    return False
                 tx.finals.clear()
                 tx.final(text, now)
             elif text:
