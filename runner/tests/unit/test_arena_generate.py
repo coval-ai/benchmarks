@@ -35,7 +35,7 @@ def _model(provider: str, model: str) -> RegisteredModel:
             Voice(id=f"{model}-m", gender=Gender.MALE),
         ),
         collected=True,
-        published=True,
+        visibility="public",
     )
 
 
@@ -189,7 +189,7 @@ async def test_generate_battle_refuses_a_model_without_that_gender(
         voice="v",
         voices=(Voice(id="model-b-f", gender=Gender.FEMALE),),
         collected=True,
-        published=True,
+        visibility="public",
     )
     models = (_model("provider-a", "model-a"), female_only)
     provider = _fake_provider_cls(tmp_path, fail_models=set())
@@ -450,7 +450,7 @@ async def test_a_stand_in_without_that_gender_is_never_drawn(
         voice="v",
         voices=(Voice(id="model-female-only-f", gender=Gender.FEMALE),),
         collected=True,
-        published=True,
+        visibility="public",
     )
     standin = _model("provider-standin", "model-standin")
     _register(

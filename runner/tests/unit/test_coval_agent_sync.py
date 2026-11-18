@@ -32,7 +32,7 @@ PHONELY = RegisteredModel(
     provider="phonely",
     model="phonely-agent",
     collected=True,
-    published=False,
+    visibility="partner",
 )
 DEFINITION = CovalTextAgentDefinition(
     provider="phonely",

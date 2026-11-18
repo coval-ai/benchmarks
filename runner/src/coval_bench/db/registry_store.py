@@ -32,6 +32,7 @@ from coval_bench.registries.models import (
     Orchestration,
     RegisteredModel,
     Source,
+    Visibility,
     Voice,
 )
 
@@ -56,7 +57,7 @@ EDITABLE_FIELDS = frozenset(
         "region",
         "arena_enabled",
         "collected",
-        "published",
+        "visibility",
         "tags",
         "color",
         "display_name",
@@ -102,7 +103,7 @@ class NewModel(BaseModel):
     region: Literal["us", "eu", "asia"] | None = None
     arena_enabled: bool = True
     collected: bool = True
-    published: bool = False
+    visibility: Visibility = "partner"
     tags: tuple[str, ...] = ()
     color: HexColor = None
     display_name: str | None = None
@@ -145,7 +146,7 @@ class ModelChange(BaseModel):
 _SELECT_MODELS = """
     SELECT m.id, m.modality, m.provider, m.model, m.voice, m.voices, m.creator,
            m.source, m.licensing, m.on_prem, m.region, m.arena_enabled,
-           m.collected, m.published, m.color, m.display_name,
+           m.collected, m.visibility, m.color, m.display_name,
            m.architecture, m.orchestration, m.version, m.updated_by_user_id,
            m.updated_by_email, m.updated_at, COALESCE(t.tags, '{}') AS tags
     FROM benchmarks_v2.models m
@@ -159,7 +160,7 @@ _SELECT_MODELS = """
 _INSERT_MODEL = """
     INSERT INTO benchmarks_v2.models
         (modality, provider, model, voice, voices, creator, source, licensing,
-         on_prem, region, arena_enabled, collected, published, color, display_name,
+         on_prem, region, arena_enabled, collected, visibility, color, display_name,
          architecture, orchestration, updated_by_user_id, updated_by_email)
     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     RETURNING id, updated_at
@@ -169,7 +170,7 @@ _UPDATE_MODEL = """
     UPDATE benchmarks_v2.models
     SET provider = %s, model = %s, voice = %s, voices = %s, creator = %s,
         source = %s, licensing = %s, on_prem = %s, region = %s,
-        arena_enabled = %s, collected = %s, published = %s, color = %s,
+        arena_enabled = %s, collected = %s, visibility = %s, color = %s,
         display_name = %s, architecture = %s, orchestration = %s, version = %s,
         updated_by_user_id = %s, updated_by_email = %s,
         -- Strictly monotonic per row: the 412 stale check compares this exactly,
@@ -192,7 +193,12 @@ _INSERT_HISTORY = """
 # the read behind /v1/providers and the orchestrator's roster — the whole site
 # goes dark if it fails for the window between the two. Each missing column
 # reads as unset until it exists.
-_SELECT_MODELS_BEFORE_VERSION = _SELECT_MODELS.replace("m.version,", "1 AS version,")
+_SELECT_MODELS_BEFORE_VISIBILITY = _SELECT_MODELS.replace(
+    "m.visibility,", "CASE WHEN m.published THEN 'public' ELSE 'partner' END AS visibility,"
+)
+_SELECT_MODELS_BEFORE_VERSION = _SELECT_MODELS_BEFORE_VISIBILITY.replace(
+    "m.version,", "1 AS version,"
+)
 _SELECT_MODELS_BEFORE_AGENT_KIND = _SELECT_MODELS_BEFORE_VERSION.replace(
     "m.architecture, m.orchestration,", "NULL AS architecture, NULL AS orchestration,"
 )
@@ -204,6 +210,7 @@ _SELECT_MODELS_BEFORE_COLOR = _SELECT_MODELS_BEFORE_DISPLAY_NAME.replace(
 )
 _SELECT_MODELS_SHAPES = (
     _SELECT_MODELS,
+    _SELECT_MODELS_BEFORE_VISIBILITY,
     _SELECT_MODELS_BEFORE_VERSION,
     _SELECT_MODELS_BEFORE_AGENT_KIND,
     _SELECT_MODELS_BEFORE_DISPLAY_NAME,
@@ -317,7 +324,7 @@ class RegistryStore:
                             new.region,
                             new.arena_enabled,
                             new.collected,
-                            new.published,
+                            new.visibility,
                             new.color,
                             new.display_name,
                             new.architecture,
@@ -408,7 +415,7 @@ class RegistryStore:
                             merged.region,
                             merged.arena_enabled,
                             merged.collected,
-                            merged.published,
+                            merged.visibility,
                             merged.color,
                             merged.display_name,
                             merged.architecture,
@@ -517,7 +524,7 @@ def _registered(record: ModelRecord) -> RegisteredModel:
         on_prem=record.on_prem,
         region=record.region,
         collected=record.collected,
-        published=record.published,
+        visibility=record.visibility,
         arena_enabled=record.arena_enabled,
         color=record.color,
         display_name=record.display_name,

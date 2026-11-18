@@ -69,7 +69,7 @@ async def get_quality(
     model_id: int | None = Query(default=None),
     breakdown: Literal["condition"] | None = Query(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
-    sees: Callable[[str, str, str], bool] = Depends(visible),
+    sees: Callable[[str, str, str, str], bool] = Depends(visible),
 ) -> QualityResponse:
     """One row per model, benchmark and metric, pooled across the benchmark's conditions.
 
@@ -92,7 +92,7 @@ async def get_quality(
     rows = [
         row
         for row in rows
-        if sees(row["provider"], row["model"], row["metric"])
+        if sees(row["modality"], row["provider"], row["model"], row["metric"])
         and modality in (None, row["modality"])
         and benchmark in (None, row["benchmark"])
         and metric in (None, row["metric"])

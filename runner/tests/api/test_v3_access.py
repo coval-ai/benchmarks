@@ -11,8 +11,8 @@ import psycopg
 import pytest
 from httpx import AsyncClient
 
-from coval_bench.api.v3_access import Caller, Visibility, can_see
-from coval_bench.registries import RegisteredModel
+from coval_bench.api.v3_access import Caller, can_see
+from coval_bench.registries import RegisteredModel, Visibility
 from coval_bench.registries.benchmarks import Benchmark
 from tests.api.conftest import (
     COVAL_ORG,
@@ -30,7 +30,11 @@ LINKED = "org_test_linked"
 
 def _unpublished(provider: str, model: str) -> RegisteredModel:
     return RegisteredModel(
-        benchmark=Benchmark.STT, provider=provider, model=model, collected=True, published=False
+        benchmark=Benchmark.STT,
+        provider=provider,
+        model=model,
+        collected=True,
+        visibility="partner",
     )
 
 
@@ -71,6 +75,56 @@ async def test_an_org_sees_its_own_companys_unpublished_models_and_no_one_elses(
     assert staff == public | {EA_PROVIDER, "rival"}
 
 
+async def test_a_coval_level_model_is_hidden_from_its_own_company(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    add_models(
+        postgresql,
+        RegisteredModel(
+            benchmark=Benchmark.STT,
+            provider=EA_PROVIDER,
+            model=EA_MODEL,
+            collected=True,
+            visibility="coval",
+        ),
+    )
+    set_company_org(postgresql, EA_PROVIDER, LINKED)
+    _probe_every_model(postgresql)
+
+    assert EA_PROVIDER not in await _providers(client, LINKED)
+    assert EA_PROVIDER in await _providers(client, COVAL_ORG)
+
+
+async def test_a_models_level_is_not_taken_from_its_namesake_in_another_modality(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    add_models(
+        postgresql,
+        RegisteredModel(
+            benchmark=Benchmark.STT,
+            provider=EA_PROVIDER,
+            model="omni",
+            collected=True,
+            visibility="coval",
+        ),
+        RegisteredModel(
+            benchmark=Benchmark.TTS,
+            provider=EA_PROVIDER,
+            model="omni",
+            voice="v",
+            collected=True,
+            visibility="public",
+        ),
+    )
+    _probe_every_model(postgresql)
+
+    stt = (await client.get("/v3/latency?modality=STT")).json()["latency"]
+    tts = (await client.get("/v3/latency?modality=TTS")).json()["latency"]
+
+    assert EA_PROVIDER not in {row["provider"] for row in stt}
+    assert EA_PROVIDER in {row["provider"] for row in tts}
+
+
 async def test_a_partner_level_metric_shows_only_on_the_callers_own_models(
     client: AsyncClient, postgresql: Any
 ) -> None:
@@ -81,7 +135,7 @@ async def test_a_partner_level_metric_shows_only_on_the_callers_own_models(
             provider=EA_PROVIDER,
             model=EA_MODEL,
             collected=True,
-            published=True,
+            visibility="public",
         ),
     )
     set_company_org(postgresql, EA_PROVIDER, LINKED)

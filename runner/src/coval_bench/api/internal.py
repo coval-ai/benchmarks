@@ -112,11 +112,14 @@ def hidden_early_access(
     # Exclusive orgs are resolved first and never widened: nothing may add to a
     # view whose whole point is what it leaves out.
     universe = all_registered_pairs(models)
+    coval_only = with_retired_keys(
+        frozenset((m.provider, m.model) for m in models if m.visibility == "coval")
+    )
     only = clerk.exclusive_pairs(authorization, settings, universe)
     if only is not None:
         response.headers[EA_STATUS_HEADER] = "accepted"
         response.headers["Cache-Control"] = "private, no-store"
-        return universe - with_retired_keys(only)
+        return universe - with_retired_keys(only - coval_only)
 
     bearer = clerk.allowed_pairs(authorization, settings, embargoed)
     if bearer is None:
@@ -125,6 +128,8 @@ def hidden_early_access(
 
     response.headers[EA_STATUS_HEADER] = "accepted"
     response.headers["Cache-Control"] = "private, no-store"
+    if clerk.caller_level(authorization, settings) != "coval":
+        bearer -= coval_only
     return embargoed - with_retired_keys(bearer)
 
 

@@ -45,7 +45,7 @@ async def get_latency(
     metric: MetricLiteral | None = Query(default=None),
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
-    sees: Callable[[str, str, str], bool] = Depends(visible),
+    sees: Callable[[str, str, str, str], bool] = Depends(visible),
 ) -> LatencyResponse:
     """One row per model and metric: percentiles over the probes that succeeded in the window.
 
@@ -65,7 +65,7 @@ async def get_latency(
 
     def wanted(row: dict[str, Any], code: str) -> bool:
         return (
-            sees(row["provider"], row["model"], code)
+            sees(row["modality"], row["provider"], row["model"], code)
             and modality in (None, row["modality"])
             and metric in (None, code)
             and not is_metric_excluded(row["provider"], row["model"], code)
@@ -123,7 +123,7 @@ async def get_latency_points(
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     settings: Settings = Depends(get_settings),
-    sees: Callable[[str, str, str], bool] = Depends(visible),
+    sees: Callable[[str, str, str, str], bool] = Depends(visible),
 ) -> LatencyPointsResponse:
     """Every model's *metric* over the window, as points for a chart.
 
@@ -136,10 +136,11 @@ async def get_latency_points(
         "7d": timedelta(hours=1),
         "30d": timedelta(days=1),
     }[window]
+    modality = "TTS" if metric == "TTFA" else "STT"
     try:
         rows = await fetch_latency_points(
             pool,
-            modality="TTS" if metric == "TTFA" else "STT",
+            modality=modality,
             metric=metric,
             since=datetime.now(UTC) - WINDOW_DURATIONS[window],
             bucket=bucket,
@@ -156,7 +157,7 @@ async def get_latency_points(
             value=None if row["value"] is None else round(row["value"], 1),
         )
         for row in rows
-        if sees(row["provider"], row["model"], metric)
+        if sees(modality, row["provider"], row["model"], metric)
         and not is_metric_excluded(row["provider"], row["model"], metric)
     ]
     return LatencyPointsResponse(

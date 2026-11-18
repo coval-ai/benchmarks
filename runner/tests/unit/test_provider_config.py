@@ -19,7 +19,11 @@ from coval_bench.registries.provider_keys import provider_names
 
 def test_registered_model_defaults() -> None:
     m = RegisteredModel(
-        benchmark=Benchmark.STT, provider="deepgram", model="nova-3", collected=True, published=True
+        benchmark=Benchmark.STT,
+        provider="deepgram",
+        model="nova-3",
+        collected=True,
+        visibility="public",
     )
     assert m.voice is None
     assert m.creator is None

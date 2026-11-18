@@ -29,6 +29,7 @@ from coval_bench.registries.models import (
     Orchestration,
     RegisteredModel,
     Source,
+    Visibility,
     Voice,
     normalize_hex_color,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "Licensing",
     "RegisteredModel",
     "Source",
+    "Visibility",
     "Voice",
     "normalize_hex_color",
     "CATEGORY_LABELS",
