@@ -127,7 +127,7 @@ def get_cache(request: Request) -> TTLCache[Any, Any]:
 
 async def read_registry(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
-) -> tuple[list[RegisteredModel], dict[str, str] | None]:
+) -> tuple[list[tuple[int, RegisteredModel]], dict[str, str] | None]:
     """The model roster and metric visibility levels, read fresh on one connection per request.
 
     Deliberately uncached. They decide who may see an embargoed model or a hidden
@@ -146,14 +146,27 @@ async def read_registry(
 
 
 async def get_models(
-    registry: tuple[list[RegisteredModel], dict[str, str] | None] = Depends(read_registry),
+    registry: tuple[list[tuple[int, RegisteredModel]], dict[str, str] | None] = Depends(
+        read_registry
+    ),
 ) -> list[RegisteredModel]:
     """The model roster."""
-    return registry[0]
+    return [model for _, model in registry[0]]
+
+
+async def get_models_by_id(
+    registry: tuple[list[tuple[int, RegisteredModel]], dict[str, str] | None] = Depends(
+        read_registry
+    ),
+) -> dict[int, RegisteredModel]:
+    """The model roster, by row id."""
+    return dict(registry[0])
 
 
 async def get_metric_visibility(
-    registry: tuple[list[RegisteredModel], dict[str, str] | None] = Depends(read_registry),
+    registry: tuple[list[tuple[int, RegisteredModel]], dict[str, str] | None] = Depends(
+        read_registry
+    ),
 ) -> dict[str, str]:
     """Each metric's visibility level.
 

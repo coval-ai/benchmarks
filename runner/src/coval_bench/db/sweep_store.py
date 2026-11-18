@@ -216,7 +216,8 @@ _QUALITY = """
         ORDER BY s.model_id, s.benchmark, s.model_version DESC, max(s.completed_at) DESC
     )
     SELECT m.id AS model_id, m.modality, m.provider, m.model, s.model_version,
-           s.benchmark, s.dataset_version AS benchmark_version, s.condition, c.conditions,
+           s.benchmark, b.visibility AS benchmark_visibility,
+           s.dataset_version AS benchmark_version, s.condition, c.conditions,
            sc.metric, sc.metric_version,
            sum(sc.errors) AS errors, sum(sc.reference_units) AS reference_units,
            count(*) AS sample_count,
@@ -227,10 +228,11 @@ _QUALITY = """
     FROM scored s
     JOIN complete c USING (model_id, benchmark, model_version, dataset_version)
     JOIN benchmarks_v2.models m ON m.id = s.model_id
+    JOIN benchmarks_v2.benchmarks b ON b.slug = s.benchmark
     JOIN benchmarks_v2.sweep_results r ON r.sweep_id = s.id
     JOIN benchmarks_v2.sweep_scores sc ON sc.sweep_result_id = r.id
     GROUP BY m.id, s.id, s.model_version, s.dataset_version, s.completed_at,
-             s.benchmark, s.condition, c.conditions, sc.metric, sc.metric_version
+             s.benchmark, b.visibility, s.condition, c.conditions, sc.metric, sc.metric_version
     ORDER BY m.id, s.benchmark, s.condition NULLS FIRST, sc.metric, sc.metric_version
 """
 

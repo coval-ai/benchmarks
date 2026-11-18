@@ -28,10 +28,11 @@ from tests.api.conftest import (
 def registry(postgresql: Any) -> None:
     with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
         conn.execute(
-            """INSERT INTO benchmarks_v2.benchmarks (slug, modality, name, updated_by_user_id)
-               VALUES ('stt-v3', 'STT', 'STT v3', 'tests'),
-                      ('stt-wildasr', 'STT', 'WildASR', 'tests'),
-                      ('tts-v2', 'TTS', 'TTS v2', 'tests')"""
+            """INSERT INTO benchmarks_v2.benchmarks
+                   (slug, modality, name, visibility, updated_by_user_id)
+               VALUES ('stt-v3', 'STT', 'STT v3', 'public', 'tests'),
+                      ('stt-wildasr', 'STT', 'WildASR', 'public', 'tests'),
+                      ('tts-v2', 'TTS', 'TTS v2', 'public', 'tests')"""
         )
         conn.execute(
             """INSERT INTO benchmarks_v2.benchmark_datasets (dataset_id, benchmark, condition)
@@ -227,6 +228,34 @@ async def test_an_unpublished_model_is_only_in_its_own_orgs_quality(
 
     assert public.json()["quality"] == []
     assert [row["provider"] for row in partner.json()["quality"]] == [EA_PROVIDER]
+
+
+async def test_a_partner_level_benchmark_shows_only_on_the_callers_own_models(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    add_models(
+        postgresql,
+        RegisteredModel(
+            benchmark=Benchmark.STT,
+            provider=EA_PROVIDER,
+            model=EA_MODEL,
+            collected=True,
+            visibility="public",
+        ),
+    )
+    set_company_org(postgresql, EA_PROVIDER, "org_test_linked")
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        _sweep(conn, _model_id(conn, EA_PROVIDER, EA_MODEL), [("a", "", 1, 10)])
+        _sweep(conn, _model_id(conn, "seed", "stt"), [("a", "", 1, 10)])
+        conn.execute("UPDATE benchmarks_v2.benchmarks SET visibility = 'partner'")
+
+    async def providers(headers: dict[str, str]) -> set[str]:
+        rows = (await client.get("/v3/quality", headers=headers)).json()["quality"]
+        return {row["provider"] for row in rows}
+
+    assert await providers({}) == set()
+    assert await providers(bearer(sub="u", org_id="org_test_linked")) == {EA_PROVIDER}
+    assert await providers(bearer(org_id=COVAL_ORG)) == {EA_PROVIDER, "seed"}
 
 
 async def test_a_completed_sweep_with_nothing_scored_keeps_the_previous_score(

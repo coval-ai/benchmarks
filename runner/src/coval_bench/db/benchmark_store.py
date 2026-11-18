@@ -13,6 +13,8 @@ import psycopg.rows
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
+from coval_bench.registries import Visibility
+
 BenchmarkPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]
 
 
@@ -29,6 +31,7 @@ class RegisteredBenchmark(BaseModel):
     slug: str
     modality: str
     name: str
+    visibility: Visibility
     datasets: list[BenchmarkDataset]
     updated_by_user_id: str
     updated_by_email: str | None
@@ -36,7 +39,8 @@ class RegisteredBenchmark(BaseModel):
 
 
 _SELECT = """
-    SELECT b.slug, b.modality, b.name, b.updated_by_user_id, b.updated_by_email, b.updated_at,
+    SELECT b.slug, b.modality, b.name, b.visibility,
+           b.updated_by_user_id, b.updated_by_email, b.updated_at,
            COALESCE(
              (SELECT jsonb_agg(jsonb_build_object('dataset_id', d.dataset_id,
                                                   'condition', d.condition)
@@ -69,19 +73,38 @@ class BenchmarkStore:
         return RegisteredBenchmark.model_validate(dict(row or {}))
 
     async def create(
-        self, *, slug: str, modality: str, name: str, user_id: str, email: str | None
+        self,
+        *,
+        slug: str,
+        modality: str,
+        name: str,
+        visibility: Visibility,
+        user_id: str,
+        email: str | None,
     ) -> RegisteredBenchmark:
         try:
             async with self._pool.connection() as conn, conn.transaction():
                 await conn.execute(
                     "INSERT INTO benchmarks_v2.benchmarks"
-                    " (slug, modality, name, updated_by_user_id, updated_by_email)"
-                    " VALUES (%s, %s, %s, %s, %s)",
-                    (slug, modality, name, user_id, email),
+                    " (slug, modality, name, visibility, updated_by_user_id, updated_by_email)"
+                    " VALUES (%s, %s, %s, %s, %s, %s)",
+                    (slug, modality, name, visibility, user_id, email),
                 )
                 return await self._get(conn, slug)
         except psycopg.errors.UniqueViolation as exc:
             raise RegistryConflict(f"benchmark {slug!r} already exists") from exc
+
+    async def set_visibility(
+        self, slug: str, visibility: Visibility, *, user_id: str, email: str | None
+    ) -> RegisteredBenchmark | None:
+        """Change who sees the benchmark's results; None when there is no such benchmark."""
+        async with self._pool.connection() as conn, conn.transaction():
+            updated = await conn.execute(
+                "UPDATE benchmarks_v2.benchmarks SET visibility = %s, updated_by_user_id = %s,"
+                " updated_by_email = %s, updated_at = now() WHERE slug = %s",
+                (visibility, user_id, email, slug),
+            )
+            return await self._get(conn, slug) if updated.rowcount else None
 
     async def put_dataset(
         self, slug: str, dataset_id: str, *, condition: str | None, user_id: str, email: str | None
