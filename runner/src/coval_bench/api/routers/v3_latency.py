@@ -22,10 +22,12 @@ from coval_bench.api.schemas import (
     LatencyPointOut,
     LatencyPointsResponse,
     LatencyResponse,
+    ProbeOut,
+    ProbesResponse,
 )
-from coval_bench.api.v3_access import Sees, visible
+from coval_bench.api.v3_access import Sees, coval_only, visible
 from coval_bench.config import Settings
-from coval_bench.db.probe_store import fetch_latency, fetch_latency_points
+from coval_bench.db.probe_store import fetch_latency, fetch_latency_points, fetch_probes
 from coval_bench.registries import is_metric_excluded
 
 router = APIRouter(tags=["latency"])
@@ -161,3 +163,30 @@ async def get_latency_points(
     return LatencyPointsResponse(
         metric=metric, bucket_seconds=int(bucket.total_seconds()), points=points
     )
+
+
+@router.get(
+    "/latency/probes",
+    response_model=ProbesResponse,
+    responses={400: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
+    dependencies=[Depends(coval_only)],
+)
+@limiter.limit("60/minute")
+async def get_probes(
+    request: Request,  # required by slowapi
+    model_id: int = Query(...),
+    window: WindowLiteral = Query(default="24h"),
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+) -> ProbesResponse:
+    """Every probe of one model over the window, oldest first. Coval staff only.
+
+    Unlike ``/latency``, a probe that failed on our side is listed too, with a
+    ``failure_origin`` of ``runner``.
+    """
+    try:
+        rows = await fetch_probes(
+            pool, model_id=model_id, since=datetime.now(UTC) - WINDOW_DURATIONS[window]
+        )
+    except psycopg.Error as exc:
+        raise HTTPException(503, "latency results are unavailable") from exc
+    return ProbesResponse(probes=[ProbeOut(**row) for row in rows])

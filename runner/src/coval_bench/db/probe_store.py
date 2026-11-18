@@ -181,3 +181,22 @@ async def fetch_latency_points(
         await cur.execute(_POINTS, params)
         rows: list[dict[str, Any]] = await cur.fetchall()
         return rows
+
+
+_PROBES = """
+    SELECT scheduled_at, sent_at, voice, status, ttft_ms, ttfs_ms, ttfa_ms,
+           error, failure_origin, status_code
+    FROM benchmarks_v2.probe_results
+    WHERE model_id = %(model_id)s AND scheduled_at >= %(since)s
+    ORDER BY scheduled_at
+"""
+
+
+async def fetch_probes(
+    pool: AsyncConnectionPool[Any], *, model_id: int, since: datetime
+) -> list[dict[str, Any]]:
+    """Every probe of one model since *since*, oldest first, failures of either origin included."""
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(_PROBES, {"model_id": model_id, "since": since})
+        rows: list[dict[str, Any]] = await cur.fetchall()
+        return rows

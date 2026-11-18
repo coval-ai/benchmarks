@@ -736,6 +736,31 @@ class LatencyPointsResponse(BaseModel):
     points: list[LatencyPointOut]
 
 
+class ProbeOut(BaseModel):
+    """One probe of a model. Timings are milliseconds and null when not measured.
+
+    A failed probe has its ``error``, the ``status_code`` if the provider sent one, and
+    a ``failure_origin`` of ``provider`` or ``runner``.
+    """
+
+    scheduled_at: datetime
+    sent_at: datetime
+    voice: str | None
+    status: Literal["succeeded", "failed"]
+    ttft_ms: float | None
+    ttfs_ms: float | None
+    ttfa_ms: float | None
+    error: str | None
+    failure_origin: Literal["provider", "runner"] | None
+    status_code: int | None
+
+
+class ProbesResponse(BaseModel):
+    """Response schema for GET /v3/latency/probes."""
+
+    probes: list[ProbeOut]
+
+
 class QualityOut(BaseModel):
     """One model's score on a benchmark, pooled over every scored item. ``condition`` is set
     only on a per-condition row."""
