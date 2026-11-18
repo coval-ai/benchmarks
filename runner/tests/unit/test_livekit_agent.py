@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -18,52 +19,59 @@ from coval_bench.livekit_agent.correlation import from_attributes
 from coval_bench.livekit_agent.tools import MockToolsClient, build_tools
 from coval_bench.mocktools.codecs import Correlation
 from coval_bench.platform_assets import render_livekit_tools
+from tests.tool_fixtures import SYNTHETIC_SUITE, TOOL_DEFINITIONS
 
 CORRELATION = Correlation("sim-123", "+15550100000", source="sip_header")
 
 
-def test_contract_reads_the_shared_files(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SYSTEM_PROMPT", "You are the dental receptionist.")
+def test_contract_reads_the_shared_files(
+    monkeypatch: pytest.MonkeyPatch, synthetic_contract: Path
+) -> None:
+    monkeypatch.setenv("SYSTEM_PROMPT", "You are the fixture agent.")
     monkeypatch.delenv("FIRST_MESSAGE", raising=False)
-    contract = load_contract("dental")
+    contract = load_contract(SYNTHETIC_SUITE)
     assert contract.stack.stt.model == "nova-3"
     assert contract.stack.llm.temperature == 0
-    assert [tool["name"] for tool in contract.tools] == [
-        tool["name"] for tool in read_tool_definitions("dental")
-    ]
-    assert contract.system_prompt == "You are the dental receptionist."
+    assert contract.tools == TOOL_DEFINITIONS
+    assert contract.system_prompt == "You are the fixture agent."
     assert len(contract.digest) == 64
 
 
-def test_prompt_can_arrive_base64_encoded(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prompt_can_arrive_base64_encoded(
+    monkeypatch: pytest.MonkeyPatch, synthetic_contract: Path
+) -> None:
     monkeypatch.delenv("SYSTEM_PROMPT", raising=False)
     monkeypatch.setenv("SYSTEM_PROMPT_B64", "WW91IGFyZSBsaW5lIG9uZS4KTGluZSB0d28uCg==")
-    assert load_contract("dental").system_prompt == "You are line one.\nLine two."
+    assert load_contract(SYNTHETIC_SUITE).system_prompt == "You are line one.\nLine two."
 
 
 def test_prompt_digest_tracks_the_override_while_the_public_digest_does_not(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, synthetic_contract: Path
 ) -> None:
     monkeypatch.delenv("FIRST_MESSAGE", raising=False)
     monkeypatch.setenv("SYSTEM_PROMPT", "prompt A")
-    first = load_contract("dental")
+    first = load_contract(SYNTHETIC_SUITE)
     monkeypatch.setenv("SYSTEM_PROMPT", "prompt B")
-    second = load_contract("dental")
+    second = load_contract(SYNTHETIC_SUITE)
     assert first.digest == second.digest
     assert first.prompt_digest != second.prompt_digest
     assert first.prompt_digest == prompt_sha256("prompt A", first.first_message)
 
 
-def test_missing_prompt_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_prompt_fails_loudly(
+    monkeypatch: pytest.MonkeyPatch, synthetic_contract: Path
+) -> None:
     monkeypatch.delenv("SYSTEM_PROMPT", raising=False)
     with pytest.raises(ValueError, match="system prompt"):
-        load_contract("dental")
+        load_contract(SYNTHETIC_SUITE)
 
 
-def test_endpointing_delay_lands_on_the_pinned_target(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_endpointing_delay_lands_on_the_pinned_target(
+    monkeypatch: pytest.MonkeyPatch, synthetic_contract: Path
+) -> None:
     """800 ms pin minus the 300 ms Silero silence window: the headline turn-taking parity number."""
     monkeypatch.setenv("SYSTEM_PROMPT", "p")
-    contract = load_contract("dental")
+    contract = load_contract(SYNTHETIC_SUITE)
     assert contract.stack.turn_taking.end_of_turn_target_ms == 800
     assert endpointing_delay(contract) == pytest.approx(0.5)
     short = replace(
@@ -138,7 +146,7 @@ async def test_tools_keep_the_contract_schema_and_route_by_name() -> None:
         calls.append((tool, args))
         return "{}"
 
-    definitions = read_tool_definitions("dental")
+    definitions = TOOL_DEFINITIONS
     tools = build_tools(definitions, poster, lambda: CORRELATION)
     infos = [getattr(tool, "info") for tool in tools]  # noqa: B009
     assert [info.name for info in infos] == [d["name"] for d in definitions]
@@ -156,7 +164,7 @@ async def test_tools_resolve_the_correlation_at_call_time() -> None:
         seen.append(correlation)
         return "{}"
 
-    tools = build_tools(read_tool_definitions("dental")[:1], poster, lambda: holder["value"])
+    tools = build_tools(TOOL_DEFINITIONS[:1], poster, lambda: holder["value"])
     await tools[0]({})  # type: ignore[operator]
     holder["value"] = CORRELATION
     await tools[0]({})  # type: ignore[operator]
@@ -164,7 +172,7 @@ async def test_tools_resolve_the_correlation_at_call_time() -> None:
 
 
 def test_livekit_renderer_is_the_contract_verbatim() -> None:
-    definitions = read_tool_definitions("dental")
+    definitions = TOOL_DEFINITIONS
     rendered = render_livekit_tools(definitions, "https://ignored", "ignored")
     assert rendered == [
         {"name": d["name"], "description": d["description"], "parameters": d["parameters"]}
