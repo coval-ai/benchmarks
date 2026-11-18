@@ -257,3 +257,38 @@ async def fetch_quality(pool: Pool) -> list[dict[str, Any]]:
         await cur.execute(_QUALITY)
         rows: list[dict[str, Any]] = await cur.fetchall()
         return rows
+
+
+_SWEEPS = """
+    SELECT s.id, s.model_id, m.modality, m.provider, m.model, s.model_version,
+           bd.benchmark, bd.condition, s.dataset_id, s.dataset_version,
+           s.created_at, s.completed_at,
+           (SELECT count(*) FROM benchmarks_v2.sweep_results r WHERE r.sweep_id = s.id)
+             AS result_count,
+           (SELECT count(*) FROM benchmarks_v2.sweep_queue q
+             WHERE q.sweep_id = s.id AND q.tries_left > 0) AS queued_count,
+           (SELECT count(*) FROM benchmarks_v2.sweep_queue q
+             WHERE q.sweep_id = s.id AND q.tries_left = 0) AS gave_up_count
+    FROM benchmarks_v2.sweeps s
+    JOIN benchmarks_v2.models m ON m.id = s.model_id
+    LEFT JOIN benchmarks_v2.benchmark_datasets bd ON bd.dataset_id = s.dataset_id
+    ORDER BY s.created_at, s.id
+"""
+
+
+async def fetch_sweeps(pool: Pool) -> list[dict[str, Any]]:
+    """Every sweep, oldest first, with how far through its items it is.
+
+    ``result_count`` is the items that ran, ``queued_count`` the ones still to run and
+    ``gave_up_count`` the ones that ran out of tries. Raises ``QueryCanceled`` after ten
+    seconds.
+    """
+    async with (
+        pool.connection() as conn,
+        conn.transaction(),
+        conn.cursor(row_factory=dict_row) as cur,
+    ):
+        await cur.execute("SET LOCAL statement_timeout = '10s'")
+        await cur.execute(_SWEEPS)
+        rows: list[dict[str, Any]] = await cur.fetchall()
+        return rows

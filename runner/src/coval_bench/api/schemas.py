@@ -764,6 +764,35 @@ class QualityResponse(BaseModel):
     quality: list[QualityOut]
 
 
+class SweepOut(BaseModel):
+    """One sweep: a model version run over one version of a dataset.
+
+    ``benchmark`` and ``condition`` are null for a dataset no benchmark owns.
+    """
+
+    id: int
+    model_id: int
+    modality: str
+    provider: str
+    model: str
+    model_version: int
+    benchmark: str | None
+    condition: str | None
+    dataset_id: str
+    dataset_version: str
+    created_at: datetime
+    completed_at: datetime | None
+    result_count: int
+    queued_count: int
+    gave_up_count: int
+
+
+class SweepsResponse(BaseModel):
+    """Response schema for GET /v3/sweeps."""
+
+    sweeps: list[SweepOut]
+
+
 class ErrorOut(BaseModel):
     """What went wrong with a ``/v3`` request."""
 

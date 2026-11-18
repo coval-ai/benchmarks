@@ -104,6 +104,14 @@ async def caller(
     return Caller("accepted")
 
 
+def coval_only(response: Response, who: Caller = Depends(caller)) -> None:
+    """Let only coval staff through, and keep the response out of shared caches."""
+    if who.level != "coval":
+        raise HTTPException(403, "this endpoint is for coval staff")
+    response.headers.append("Vary", VARY_HEADERS)
+    response.headers["Cache-Control"] = "private, no-store"
+
+
 class Sees(Protocol):
     """``visible``'s check. *benchmark* is the level of the result's benchmark, if it has one."""
 
