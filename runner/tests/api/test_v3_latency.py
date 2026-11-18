@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""GET /v3/latency and /v3/latency/points over HTTP."""
+"""GET /v3/latency, /v3/latency/points and /v3/latency/probes over HTTP."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from coval_bench.registries.benchmarks import Benchmark
 from tests.api.conftest import (
     COVAL_ORG,
     EA_MODEL,
+    EA_ORG,
     EA_PROVIDER,
     _make_db_url,
     add_models,
@@ -242,3 +243,32 @@ async def test_a_coval_only_metric_is_left_out_for_the_public(
     assert (stt, "TTFS") in {(row["model_id"], row["metric"]) for row in internal}
     assert (await client.get("/v3/latency/points?metric=TTFS")).json()["points"] == []
     assert (await client.get("/v3/latency/points?metric=TTFS", headers=staff)).json()["points"]
+
+
+async def test_coval_sees_every_probe_of_a_model_and_no_one_else_does(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    stt, _ = _seed(postgresql)
+    staff = bearer(sub="u", org_id=COVAL_ORG)
+    url = f"/v3/latency/probes?model_id={stt}"
+
+    day = (await client.get(url, headers=staff)).json()["probes"]
+    week = (await client.get(f"{url}&window=7d", headers=staff)).json()["probes"]
+    anonymous = await client.get(url)
+    partner = await client.get(url, headers=bearer(sub="u", org_id=EA_ORG))
+
+    assert [probe["ttft_ms"] for probe in day] == [None, None, 250.0, 300.0, 200.0, 100.0]
+    assert len(week) == 7
+    assert day[1].pop("scheduled_at") == day[1].pop("sent_at")
+    assert day[1] == {
+        "voice": None,
+        "status": "failed",
+        "ttft_ms": None,
+        "ttfs_ms": None,
+        "ttfa_ms": None,
+        "error": "request failed",
+        "failure_origin": "runner",
+        "status_code": 401,
+    }
+    assert anonymous.status_code == 403
+    assert partner.status_code == 403
