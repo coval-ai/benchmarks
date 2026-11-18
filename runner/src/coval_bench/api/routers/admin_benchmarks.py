@@ -23,6 +23,7 @@ from coval_bench.api.internal import never_shared
 from coval_bench.api.schemas import (
     AdminBenchmarkCreate,
     AdminBenchmarkDatasetPut,
+    AdminBenchmarkPatch,
     AdminBenchmarksResponse,
 )
 from coval_bench.db.benchmark_store import BenchmarkStore, RegisteredBenchmark, RegistryConflict
@@ -69,9 +70,30 @@ async def create_admin_benchmark(
             slug=body.slug,
             modality=str(body.modality),
             name=body.name,
+            visibility=body.visibility,
             user_id=admin.user_id,
             email=admin.email,
         )
+    )
+
+
+@router.patch("/admin/benchmarks/{slug}", response_model=RegisteredBenchmark)
+async def update_admin_benchmark(
+    slug: str,
+    body: AdminBenchmarkPatch,
+    response: Response,
+    admin: CovalAdmin = Depends(require_coval_admin),
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+) -> RegisteredBenchmark:
+    """Change who sees the benchmark's results."""
+    never_shared(response)
+    return _found(
+        await _guarded(
+            BenchmarkStore(pool).set_visibility(
+                slug, body.visibility, user_id=admin.user_id, email=admin.email
+            )
+        ),
+        "benchmark",
     )
 
 

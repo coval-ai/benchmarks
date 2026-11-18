@@ -545,10 +545,10 @@ async def fetch_models(pool: RegistryPool) -> list[RegisteredModel]:
 
 async def fetch_models_and_metric_levels(
     pool: RegistryPool,
-) -> tuple[list[RegisteredModel], dict[str, str] | None]:
-    """Every registered model plus each metric's visibility level, on one connection."""
+) -> tuple[list[tuple[int, RegisteredModel]], dict[str, str] | None]:
+    """Every registered model with its row id, plus each metric's visibility level."""
     records, levels = await RegistryStore(pool).list_models_and_metric_levels()
-    return [_registered(record) for record in records], levels
+    return [(record.id, _registered(record)) for record in records], levels
 
 
 async def fetch_models_with_ids(pool: RegistryPool) -> list[tuple[int, RegisteredModel]]:

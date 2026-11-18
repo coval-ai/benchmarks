@@ -11,16 +11,20 @@ is read from the ``companies`` table on each request, so a change takes effect a
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal, Protocol, cast
 
 import psycopg
 from fastapi import Depends, Header, HTTPException, Response
 from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.api import clerk
-from coval_bench.api.deps import get_metric_visibility, get_models, get_pool, get_settings
+from coval_bench.api.deps import (
+    get_metric_visibility,
+    get_models_by_id,
+    get_pool,
+    get_settings,
+)
 from coval_bench.api.internal import EA_STATUS_HEADER, PUBLIC_CACHE_CONTROL, VARY_HEADERS
 from coval_bench.config import Settings
 from coval_bench.registries import RegisteredModel, Visibility
@@ -85,18 +89,24 @@ async def caller(
     return Caller("accepted")
 
 
+class Sees(Protocol):
+    """``visible``'s check. *benchmark* is the level of the result's benchmark, if it has one."""
+
+    def __call__(self, model_id: int, metric: str, benchmark: Visibility = ...) -> bool: ...
+
+
 def visible(
     response: Response,
     authorization: str | None = Header(default=None),
     who: Caller = Depends(caller),
-    models: Sequence[RegisteredModel] = Depends(get_models),
+    models: dict[int, RegisteredModel] = Depends(get_models_by_id),
     metric_levels: dict[str, str] = Depends(get_metric_visibility),
-) -> Callable[[str, str, str, str], bool]:
+) -> Sees:
     """A check of whether this caller may see a model's result for a metric.
 
-    A result takes the stricter level of its model and its metric. A metric with no
-    row in the metrics table is served to no one. Sets the cache headers too, so no
-    route can serve a hidden result without them.
+    A result takes the strictest level of its model, its metric and, when it has one,
+    its benchmark. A metric with no row in the metrics table is served to no one. Sets
+    the cache headers too, so no route can serve a hidden result without them.
     """
     response.headers.append("Vary", VARY_HEADERS)
     response.headers[EA_STATUS_HEADER] = who.proof
@@ -104,13 +114,12 @@ def visible(
         response.headers["Cache-Control"] = "private, no-store"
     elif authorization is None:
         response.headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
-    model_levels = {(str(m.benchmark), m.provider, m.model): m.visibility for m in models}
 
-    def sees(modality: str, provider: str, model: str, metric: str) -> bool:
-        key = (modality, provider, model)
-        if metric not in metric_levels or key not in model_levels:
+    def sees(model_id: int, metric: str, benchmark: Visibility = "public") -> bool:
+        model = models.get(model_id)
+        if model is None or metric not in metric_levels:
             return False
-        level = strictest(model_levels[key], cast("Visibility", metric_levels[metric]))
-        return can_see(who, level, provider)
+        level = strictest(model.visibility, cast("Visibility", metric_levels[metric]), benchmark)
+        return can_see(who, level, model.provider)
 
     return sees

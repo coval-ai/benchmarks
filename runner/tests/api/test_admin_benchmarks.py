@@ -83,3 +83,19 @@ async def test_a_dataset_is_removed_from_the_benchmark_that_owns_it(client: Asyn
 
     removed = await client.delete(f"{URL}/stt-wildasr/datasets/stt-wildasr-clean", headers=ADMIN)
     assert removed.json()["datasets"] == []
+
+
+async def test_a_benchmark_starts_coval_only_and_its_level_can_be_changed(
+    client: AsyncClient,
+) -> None:
+    assert (await _create(client)).json()["visibility"] == "coval"
+
+    url = f"{URL}/stt-wildasr"
+    changed = await client.patch(url, json={"visibility": "public"}, headers=ADMIN)
+
+    assert changed.json()["visibility"] == "public"
+    assert (
+        await client.patch(url, json={"visibility": "secret"}, headers=ADMIN)
+    ).status_code == 422
+    missing = await client.patch(f"{URL}/nope", json={"visibility": "public"}, headers=ADMIN)
+    assert missing.status_code == 404

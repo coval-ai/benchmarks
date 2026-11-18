@@ -787,6 +787,13 @@ class AdminBenchmarkCreate(BaseModel):
     slug: str = Field(pattern=_SLUG)
     modality: Benchmark
     name: str = Field(min_length=1)
+    visibility: Visibility = "coval"
+
+
+class AdminBenchmarkPatch(BaseModel):
+    """PATCH body for /v1/admin/benchmarks/{slug}."""
+
+    visibility: Visibility
 
 
 class AdminBenchmarkDatasetPut(BaseModel):
