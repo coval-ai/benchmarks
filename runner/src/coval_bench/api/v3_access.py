@@ -3,10 +3,11 @@
 
 """Who may see what on ``/v3``.
 
-The proof is a bearer Clerk session token. The coval org sees everything. An org set
-on a company sees that company's partner-level models, and partner-level metrics on that
-company's models. Anyone else gets the public view. Which org belongs to which company
-is read from the ``companies`` table on each request, so a change takes effect at once.
+The proof is a bearer token: a Clerk session token, or a Clerk API key that an org
+owns. The coval org sees everything. An org set on a company sees that company's
+partner-level models, and partner-level metrics on that company's models. Anyone else
+gets the public view. Which org belongs to which company is read from the ``companies``
+table on each request, so a change takes effect at once.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.api import clerk
 from coval_bench.api.deps import (
+    bearer_token,
     get_metric_visibility,
     get_models_by_id,
     get_pool,
@@ -63,14 +65,27 @@ async def caller(
     settings: Settings = Depends(get_settings),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> Caller:
-    """Resolve the caller. A signed-in request gets a 503 if its company can't be read:
-    answering with the public view would hide a partner's own models without an error."""
+    """Resolve the caller. A signed-in request gets a 503 if its key or company can't be
+    checked: the public view would hide a partner's own models without an error."""
     if authorization is None or settings.clerk_issuer is None:
         return Caller("absent")
-    claims = clerk.bearer_claims(authorization, settings)
-    if claims is None:
-        return Caller("unknown")
-    org_id = claims.get("org_id")
+    token = bearer_token(authorization)
+    org_id: object
+    if token is not None and token.count(".") != 2:
+        if settings.clerk_secret_key is None:
+            return Caller("unknown")
+        try:
+            owner = await clerk.api_key_owner(token, settings.clerk_secret_key)
+        except clerk.UnknownApiKey:
+            return Caller("unknown")
+        except Exception as exc:
+            raise HTTPException(503, "access is unavailable") from exc
+        org_id = owner if owner.startswith("org_") else None
+    else:
+        claims = clerk.bearer_claims(authorization, settings)
+        if claims is None:
+            return Caller("unknown")
+        org_id = claims.get("org_id")
     if not isinstance(org_id, str):
         return Caller("accepted")
     try:

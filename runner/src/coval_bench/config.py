@@ -379,6 +379,7 @@ class Settings(BaseSettings):
     clerk_issuer: str | None = None
     # Allowed azp claim values; bearer tokens are rejected while empty.
     clerk_authorized_parties: list[str] = []
+    clerk_secret_key: SecretStr | None = None
     # The coval staff org id: a token with this org active sees every embargoed
     # model. A clerk_org_providers or clerk_org_exclusive entry for this org takes
     # precedence and narrows it like any other org. Unset means no org gets the

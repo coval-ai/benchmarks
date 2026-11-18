@@ -270,6 +270,22 @@ wheels = [
 ]
 
 [[package]]
+name = "clerk-backend-api"
+version = "7.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "httpcore" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pyjwt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2e/d6/3725e6af320df49e1d8d077aae479cc486a94a1004d13d1e4eeb4c98ff80/clerk_backend_api-7.1.0.tar.gz", hash = "sha256:8669688eeb09cc18f37ea5958104bacb4b4d151d2dd11a7359b711e1d5f1f97e", size = 341280, upload-time = "2026-11-02T13:09:44.96Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ef/2b/c3ae023d28be3eba12d60604e19a1fd9ac445a460306355e852e1ec130fe/clerk_backend_api-7.1.0-py3-none-any.whl", hash = "sha256:21eb6533a2ae1d121765959d1f7b967141a0e7594eb8b50f75a942b8fd332428", size = 709081, upload-time = "2026-11-02T13:09:43.629Z" },
+]
+
+[[package]]
 name = "click"
 version = "8.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -300,6 +316,7 @@ dependencies = [
     { name = "anyio" },
     { name = "cachetools" },
     { name = "cartesia" },
+    { name = "clerk-backend-api" },
     { name = "click" },
     { name = "cryptography" },
     { name = "fastapi" },
@@ -368,6 +385,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.4" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cartesia", specifier = ">=2" },
+    { name = "clerk-backend-api", specifier = ">=7.1.0" },
     { name = "click", specifier = ">=8.1" },
     { name = "cryptography", specifier = ">=42" },
     { name = "fastapi", specifier = ">=0.111" },

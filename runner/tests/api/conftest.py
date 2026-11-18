@@ -627,6 +627,7 @@ async def app(
     monkeypatch.setenv("CLERK_AUTHORIZED_PARTIES", json.dumps([CLERK_PARTY]))
     monkeypatch.setenv("CLERK_ORG_PROVIDERS", json.dumps(CLERK_ORG_PROVIDERS))
     monkeypatch.setenv("CLERK_COVAL_ORG", COVAL_ORG)
+    monkeypatch.setenv("CLERK_SECRET_KEY", "sk_test_not_real")
     stub_jwks(monkeypatch)
     # Battle generation screens prompts through the moderation API. Without this the
     # suite would reach the network on any machine that has the key exported.
