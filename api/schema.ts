@@ -396,6 +396,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/benchmarks/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Admin Benchmark
+         * @description Change who sees the benchmark's results.
+         */
+        patch: operations["update_admin_benchmark_v1_admin_benchmarks__slug__patch"];
+        trace?: never;
+    };
     "/v1/admin/benchmarks/{slug}/datasets/{dataset_id}": {
         parameters: {
             query?: never;
@@ -718,6 +738,12 @@ export interface components {
             modality: components["schemas"]["Benchmark"];
             /** Name */
             name: string;
+            /**
+             * Visibility
+             * @default coval
+             * @enum {string}
+             */
+            visibility: "public" | "partner" | "coval";
         };
         /**
          * AdminBenchmarkDatasetPut
@@ -726,6 +752,17 @@ export interface components {
         AdminBenchmarkDatasetPut: {
             /** Condition */
             condition?: string | null;
+        };
+        /**
+         * AdminBenchmarkPatch
+         * @description PATCH body for /v1/admin/benchmarks/{slug}.
+         */
+        AdminBenchmarkPatch: {
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "partner" | "coval";
         };
         /**
          * AdminBenchmarksResponse
@@ -799,6 +836,9 @@ export interface components {
         /**
          * AdminModelCreate
          * @description POST body for /v1/admin/models. The defaults land the model Hidden.
+         *
+         *     ``visibility`` is the level. ``published`` is the older way to say public or
+         *     partner, and is only read when ``visibility`` is left out.
          */
         AdminModelCreate: {
             modality: components["schemas"]["Benchmark"];
@@ -836,6 +876,8 @@ export interface components {
              * @default true
              */
             collected: boolean;
+            /** Visibility */
+            visibility?: ("public" | "partner" | "coval") | null;
             /**
              * Published
              * @default false
@@ -912,6 +954,11 @@ export interface components {
             arena_enabled: boolean;
             /** Collected */
             collected: boolean;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "partner" | "coval";
             /** Published */
             published: boolean;
             /**
@@ -970,6 +1017,8 @@ export interface components {
             arena_enabled?: boolean | null;
             /** Collected */
             collected?: boolean | null;
+            /** Visibility */
+            visibility?: ("public" | "partner" | "coval") | null;
             /** Published */
             published?: boolean | null;
             /** Tags */
@@ -1721,6 +1770,11 @@ export interface components {
             modality: string;
             /** Name */
             name: string;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "partner" | "coval";
             /** Datasets */
             datasets: components["schemas"]["BenchmarkDataset"][];
             /** Updated By User Id */
@@ -2700,6 +2754,43 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegisteredBenchmark"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_admin_benchmark_v1_admin_benchmarks__slug__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminBenchmarkPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
