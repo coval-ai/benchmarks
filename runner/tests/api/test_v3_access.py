@@ -5,12 +5,17 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import psycopg
 import pytest
+from clerk_backend_api import models
 from httpx import AsyncClient
+from pydantic import SecretStr
 
+from coval_bench.api import clerk
 from coval_bench.api.v3_access import Caller, can_see
 from coval_bench.registries import RegisteredModel, Visibility
 from coval_bench.registries.benchmarks import Benchmark
@@ -165,3 +170,56 @@ STAFF = Caller("accepted", "coval")
 def test_who_sees_a_result_on_acmes_model(level: Visibility, who_sees_it: set[Caller]) -> None:
     callers = (ANONYMOUS, OWNER, RIVAL, STAFF)
     assert {who for who in callers if can_see(who, level, "acme")} == who_sees_it
+
+
+async def test_an_orgs_api_key_gets_the_same_view_as_its_session(
+    client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    add_models(postgresql, _unpublished(EA_PROVIDER, EA_MODEL))
+    set_company_org(postgresql, EA_PROVIDER, LINKED)
+    _probe_every_model(postgresql)
+
+    async def owner(key: str, secret: Any) -> str:
+        if key == "ak_down":
+            raise ConnectionError
+        if key != "ak_linked":
+            raise clerk.UnknownApiKey
+        return LINKED
+
+    monkeypatch.setattr(clerk, "api_key_owner", owner)
+
+    async def get(key: str) -> Any:
+        return await client.get("/v3/latency", headers={"Authorization": f"Bearer {key}"})
+
+    linked, stranger, down = await get("ak_linked"), await get("ak_other"), await get("ak_down")
+
+    assert EA_PROVIDER in {row["provider"] for row in linked.json()["latency"]}
+    assert linked.headers["Cache-Control"] == "private, no-store"
+    assert EA_PROVIDER not in {row["provider"] for row in stranger.json()["latency"]}
+    assert down.status_code == 503
+
+
+async def test_a_good_api_key_is_remembered_and_a_rejected_one_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[str] = []
+
+    async def verify(*, secret: str) -> Any:
+        asked.append(secret)
+        if secret not in {"ak_good"}:
+            raise models.VerifyAPIKeyAPIKeysResponseResponseBody(
+                models.VerifyAPIKeyAPIKeysResponseResponseBodyData(errors=[]),
+                httpx.Response(404, request=httpx.Request("POST", "https://clerk.test")),
+            )
+        return SimpleNamespace(subject="org_1", revoked=False, expired=False)
+
+    backend = SimpleNamespace(api_keys=SimpleNamespace(verify_api_key_async=verify))
+    monkeypatch.setattr(clerk, "_backend", lambda secret: backend)
+    monkeypatch.setattr(clerk, "_API_KEY_OWNERS", {})
+    secret = SecretStr("sk_test_not_real")
+
+    assert await clerk.api_key_owner("ak_good", secret) == "org_1"
+    assert await clerk.api_key_owner("ak_good", secret) == "org_1"
+    with pytest.raises(clerk.UnknownApiKey):
+        await clerk.api_key_owner("ak_bad", secret)
+    assert asked == ["ak_good", "ak_bad"]

@@ -12,6 +12,7 @@ switching into a partner org previews exactly their view. The coval org
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -19,6 +20,9 @@ from typing import Any, Literal
 
 import jwt
 import structlog
+from cachetools import TTLCache
+from clerk_backend_api import Clerk, models
+from pydantic import SecretStr
 
 from coval_bench.config import Settings
 
@@ -37,6 +41,37 @@ class CovalAdmin:
 
     user_id: str
     email: str | None
+
+
+class UnknownApiKey(Exception):  # noqa: N818
+    """Clerk doesn't know the key, or it is revoked or expired."""
+
+
+_API_KEY_OWNERS: TTLCache[str, str] = TTLCache(maxsize=1024, ttl=60)
+
+
+@functools.lru_cache(maxsize=2)
+def _backend(secret: str) -> Clerk:
+    return Clerk(bearer_auth=secret)
+
+
+async def api_key_owner(key: str, secret: SecretStr) -> str:
+    """The user or org id that owns a Clerk API key, remembered for a minute."""
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    owner = _API_KEY_OWNERS.get(digest)
+    if owner is not None:
+        return owner
+    try:
+        found = await _backend(secret.get_secret_value()).api_keys.verify_api_key_async(secret=key)
+    except (
+        models.VerifyAPIKeyAPIKeysResponseBody,
+        models.VerifyAPIKeyAPIKeysResponseResponseBody,
+    ) as exc:
+        raise UnknownApiKey from exc
+    if found.revoked or found.expired:
+        raise UnknownApiKey
+    _API_KEY_OWNERS[digest] = found.subject
+    return found.subject
 
 
 @functools.lru_cache(maxsize=4)
