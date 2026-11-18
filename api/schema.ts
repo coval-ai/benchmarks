@@ -625,6 +625,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v3/latency/probes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Probes
+         * @description Every probe of one model over the window, oldest first. Coval staff only.
+         *
+         *     Unlike ``/latency``, a probe that failed on our side is listed too, with a
+         *     ``failure_origin`` of ``runner``.
+         */
+        get: operations["get_probes_v3_latency_probes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v3/quality": {
         parameters: {
             query?: never;
@@ -648,6 +671,56 @@ export interface paths {
          *     metric version has a row for each.
          */
         get: operations["get_quality_v3_quality_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v3/sweeps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sweeps
+         * @description One row per sweep, oldest first, finished or not.
+         *
+         *     ``result_count`` items have run, ``queued_count`` are still to run and
+         *     ``gave_up_count`` ran out of tries. A sweep with ``completed_at`` set has nothing
+         *     left to run. A model has a sweep per dataset for each of its versions, so an old
+         *     version's sweeps are listed too.
+         */
+        get: operations["get_sweeps_v3_sweeps_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v3/sweeps/{sweep_id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sweep Items
+         * @description Every item of a sweep in sample and voice order, the ones that haven't run included.
+         *
+         *     A ``done`` item has the transcript, the timings, each metric's ``scores`` and, for
+         *     TTS, the ``audio_uri`` of the audio the model made. For STT the transcript is the
+         *     model's. For TTS it is what the model's audio was heard to say. A ``queued`` item
+         *     hasn't run yet or is waiting to retry, and a ``gave_up`` item ran out of tries.
+         */
+        get: operations["get_sweep_items_v3_sweeps__sweep_id__items_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1681,6 +1754,52 @@ export interface components {
             rates: components["schemas"]["PricingRateOut"][];
         };
         /**
+         * ProbeOut
+         * @description One probe of a model. Timings are milliseconds and null when not measured.
+         *
+         *     A failed probe has its ``error``, the ``status_code`` if the provider sent one, and
+         *     a ``failure_origin`` of ``provider`` or ``runner``.
+         */
+        ProbeOut: {
+            /**
+             * Scheduled At
+             * Format: date-time
+             */
+            scheduled_at: string;
+            /**
+             * Sent At
+             * Format: date-time
+             */
+            sent_at: string;
+            /** Voice */
+            voice: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "succeeded" | "failed";
+            /** Ttft Ms */
+            ttft_ms: number | null;
+            /** Ttfs Ms */
+            ttfs_ms: number | null;
+            /** Ttfa Ms */
+            ttfa_ms: number | null;
+            /** Error */
+            error: string | null;
+            /** Failure Origin */
+            failure_origin: ("provider" | "runner") | null;
+            /** Status Code */
+            status_code: number | null;
+        };
+        /**
+         * ProbesResponse
+         * @description Response schema for GET /v3/latency/probes.
+         */
+        ProbesResponse: {
+            /** Probes */
+            probes: components["schemas"]["ProbeOut"][];
+        };
+        /**
          * ProviderInfo
          * @description Information about a single provider's models.
          */
@@ -1990,6 +2109,111 @@ export interface components {
          * @enum {string}
          */
         Source: "official-api" | "shared-inference" | "dedicated-inference";
+        /**
+         * SweepItemOut
+         * @description One item of a sweep: a sample, and for TTS the voice it was spoken in.
+         *
+         *     A ``done`` item has what the model produced. A ``queued`` or ``gave_up`` item has
+         *     ``tries_left`` and, if it has failed, ``last_error``.
+         */
+        SweepItemOut: {
+            /** Sample Id */
+            sample_id: string;
+            /** Voice */
+            voice: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "done" | "queued" | "gave_up";
+            /** Transcript */
+            transcript: string | null;
+            /** Timings */
+            timings: {
+                [key: string]: unknown;
+            } | null;
+            /** Audio Uri */
+            audio_uri: string | null;
+            /** Ran At */
+            ran_at: string | null;
+            /** Tries Left */
+            tries_left: number | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Scores */
+            scores: components["schemas"]["SweepScoreOut"][];
+        };
+        /**
+         * SweepItemsResponse
+         * @description Response schema for GET /v3/sweeps/{sweep_id}/items.
+         */
+        SweepItemsResponse: {
+            /** Items */
+            items: components["schemas"]["SweepItemOut"][];
+        };
+        /**
+         * SweepOut
+         * @description One sweep: a model version run over one version of a dataset.
+         *
+         *     ``benchmark`` and ``condition`` are null for a dataset no benchmark owns.
+         */
+        SweepOut: {
+            /** Id */
+            id: number;
+            /** Model Id */
+            model_id: number;
+            /** Modality */
+            modality: string;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Model Version */
+            model_version: number;
+            /** Benchmark */
+            benchmark: string | null;
+            /** Condition */
+            condition: string | null;
+            /** Dataset Id */
+            dataset_id: string;
+            /** Dataset Version */
+            dataset_version: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Completed At */
+            completed_at: string | null;
+            /** Result Count */
+            result_count: number;
+            /** Queued Count */
+            queued_count: number;
+            /** Gave Up Count */
+            gave_up_count: number;
+        };
+        /**
+         * SweepScoreOut
+         * @description One item's score on a metric, as error and reference counts.
+         */
+        SweepScoreOut: {
+            /** Metric */
+            metric: string;
+            /** Metric Version */
+            metric_version: string;
+            /** Errors */
+            errors: number;
+            /** Reference Units */
+            reference_units: number;
+        };
+        /**
+         * SweepsResponse
+         * @description Response schema for GET /v3/sweeps.
+         */
+        SweepsResponse: {
+            /** Sweeps */
+            sweeps: components["schemas"]["SweepOut"][];
+        };
         /**
          * TagCategory
          * @description Faceted leaderboard filters. Within a facet tags OR; across facets they AND.
@@ -3305,6 +3529,58 @@ export interface operations {
             };
         };
     };
+    get_probes_v3_latency_probes_get: {
+        parameters: {
+            query: {
+                model_id: number;
+                window?: "24h" | "7d" | "30d";
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbesResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_quality_v3_quality_get: {
         parameters: {
             query?: {
@@ -3333,6 +3609,97 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sweeps_v3_sweeps_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SweepsResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sweep_items_v3_sweeps__sweep_id__items_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                sweep_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SweepItemsResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
