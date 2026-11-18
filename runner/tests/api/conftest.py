@@ -390,6 +390,10 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 sweep_id  bigint NOT NULL REFERENCES benchmarks_v2.sweeps (id),
                 sample_id text NOT NULL,
                 voice     text NOT NULL DEFAULT '',
+                transcript text,
+                timings    jsonb NOT NULL DEFAULT '{}'::jsonb,
+                audio_uri  text,
+                created_at timestamptz NOT NULL DEFAULT now(),
                 UNIQUE (sweep_id, sample_id, voice)
             );
             CREATE TABLE IF NOT EXISTS benchmarks_v2.sweep_scores (
@@ -406,6 +410,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 sample_id  text NOT NULL,
                 voice      text NOT NULL DEFAULT '',
                 tries_left integer NOT NULL DEFAULT 3,
+                last_error text,
                 PRIMARY KEY (sweep_id, sample_id, voice)
             );
         """)

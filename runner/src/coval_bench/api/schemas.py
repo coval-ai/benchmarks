@@ -793,6 +793,40 @@ class SweepsResponse(BaseModel):
     sweeps: list[SweepOut]
 
 
+class SweepScoreOut(BaseModel):
+    """One item's score on a metric, as error and reference counts."""
+
+    metric: str
+    metric_version: str
+    errors: int
+    reference_units: int
+
+
+class SweepItemOut(BaseModel):
+    """One item of a sweep: a sample, and for TTS the voice it was spoken in.
+
+    A ``done`` item has what the model produced. A ``queued`` or ``gave_up`` item has
+    ``tries_left`` and, if it has failed, ``last_error``.
+    """
+
+    sample_id: str
+    voice: str | None
+    status: Literal["done", "queued", "gave_up"]
+    transcript: str | None
+    timings: dict[str, Any] | None
+    audio_uri: str | None
+    ran_at: datetime | None
+    tries_left: int | None
+    last_error: str | None
+    scores: list[SweepScoreOut]
+
+
+class SweepItemsResponse(BaseModel):
+    """Response schema for GET /v3/sweeps/{sweep_id}/items."""
+
+    items: list[SweepItemOut]
+
+
 class ErrorOut(BaseModel):
     """What went wrong with a ``/v3`` request."""
 

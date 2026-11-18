@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""GET /v3/sweeps: how far along each quality sweep is. Coval staff only."""
+"""GET /v3/sweeps: each quality sweep's progress and its items. Coval staff only."""
 
 from __future__ import annotations
 
@@ -14,9 +14,15 @@ from starlette.requests import Request
 
 from coval_bench.api.deps import get_pool
 from coval_bench.api.ratelimit import limiter
-from coval_bench.api.schemas import ErrorResponse, SweepOut, SweepsResponse
+from coval_bench.api.schemas import (
+    ErrorResponse,
+    SweepItemOut,
+    SweepItemsResponse,
+    SweepOut,
+    SweepsResponse,
+)
 from coval_bench.api.v3_access import coval_only
-from coval_bench.db.sweep_store import fetch_sweeps
+from coval_bench.db.sweep_store import fetch_sweep_items, fetch_sweeps
 
 router = APIRouter(tags=["sweeps"], dependencies=[Depends(coval_only)])
 
@@ -39,3 +45,30 @@ async def get_sweeps(
     except psycopg.Error as exc:
         raise HTTPException(503, "sweeps are unavailable") from exc
     return SweepsResponse(sweeps=[SweepOut(**row) for row in rows])
+
+
+@router.get(
+    "/sweeps/{sweep_id}/items",
+    response_model=SweepItemsResponse,
+    responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
+)
+@limiter.limit("60/minute")
+async def get_sweep_items(
+    request: Request,  # required by slowapi
+    sweep_id: int,
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+) -> SweepItemsResponse:
+    """Every item of a sweep in sample and voice order, the ones that haven't run included.
+
+    A ``done`` item has the transcript, the timings, each metric's ``scores`` and, for
+    TTS, the ``audio_uri`` of the audio the model made. For STT the transcript is the
+    model's. For TTS it is what the model's audio was heard to say. A ``queued`` item
+    hasn't run yet or is waiting to retry, and a ``gave_up`` item ran out of tries.
+    """
+    try:
+        rows = await fetch_sweep_items(pool, sweep_id)
+    except psycopg.Error as exc:
+        raise HTTPException(503, "sweeps are unavailable") from exc
+    if rows is None:
+        raise HTTPException(404, "no such sweep")
+    return SweepItemsResponse(items=[SweepItemOut(**row) for row in rows])
