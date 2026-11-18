@@ -292,3 +292,42 @@ async def fetch_sweeps(pool: Pool) -> list[dict[str, Any]]:
         await cur.execute(_SWEEPS)
         rows: list[dict[str, Any]] = await cur.fetchall()
         return rows
+
+
+_SWEEP_ITEMS = """
+    SELECT r.sample_id, NULLIF(r.voice, '') AS voice, 'done' AS status,
+           r.transcript, r.timings, r.audio_uri, r.created_at AS ran_at,
+           NULL::integer AS tries_left, NULL::text AS last_error,
+           COALESCE((
+               SELECT jsonb_agg(jsonb_build_object(
+                          'metric', sc.metric, 'metric_version', sc.metric_version,
+                          'errors', sc.errors, 'reference_units', sc.reference_units)
+                        ORDER BY sc.metric, sc.metric_version)
+               FROM benchmarks_v2.sweep_scores sc WHERE sc.sweep_result_id = r.id
+           ), '[]'::jsonb) AS scores
+    FROM benchmarks_v2.sweep_results r
+    WHERE r.sweep_id = %(sweep_id)s
+    UNION ALL
+    SELECT q.sample_id, NULLIF(q.voice, ''),
+           CASE WHEN q.tries_left > 0 THEN 'queued' ELSE 'gave_up' END,
+           NULL, NULL, NULL, NULL, q.tries_left, q.last_error, '[]'::jsonb
+    FROM benchmarks_v2.sweep_queue q
+    WHERE q.sweep_id = %(sweep_id)s
+    ORDER BY sample_id, voice NULLS FIRST
+"""
+
+
+async def fetch_sweep_items(pool: Pool, sweep_id: int) -> list[dict[str, Any]] | None:
+    """A sweep's items in sample and voice order, or None if there's no such sweep.
+
+    An item that ran is ``done`` and has its transcript, timings, audio URI and scores. One
+    still in the queue is ``queued``, or ``gave_up`` once it has no tries left, and has
+    its last error if it has failed.
+    """
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute("SELECT 1 FROM benchmarks_v2.sweeps WHERE id = %s", (sweep_id,))
+        if await cur.fetchone() is None:
+            return None
+        await cur.execute(_SWEEP_ITEMS, {"sweep_id": sweep_id})
+        rows: list[dict[str, Any]] = await cur.fetchall()
+        return rows
