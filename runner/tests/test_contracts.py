@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -26,6 +27,7 @@ from coval_bench.scenarios import (
     stack_as_dict,
 )
 from coval_bench.variants.platforms import redact_identifiers
+from tests.tool_fixtures import SYNTHETIC_SUITE
 
 # Bump deliberately, in the same commit that changes a committed contract file or
 # a pin. A failure here means someone edited the contract without versioning it,
@@ -35,7 +37,7 @@ from coval_bench.variants.platforms import redact_identifiers
 # never committed, so its value differs between a machine holding the fixtures
 # and CI, which never does — pinning that would be red for exactly the people
 # doing the work and vacuous everywhere else.
-EXPECTED_PUBLIC_CONTRACT_SHA = "146ac237d7ef007c"
+EXPECTED_PUBLIC_CONTRACT_SHA = "751580c11409d238"
 
 
 def test_stack_loads_and_pins_are_what_the_design_doc_says() -> None:
@@ -55,21 +57,17 @@ def test_stack_loads_and_pins_are_what_the_design_doc_says() -> None:
     assert stack.platform_behaviour.vendor_post_call_analysis is False
 
 
-def test_public_contract_hash_is_pinned() -> None:
-    assert public_contract_sha256("dental").startswith(EXPECTED_PUBLIC_CONTRACT_SHA), (
-        "The dental contract or the pinned stack changed. If that was deliberate, "
+def test_public_contract_hash_is_pinned(synthetic_contract: Path) -> None:
+    assert public_contract_sha256(SYNTHETIC_SUITE).startswith(EXPECTED_PUBLIC_CONTRACT_SHA), (
+        "The synthetic contract or the pinned stack changed. If that was deliberate, "
         "update EXPECTED_PUBLIC_CONTRACT_SHA in the same commit."
     )
 
 
-def test_the_published_hash_also_covers_the_private_fixtures() -> None:
-    """What ran is identified by the fixtures too, not just the committed files.
-
-    Skips in CI and a fresh checkout, where `_private/` does not exist.
-    """
-    if not has_private_contract("dental"):
-        pytest.skip("private fixtures are not installed")
-    assert contract_sha256("dental") != public_contract_sha256("dental")
+def test_the_published_hash_also_covers_the_private_fixtures(
+    synthetic_contract: Path, local_private_fixture: bytes
+) -> None:
+    assert contract_sha256(SYNTHETIC_SUITE) != public_contract_sha256(SYNTHETIC_SUITE)
 
 
 def test_rationale_keys_are_allowed_and_survive_load() -> None:
@@ -176,12 +174,19 @@ def test_a_provider_answers_when_the_checkout_has_none(
     assert read_private_fixture("dental") == SEEDED
 
 
-def test_the_local_checkout_wins_over_a_provider(no_providers: None) -> None:
+@pytest.fixture
+def local_private_fixture(synthetic_contract: Path, no_providers: None) -> bytes:
+    data = b'{"tools": {"lookup": {"fixture": true}}}'
+    directory = synthetic_contract / "_private"
+    directory.mkdir()
+    (directory / FIXTURE_FILE).write_bytes(data)
+    return data
+
+
+def test_the_local_checkout_wins_over_a_provider(local_private_fixture: bytes) -> None:
     """Editing the file is what a developer expects to take effect."""
-    if not has_private_contract("dental"):
-        pytest.skip("local fixtures are not installed")
     register_fixture_provider(_serving(SEEDED))
-    assert read_private_fixture("dental") != SEEDED
+    assert read_private_fixture(SYNTHETIC_SUITE) == local_private_fixture
 
 
 def test_a_provider_without_the_suite_falls_through(
@@ -201,7 +206,7 @@ def test_an_empty_chain_still_raises(no_providers: None, checkout_without_fixtur
 
 
 def test_the_published_hash_is_the_same_whichever_source_supplied_the_bytes(
-    no_providers: None, monkeypatch: pytest.MonkeyPatch
+    local_private_fixture: bytes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The reason the fallback lives in the reader and not in the mock service.
 
@@ -210,10 +215,7 @@ def test_the_published_hash_is_the_same_whichever_source_supplied_the_bytes(
     hash computed as though it had none — a different "what ran" number on every
     result, and nothing to notice it.
     """
-    if not has_private_contract("dental"):
-        pytest.skip("local fixtures are not installed")
-    from_disk = contract_sha256("dental")
-    seeded = read_private_fixture("dental")
+    from_disk = contract_sha256(SYNTHETIC_SUITE)
 
     real = contracts_module._read_bytes
 
@@ -223,9 +225,9 @@ def test_the_published_hash_is_the_same_whichever_source_supplied_the_bytes(
         return real(*parts)
 
     monkeypatch.setattr(contracts_module, "_read_bytes", missing_private)
-    register_fixture_provider(_serving(seeded))
-    assert contract_sha256("dental") == from_disk
-    assert contract_sha256("dental") != public_contract_sha256("dental")
+    register_fixture_provider(_serving(local_private_fixture))
+    assert contract_sha256(SYNTHETIC_SUITE) == from_disk
+    assert contract_sha256(SYNTHETIC_SUITE) != public_contract_sha256(SYNTHETIC_SUITE)
 
 
 def test_the_published_prompt_is_read_and_covered_by_the_contract_hash(

@@ -19,9 +19,10 @@ from httpx import AsyncClient
 
 import coval_bench.scenarios as contracts_module
 from coval_bench.api.routers import mocktools as mocktools_router
-from coval_bench.mocktools.dispatch import Dispatcher, Suite, load_tool_specs
+from coval_bench.mocktools.dispatch import Dispatcher, Suite, parse_tool_specs
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture
 from tests.api.conftest import MOCK_TOOLS_KEY, _make_db_url
+from tests.tool_fixtures import TOOL_DEFINITIONS_JSON
 
 PHONE = "2065550180"
 AUTH = {"X-Mock-Tools-Key": MOCK_TOOLS_KEY}
@@ -32,11 +33,7 @@ BULKY = {"patient_name": "Marcus Lee", "notes": "x" * 4096}
 
 
 def _test_fixtures() -> MockFixtures:
-    """Seeds covering every tool the committed contract declares.
-
-    Built here rather than read from ``_private/``, which is never committed and
-    so does not exist in CI.
-    """
+    """Seeds covering the synthetic contract."""
 
     def plain(name: str) -> ToolFixture:
         return ToolFixture(fallback=Seed(id=f"{name}_fallback", response={"ok": True}))
@@ -58,15 +55,18 @@ def _test_fixtures() -> MockFixtures:
             "check_availability": plain("check_availability"),
             "book_appointment": plain("book_appointment"),
             "cancel_appointment": plain("cancel_appointment"),
-            "transfer_to_front_desk": plain("transfer_to_front_desk"),
         }
     )
+
+
+def _test_suite() -> Suite:
+    return Suite(Dispatcher(parse_tool_specs(TOOL_DEFINITIONS_JSON), _test_fixtures()))
 
 
 @pytest_asyncio.fixture
 async def mock_app(app: FastAPI) -> FastAPI:
     """The app with the test seeds bound, and no artificial latency."""
-    suite = Suite(Dispatcher(load_tool_specs("dental"), _test_fixtures()))
+    suite = _test_suite()
     app.state.mock_suites = {"codec-test": suite}
     app.state.settings = app.state.settings.model_copy(
         update={"mock_tools_latency_ms": 0.0, "mock_tools_suite": "codec-test"}
@@ -236,7 +236,9 @@ async def test_calls_are_recoverable_in_the_order_they_fired(
     """`now()` is constant within a transaction, so `id` is what orders a burst."""
     for _ in range(5):
         await client.post(
-            "/mock/generic/check_availability", json={"date": "2030-11-12"}, headers=AUTH
+            "/mock/generic/check_availability",
+            json={"date": "2030-11-12", "appointment_type": "checkup"},
+            headers=AUTH,
         )
     rows = await _rows(postgresql)
     assert [row["id"] for row in rows] == sorted(row["id"] for row in rows)
@@ -261,11 +263,7 @@ def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 async def test_every_answer_is_held_to_the_latency_budget(
     client: AsyncClient, app: FastAPI, sleeps: list[float]
 ) -> None:
-    app.state.mock_suites = {
-        app.state.settings.mock_tools_suite: Suite(
-            Dispatcher(load_tool_specs("dental"), _test_fixtures())
-        )
-    }
+    app.state.mock_suites = {app.state.settings.mock_tools_suite: _test_suite()}
     app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 120.0})
     response = await client.post(
         "/mock/generic/lookup_patient", json={"phone": PHONE}, headers=AUTH
@@ -297,13 +295,21 @@ async def test_answers_are_not_compressed(client: AsyncClient, mock_app: FastAPI
     assert "content-encoding" not in response.headers
 
 
-@pytest.mark.parametrize("tool", ["check_availability", "book_appointment", "cancel_appointment"])
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        ("check_availability", {"date": "2030-11-12", "appointment_type": "checkup"}),
+        ("book_appointment", {"slot": 42}),
+        ("cancel_appointment", {"booking_id": "fixture-booking"}),
+    ],
+)
 async def test_every_contract_tool_is_answerable(
-    client: AsyncClient, mock_app: FastAPI, tool: str
+    client: AsyncClient, mock_app: FastAPI, tool: str, args: dict[str, Any]
 ) -> None:
     """Routes come from the contract, so no tool needs a hand-written one."""
-    response = await client.post(f"/mock/generic/{tool}", json={}, headers=AUTH)
+    response = await client.post(f"/mock/generic/{tool}", json=args, headers=AUTH)
     assert response.status_code == 200
+    assert response.json() == {"ok": True}
 
 
 # --- routing ---------------------------------------------------------------
@@ -381,11 +387,7 @@ async def test_vapi_batch_writes_one_row_per_call_in_order(
 async def test_vapi_batch_is_held_to_the_budget_per_call(
     client: AsyncClient, app: FastAPI, sleeps: list[float]
 ) -> None:
-    app.state.mock_suites = {
-        app.state.settings.mock_tools_suite: Suite(
-            Dispatcher(load_tool_specs("dental"), _test_fixtures())
-        )
-    }
+    app.state.mock_suites = {app.state.settings.mock_tools_suite: _test_suite()}
     app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 60.0})
     body = _vapi(
         {"id": "tc_1", "name": "lookup_patient", "arguments": {"phone": PHONE}},
@@ -400,11 +402,7 @@ async def test_vapi_batch_is_held_to_the_budget_per_call(
 async def test_vapi_with_no_calls_answers_empty_and_writes_nothing(
     client: AsyncClient, app: FastAPI, postgresql: Any, sleeps: list[float]
 ) -> None:
-    app.state.mock_suites = {
-        app.state.settings.mock_tools_suite: Suite(
-            Dispatcher(load_tool_specs("dental"), _test_fixtures())
-        )
-    }
+    app.state.mock_suites = {app.state.settings.mock_tools_suite: _test_suite()}
     app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 200.0})
     response = await client.post("/mock/vapi", json=_vapi(), headers=AUTH)
     assert response.json() == {"results": []}
