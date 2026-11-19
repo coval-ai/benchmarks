@@ -94,6 +94,7 @@ _STT_KEY_FIELDS = (
     "murfai_api_key",
     "nari_api_key",
     "openai_api_key",
+    "polyai_owl_api_key",
     "reson8_api_key",
     "revai_api_key",
     "saidwire_api_key",
