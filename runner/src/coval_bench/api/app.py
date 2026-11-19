@@ -63,6 +63,7 @@ from coval_bench.api.routers import (
     runs,
     s2s_samples,
     tags,
+    v3_companies,
     v3_latency,
     v3_quality,
     v3_sweeps,
@@ -254,6 +255,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_health.router, prefix="/v1")
     app.include_router(admin_models.router, prefix="/v1")
     app.include_router(admin_pricing.router, prefix="/v1")
+    app.include_router(v3_companies.router, prefix=v3.PREFIX)
     app.include_router(v3_latency.router, prefix=v3.PREFIX)
     app.include_router(v3_quality.router, prefix=v3.PREFIX)
     app.include_router(v3_sweeps.router, prefix=v3.PREFIX)

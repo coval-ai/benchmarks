@@ -852,6 +852,22 @@ class SweepItemsResponse(BaseModel):
     items: list[SweepItemOut]
 
 
+class CompanyOut(BaseModel):
+    """A company on ``/v3``. The fields after ``name`` are null unless coval staff ask."""
+
+    slug: str
+    name: str
+    org_id: str | None = None
+    updated_by_org: str | None = None
+    updated_at: datetime | None = None
+
+
+class CompaniesResponse(BaseModel):
+    """Response schema for GET /v3/companies."""
+
+    companies: list[CompanyOut]
+
+
 class ErrorOut(BaseModel):
     """What went wrong with a ``/v3`` request."""
 
