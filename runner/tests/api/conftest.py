@@ -452,6 +452,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(benchmark_visibility, "op", SimpleNamespace(execute=conn.execute)):
             benchmark_visibility.upgrade()
+        updated_by_org = import_module(
+            "coval_bench.db.migrations.versions.20261119_0069_updated_by_org"
+        )
+        with patch.object(updated_by_org, "op", SimpleNamespace(execute=conn.execute)):
+            updated_by_org.upgrade()
         # Pricing log (mirrors migration 20260903_0027).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.pricing_rates (
