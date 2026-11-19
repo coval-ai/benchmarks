@@ -317,15 +317,22 @@ _SWEEP_ITEMS = """
 """
 
 
-async def fetch_sweep_items(pool: Pool, sweep_id: int) -> list[dict[str, Any]] | None:
-    """A sweep's items in sample and voice order, or None if there's no such sweep.
+async def fetch_sweep_items(
+    pool: Pool, sweep_id: int, modality: str
+) -> list[dict[str, Any]] | None:
+    """A sweep's items in sample and voice order, or None if *modality* has no such sweep.
 
     An item that ran is ``done`` and has its transcript, timings, audio URI and scores. One
     still in the queue is ``queued``, or ``gave_up`` once it has no tries left, and has
     its last error if it has failed.
     """
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute("SELECT 1 FROM benchmarks_v2.sweeps WHERE id = %s", (sweep_id,))
+        await cur.execute(
+            "SELECT 1 FROM benchmarks_v2.sweeps sw"
+            " JOIN benchmarks_v2.models m ON m.id = sw.model_id"
+            " WHERE sw.id = %s AND m.modality = %s",
+            (sweep_id, modality),
+        )
         if await cur.fetchone() is None:
             return None
         await cur.execute(_SWEEP_ITEMS, {"sweep_id": sweep_id})

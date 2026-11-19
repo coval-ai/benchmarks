@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
+from fastapi import FastAPI
 from httpx import AsyncClient
 
 from coval_bench.registries import RegisteredModel
@@ -147,6 +148,24 @@ async def test_a_bad_parameter_is_named_in_the_error(client: AsyncClient) -> Non
     error = response.json()["error"]
     assert (error["code"], error["param"]) == ("invalid_parameter", "window")
     assert "24h" in error["message"]
+
+
+async def test_a_metric_of_another_modality_has_no_points(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    _seed(postgresql)
+
+    for path in ("/v3/tts/latency/points?metric=TTFT", "/v3/stt/latency/points?metric=TTFA"):
+        body = (await client.get(path)).json()
+        assert (body["points"], body["bucket_seconds"]) == ([], 1800)
+
+
+def test_the_schema_lists_the_modalities_and_the_not_found(app: FastAPI) -> None:
+    for path in ("/v3/{modality}/quality", "/v3/{modality}/latency", "/v3/{modality}/sweeps"):
+        get = app.openapi()["paths"][path]["get"]
+        (modality,) = [p for p in get["parameters"] if p["name"] == "modality"]
+        assert modality["schema"]["enum"] == ["llm", "s2s", "stt", "tts"]
+        assert "404" in get["responses"]
 
 
 async def test_an_unknown_v3_path_is_a_not_found_error(client: AsyncClient) -> None:

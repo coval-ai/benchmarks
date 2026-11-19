@@ -70,9 +70,7 @@ async def get_sweep_items(
     hasn't run yet or is waiting to retry, and a ``gave_up`` item ran out of tries.
     """
     try:
-        sweeps = await fetch_sweeps(pool)
-        mine = any(row["id"] == sweep_id and row["modality"] == modality for row in sweeps)
-        rows = await fetch_sweep_items(pool, sweep_id) if mine else None
+        rows = await fetch_sweep_items(pool, sweep_id, modality)
     except psycopg.Error as exc:
         raise HTTPException(503, "sweeps are unavailable") from exc
     if rows is None:

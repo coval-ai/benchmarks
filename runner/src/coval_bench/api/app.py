@@ -257,10 +257,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_models.router, prefix="/v1")
     app.include_router(admin_pricing.router, prefix="/v1")
     app.include_router(v3_companies.router, prefix=v3.PREFIX)
-    app.include_router(v3_latency.router, prefix=v3.MODALITY_PREFIX)
+    app.include_router(v3_latency.router, prefix=v3.MODALITY_PREFIX, responses=v3.NO_MODALITY)
     app.include_router(v3_models.router, prefix=v3.PREFIX)
-    app.include_router(v3_quality.router, prefix=v3.MODALITY_PREFIX)
-    app.include_router(v3_sweeps.router, prefix=v3.MODALITY_PREFIX)
+    app.include_router(v3_quality.router, prefix=v3.MODALITY_PREFIX, responses=v3.NO_MODALITY)
+    app.include_router(v3_sweeps.router, prefix=v3.MODALITY_PREFIX, responses=v3.NO_MODALITY)
     # Not under /v1 and not rate limited: an appliance the agents call, not
     # public read API. slowapi carries no default limit, so /mock and /llm are exempt
     # by construction — a 429 mid-conversation would be graded as the agent failing.

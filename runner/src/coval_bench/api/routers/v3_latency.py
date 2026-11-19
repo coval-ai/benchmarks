@@ -131,13 +131,18 @@ async def get_latency_points(
 
     The last 24 hours has one point per probe tick. Seven days is averaged by the hour and
     thirty by the day, and ``bucket_seconds`` says which. A point with a null value is a
-    tick or bucket where every probe failed on the provider's side.
+    tick or bucket where every probe failed on the provider's side. A metric the modality
+    doesn't have has no points.
     """
     bucket = {
         "24h": timedelta(seconds=settings.schedule_period_seconds),
         "7d": timedelta(hours=1),
         "30d": timedelta(days=1),
     }[window]
+    if metric not in _METRICS.get(modality, ()):
+        return LatencyPointsResponse(
+            metric=metric, bucket_seconds=int(bucket.total_seconds()), points=[]
+        )
     try:
         rows = await fetch_latency_points(
             pool,
