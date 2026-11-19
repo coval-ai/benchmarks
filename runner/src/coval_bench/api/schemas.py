@@ -556,12 +556,8 @@ class AdminModelsResponse(BaseModel):
     models: list[AdminModelOut]
 
 
-class AdminModelCreate(BaseModel):
-    """POST body for /v1/admin/models. The defaults land the model Hidden.
-
-    ``visibility`` is the level. ``published`` is the older way to say public or
-    partner, and is only read when ``visibility`` is left out.
-    """
+class ModelCreate(BaseModel):
+    """POST body for /v3/models. The defaults land the model unpublished."""
 
     modality: Benchmark
     provider: str = Field(min_length=1)
@@ -575,8 +571,7 @@ class AdminModelCreate(BaseModel):
     region: Literal["us", "eu", "asia"] | None = None
     arena_enabled: bool = True
     collected: bool = True
-    visibility: Visibility | None = None
-    published: bool = False
+    visibility: Visibility = "partner"
     tags: list[str] = []
     color: HexColor = None
     display_name: str | None = Field(default=None, min_length=1)
@@ -584,8 +579,19 @@ class AdminModelCreate(BaseModel):
     orchestration: Orchestration | None = None
 
 
-class AdminModelPatch(BaseModel):
-    """PATCH body for /v1/admin/models/{id}; absent fields stay unchanged.
+class AdminModelCreate(ModelCreate):
+    """POST body for /v1/admin/models. The defaults land the model Hidden.
+
+    ``visibility`` is the level. ``published`` is the older way to say public or
+    partner, and is only read when ``visibility`` is left out.
+    """
+
+    visibility: Visibility | None = None  # type: ignore[assignment]
+    published: bool = False
+
+
+class ModelPatch(BaseModel):
+    """PATCH body for /v3/models/{id}; absent fields stay unchanged.
 
     ``color`` null returns the model to the site's built-in palette; ``display_name``
     null returns it to the site's built-in label. ``version`` only moves up by one.
@@ -603,13 +609,58 @@ class AdminModelPatch(BaseModel):
     arena_enabled: bool | None = None
     collected: bool | None = None
     visibility: Visibility | None = None
-    published: bool | None = None
     tags: list[str] | None = None
     color: HexColor = None
     display_name: str | None = Field(default=None, min_length=1)
     architecture: Architecture | None = None
     orchestration: Orchestration | None = None
     version: int | None = None
+
+
+class AdminModelPatch(ModelPatch):
+    """PATCH body for /v1/admin/models/{id}, which also takes the older ``published``."""
+
+    published: bool | None = None
+
+
+class ModelOut(BaseModel):
+    """A model on ``/v3``. The fields after ``visibility`` are null unless coval staff ask."""
+
+    id: int
+    modality: Benchmark
+    provider: str
+    model: str
+    display_name: str | None = None
+    creator: str | None = None
+    tags: list[str] = []
+    color: str | None = None
+    source: Source
+    licensing: Licensing
+    on_prem: bool
+    region: Literal["us", "eu", "asia"] | None = None
+    architecture: Architecture | None = None
+    orchestration: Orchestration | None = None
+    version: int
+    visibility: Visibility
+    collected: bool | None = None
+    arena_enabled: bool | None = None
+    voice: str | None = None
+    voices: list[Voice] | None = None
+    updated_by_org: str | None = None
+    updated_at: datetime | None = None
+
+
+class ModelsResponse(BaseModel):
+    """Response schema for GET /v3/models."""
+
+    models: list[ModelOut]
+
+
+class ModelUpdateResponse(BaseModel):
+    """PATCH /v3/models/{id} response: the updated model plus warnings a rename leaves behind."""
+
+    model: ModelOut
+    warnings: list[str] = []
 
 
 class AdminModelUpdateResponse(BaseModel):

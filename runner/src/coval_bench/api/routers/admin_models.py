@@ -34,6 +34,7 @@ from coval_bench.api.schemas import (
     AdminModelPatch,
     AdminModelsResponse,
     AdminModelUpdateResponse,
+    ModelPatch,
 )
 from coval_bench.config import Settings
 from coval_bench.db.pricing_store import PricingStore
@@ -264,7 +265,7 @@ async def update_admin_model(
 
 async def update_model(
     model_id: int,
-    body: AdminModelPatch,
+    body: ModelPatch,
     if_match: str | None,
     pool: AsyncConnectionPool[Any],
     settings: Settings,

@@ -114,6 +114,13 @@ def coval_only(response: Response, who: Caller = Depends(caller)) -> Caller:
     return who
 
 
+def writer(who: Caller) -> str:
+    """The org a write is recorded against."""
+    if who.org_id is None:  # pragma: no cover — a coval caller always has its org
+        raise HTTPException(403, "this endpoint is for coval staff")
+    return who.org_id
+
+
 def viewer(
     response: Response,
     authorization: str | None = Header(default=None),
