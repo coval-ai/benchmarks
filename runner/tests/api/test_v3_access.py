@@ -12,11 +12,12 @@ import httpx
 import psycopg
 import pytest
 from clerk_backend_api import models
+from fastapi import Depends, FastAPI, HTTPException
 from httpx import AsyncClient
 from pydantic import SecretStr
 
 from coval_bench.api import clerk
-from coval_bench.api.v3_access import Caller, can_see
+from coval_bench.api.v3_access import Caller, can_see, coval_only, viewer
 from coval_bench.registries import RegisteredModel, Visibility
 from coval_bench.registries.benchmarks import Benchmark
 from tests.api.conftest import (
@@ -31,6 +32,8 @@ from tests.api.conftest import (
 )
 
 LINKED = "org_test_linked"
+_STAFF_ONLY = Depends(coval_only)
+_ANY_READER = Depends(viewer)
 
 
 def _unpublished(provider: str, model: str) -> RegisteredModel:
@@ -223,3 +226,38 @@ async def test_a_good_api_key_is_remembered_and_a_rejected_one_is_unknown(
     with pytest.raises(clerk.UnknownApiKey):
         await clerk.api_key_owner("ak_bad", secret)
     assert asked == ["ak_good", "ak_bad"]
+
+
+async def test_a_route_learns_the_callers_org_and_refuses_in_the_v3_error_shape(
+    app: FastAPI, client: AsyncClient
+) -> None:
+    @app.get("/v3/test-staff")
+    async def staff(who: Caller = _STAFF_ONLY) -> dict[str, Any]:
+        return {"org": who.org_id}
+
+    @app.get("/v3/test-read")
+    async def read(who: Caller = _ANY_READER) -> dict[str, Any]:
+        return {"org": who.org_id}
+
+    @app.get("/v3/test-refused/{status}")
+    async def refused(status: int) -> None:
+        raise HTTPException(status, "no")
+
+    coval = bearer(sub="u", org_id=COVAL_ORG)
+    assert (await client.get("/v3/test-staff", headers=coval)).json() == {"org": COVAL_ORG}
+
+    anonymous = await client.get("/v3/test-read")
+    assert anonymous.json() == {"org": None}
+    assert anonymous.headers["Cache-Control"].startswith("public")
+    signed_in = await client.get("/v3/test-read", headers=bearer(sub="u", org_id=EA_ORG))
+    assert signed_in.json() == {"org": EA_ORG}
+    assert signed_in.headers["Cache-Control"] == "private, no-store"
+
+    async def answer(status: int) -> tuple[int, str]:
+        response = await client.get(f"/v3/test-refused/{status}")
+        return response.status_code, response.json()["error"]["code"]
+
+    assert await answer(422) == (400, "invalid_request")
+    assert await answer(409) == (409, "conflict")
+    assert await answer(412) == (412, "precondition_failed")
+    assert await answer(428) == (428, "precondition_required")

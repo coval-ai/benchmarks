@@ -94,7 +94,9 @@ async def _never_shared_http_error(request: Request, exc: Exception) -> Response
     response: Response
     if request.url.path.startswith(v3.PREFIX):
         response = JSONResponse(
-            v3.http_error_body(http_exc), status_code=http_exc.status_code, headers=http_exc.headers
+            v3.http_error_body(http_exc),
+            status_code=v3.http_status(http_exc),
+            headers=http_exc.headers,
         )
     else:
         response = await http_exception_handler(request, http_exc)

@@ -39,6 +39,7 @@ class Caller:
     proof: Literal["absent", "unknown", "accepted"]
     level: clerk.CallerLevel = "public"
     company: str | None = None
+    org_id: str | None = None
 
 
 _LOOSEST_FIRST: tuple[Visibility, ...] = ("public", "partner", "coval")
@@ -98,18 +99,37 @@ async def caller(
     except psycopg.Error as exc:
         raise HTTPException(503, "access is unavailable") from exc
     if row is not None:
-        return Caller("accepted", "partner", row["slug"])
+        return Caller("accepted", "partner", row["slug"], org_id)
     if settings.clerk_coval_org and org_id == settings.clerk_coval_org:
-        return Caller("accepted", "coval")
-    return Caller("accepted")
+        return Caller("accepted", "coval", org_id=org_id)
+    return Caller("accepted", org_id=org_id)
 
 
-def coval_only(response: Response, who: Caller = Depends(caller)) -> None:
+def coval_only(response: Response, who: Caller = Depends(caller)) -> Caller:
     """Let only coval staff through, and keep the response out of shared caches."""
     if who.level != "coval":
         raise HTTPException(403, "this endpoint is for coval staff")
     response.headers.append("Vary", VARY_HEADERS)
     response.headers["Cache-Control"] = "private, no-store"
+    return who
+
+
+def viewer(
+    response: Response,
+    authorization: str | None = Header(default=None),
+    who: Caller = Depends(caller),
+) -> Caller:
+    """The caller of a read that is filtered by who is asking.
+
+    Sets the cache headers, so no route can serve a hidden row without them.
+    """
+    response.headers.append("Vary", VARY_HEADERS)
+    response.headers[EA_STATUS_HEADER] = who.proof
+    if who.proof == "accepted":
+        response.headers["Cache-Control"] = "private, no-store"
+    elif authorization is None:
+        response.headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
+    return who
 
 
 class Sees(Protocol):
@@ -119,24 +139,15 @@ class Sees(Protocol):
 
 
 def visible(
-    response: Response,
-    authorization: str | None = Header(default=None),
-    who: Caller = Depends(caller),
+    who: Caller = Depends(viewer),
     models: dict[int, RegisteredModel] = Depends(get_models_by_id),
     metric_levels: dict[str, str] = Depends(get_metric_visibility),
 ) -> Sees:
     """A check of whether this caller may see a model's result for a metric.
 
     A result takes the strictest level of its model, its metric and, when it has one,
-    its benchmark. A metric with no row in the metrics table is served to no one. Sets
-    the cache headers too, so no route can serve a hidden result without them.
+    its benchmark. A metric with no row in the metrics table is served to no one.
     """
-    response.headers.append("Vary", VARY_HEADERS)
-    response.headers[EA_STATUS_HEADER] = who.proof
-    if who.proof == "accepted":
-        response.headers["Cache-Control"] = "private, no-store"
-    elif authorization is None:
-        response.headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
 
     def sees(model_id: int, metric: str, benchmark: Visibility = "public") -> bool:
         model = models.get(model_id)
