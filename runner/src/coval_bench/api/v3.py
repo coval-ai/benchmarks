@@ -7,10 +7,24 @@ from __future__ import annotations
 
 from typing import Any
 
+from fastapi import HTTPException
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from coval_bench.registries import Benchmark
+
 PREFIX = "/v3"
+MODALITY_PREFIX = PREFIX + "/{modality}"
+
+_MODALITIES = {benchmark.value.lower(): benchmark for benchmark in Benchmark}
+
+
+def path_modality(modality: str) -> Benchmark:
+    """The modality a results path names, lowercase: ``/v3/stt/quality``."""
+    found = _MODALITIES.get(modality)
+    if found is None:
+        raise HTTPException(404, f"no such modality; use one of {sorted(_MODALITIES)}")
+    return found
 
 
 _STATUS_CODES = {

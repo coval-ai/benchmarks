@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""GET /v3/sweeps over HTTP."""
+"""GET /v3/{modality}/sweeps over HTTP."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ async def test_coval_sees_how_far_along_an_unfinished_sweep_is(
 ) -> None:
     model_id = _half_done_sweep(postgresql)
 
-    response = await client.get("/v3/sweeps", headers=bearer(sub="u", org_id=COVAL_ORG))
+    response = await client.get("/v3/stt/sweeps", headers=bearer(sub="u", org_id=COVAL_ORG))
 
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "private, no-store"
@@ -94,11 +94,14 @@ async def test_coval_sees_each_item_of_a_sweep_whether_or_not_it_ran(
 ) -> None:
     _half_done_sweep(postgresql)
     staff = bearer(sub="u", org_id=COVAL_ORG)
-    (sweep,) = (await client.get("/v3/sweeps", headers=staff)).json()["sweeps"]
-    url = f"/v3/sweeps/{sweep['id']}/items"
+    (sweep,) = (await client.get("/v3/stt/sweeps", headers=staff)).json()["sweeps"]
+    url = f"/v3/stt/sweeps/{sweep['id']}/items"
 
     items = (await client.get(url, headers=staff)).json()["items"]
-    missing = await client.get("/v3/sweeps/999999/items", headers=staff)
+    missing = await client.get("/v3/stt/sweeps/999999/items", headers=staff)
+    other_modality = await client.get(f"/v3/tts/sweeps/{sweep['id']}/items", headers=staff)
+    assert (await client.get("/v3/tts/sweeps", headers=staff)).json()["sweeps"] == []
+    assert other_modality.status_code == 404
 
     assert [(item["sample_id"], item["status"]) for item in items] == [
         ("a", "done"),
@@ -136,7 +139,7 @@ async def test_coval_sees_each_item_of_a_sweep_whether_or_not_it_ran(
 async def test_sweeps_are_for_coval_only(client: AsyncClient, postgresql: Any) -> None:
     _half_done_sweep(postgresql)
 
-    for url in ("/v3/sweeps", "/v3/sweeps/1/items"):
+    for url in ("/v3/stt/sweeps", "/v3/stt/sweeps/1/items"):
         anonymous = await client.get(url)
         partner = await client.get(url, headers=bearer(sub="u", org_id=EA_ORG))
 
