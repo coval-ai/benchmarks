@@ -13,7 +13,8 @@ import httpx
 import pytest
 
 from coval_bench.config import Settings
-from coval_bench.providers.stt.aircaps import AircapsSTTProvider
+from coval_bench.providers.base import TranscriptionResult
+from coval_bench.providers.stt.aircaps import AircapsSTTProvider, _AircapsTranscription
 from tests.providers.fakes import fake_connect
 from tests.providers.stt.conftest import make_settings
 
@@ -101,6 +102,19 @@ async def test_aircaps_refused_session_fails_the_clip(
     assert result.error is not None
     assert "quota_unavailable: too many sessions" in result.error
     assert result.complete_transcript is None
+
+
+def test_aircaps_final_after_finalize_keeps_first_timing(stt_settings: Settings) -> None:
+    provider = AircapsSTTProvider(stt_settings)
+    tx = _AircapsTranscription(TranscriptionResult(provider="aircaps", audio_start_time=10.0))
+    final = _transcript("Hello world", 11, final=True)
+
+    provider._on_message(final, 10.5, tx)
+    tx.finalized = True
+    provider._on_message(final, 10.9, tx)
+
+    assert tx.result.audio_to_final_seconds == pytest.approx(0.5)
+    assert tx.finals == ["Hello world"]
 
 
 def test_aircaps_construction_guards() -> None:
