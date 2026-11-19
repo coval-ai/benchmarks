@@ -14,10 +14,14 @@ PREFIX = "/v3"
 
 
 _STATUS_CODES = {
+    400: "invalid_request",
     401: "unauthorized",
     403: "forbidden",
     404: "not_found",
     405: "method_not_allowed",
+    409: "conflict",
+    412: "precondition_failed",
+    428: "precondition_required",
     429: "rate_limited",
     503: "unavailable",
 }
@@ -29,9 +33,14 @@ def error_body(status: int, message: str, param: str | None = None) -> dict[str,
     return {"error": {"code": code, "message": message, "param": param}}
 
 
+def http_status(exc: StarletteHTTPException) -> int:
+    """The status an HTTP error is answered with: a request ``/v3`` won't take is a 400."""
+    return 400 if exc.status_code == 422 else exc.status_code
+
+
 def http_error_body(exc: StarletteHTTPException) -> dict[str, Any]:
     """The body for an HTTP error a route or the router raised."""
-    return error_body(exc.status_code, str(exc.detail))
+    return error_body(http_status(exc), str(exc.detail))
 
 
 def validation_error_body(exc: RequestValidationError) -> dict[str, Any]:
