@@ -122,7 +122,8 @@ class ModelRecord(NewModel):
 
     id: int
     version: int = 1
-    updated_by_user_id: str
+    updated_by_user_id: str | None = None
+    updated_by_org_id: str | None = None
     updated_by_email: str | None = None
     updated_at: datetime
 
@@ -137,7 +138,7 @@ class ModelChange(BaseModel):
     model: str
     old: dict[str, Any] | None = None
     new: dict[str, Any]
-    changed_by_user_id: str
+    changed_by_user_id: str | None = None
     changed_by_org_id: str | None = None
     changed_by_email: str | None = None
     changed_at: datetime
@@ -148,7 +149,8 @@ _SELECT_MODELS = """
            m.source, m.licensing, m.on_prem, m.region, m.arena_enabled,
            m.collected, m.visibility, m.color, m.display_name,
            m.architecture, m.orchestration, m.version, m.updated_by_user_id,
-           m.updated_by_email, m.updated_at, COALESCE(t.tags, '{}') AS tags
+           m.updated_by_org_id, m.updated_by_email, m.updated_at,
+           COALESCE(t.tags, '{}') AS tags
     FROM benchmarks_v2.models m
     LEFT JOIN (
         SELECT model_id, array_agg(tag ORDER BY tag) AS tags
@@ -161,8 +163,9 @@ _INSERT_MODEL = """
     INSERT INTO benchmarks_v2.models
         (modality, provider, model, voice, voices, creator, source, licensing,
          on_prem, region, arena_enabled, collected, visibility, color, display_name,
-         architecture, orchestration, updated_by_user_id, updated_by_email)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         architecture, orchestration, updated_by_user_id, updated_by_org_id,
+         updated_by_email)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     RETURNING id, updated_at
 """
 
@@ -172,7 +175,7 @@ _UPDATE_MODEL = """
         source = %s, licensing = %s, on_prem = %s, region = %s,
         arena_enabled = %s, collected = %s, visibility = %s, color = %s,
         display_name = %s, architecture = %s, orchestration = %s, version = %s,
-        updated_by_user_id = %s, updated_by_email = %s,
+        updated_by_user_id = %s, updated_by_org_id = %s, updated_by_email = %s,
         -- Strictly monotonic per row: the 412 stale check compares this exactly,
         -- so same-microsecond updates must still produce a new value.
         updated_at = GREATEST(now(), updated_at + interval '1 microsecond')
@@ -193,7 +196,10 @@ _INSERT_HISTORY = """
 # the read behind /v1/providers and the orchestrator's roster — the whole site
 # goes dark if it fails for the window between the two. Each missing column
 # reads as unset until it exists.
-_SELECT_MODELS_BEFORE_VISIBILITY = _SELECT_MODELS.replace(
+_SELECT_MODELS_BEFORE_UPDATED_BY_ORG = _SELECT_MODELS.replace(
+    "m.updated_by_org_id,", "NULL AS updated_by_org_id,"
+)
+_SELECT_MODELS_BEFORE_VISIBILITY = _SELECT_MODELS_BEFORE_UPDATED_BY_ORG.replace(
     "m.visibility,", "CASE WHEN m.published THEN 'public' ELSE 'partner' END AS visibility,"
 )
 _SELECT_MODELS_BEFORE_VERSION = _SELECT_MODELS_BEFORE_VISIBILITY.replace(
@@ -210,6 +216,7 @@ _SELECT_MODELS_BEFORE_COLOR = _SELECT_MODELS_BEFORE_DISPLAY_NAME.replace(
 )
 _SELECT_MODELS_SHAPES = (
     _SELECT_MODELS,
+    _SELECT_MODELS_BEFORE_UPDATED_BY_ORG,
     _SELECT_MODELS_BEFORE_VISIBILITY,
     _SELECT_MODELS_BEFORE_VERSION,
     _SELECT_MODELS_BEFORE_AGENT_KIND,
@@ -223,8 +230,11 @@ def _record(row: Mapping[str, Any]) -> ModelRecord:
 
 
 def _snapshot(record: ModelRecord) -> Jsonb:
-    """The row minus the email label: scrubbing must not leave copies in history."""
-    return Jsonb(record.model_dump(mode="json", exclude={"updated_by_email"}))
+    """The row minus the email label: scrubbing must not leave copies in history.
+
+    The org is left out too; the history row names it in its own column.
+    """
+    return Jsonb(record.model_dump(mode="json", exclude={"updated_by_email", "updated_by_org_id"}))
 
 
 class RegistryStore:
@@ -301,7 +311,7 @@ class RegistryStore:
         self,
         new: NewModel,
         *,
-        user_id: str,
+        user_id: str | None,
         org_id: str | None,
         email: str | None,
     ) -> ModelRecord:
@@ -330,6 +340,7 @@ class RegistryStore:
                             new.architecture,
                             new.orchestration,
                             user_id,
+                            org_id,
                             email,
                         ),
                     )
@@ -341,6 +352,7 @@ class RegistryStore:
                         **new.model_dump(),
                         "id": row["id"],
                         "updated_by_user_id": user_id,
+                        "updated_by_org_id": org_id,
                         "updated_by_email": email,
                         "updated_at": row["updated_at"],
                     }
@@ -372,7 +384,7 @@ class RegistryStore:
         changes: Mapping[str, Any],
         *,
         expected_updated_at: datetime,
-        user_id: str,
+        user_id: str | None,
         org_id: str | None,
         email: str | None,
     ) -> tuple[ModelRecord, ModelRecord] | None:
@@ -422,6 +434,7 @@ class RegistryStore:
                             merged.orchestration,
                             merged.version,
                             user_id,
+                            org_id,
                             email,
                             model_id,
                         ),
@@ -437,6 +450,7 @@ class RegistryStore:
                 after = merged.model_copy(
                     update={
                         "updated_by_user_id": user_id,
+                        "updated_by_org_id": org_id,
                         "updated_by_email": email,
                         "updated_at": updated["updated_at"],
                     }

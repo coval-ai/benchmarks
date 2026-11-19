@@ -122,6 +122,34 @@ def test_insert_model_roundtrips_and_writes_history(
     _with_store(registry_pg, scenario)
 
 
+def test_a_change_by_an_org_with_no_user_is_recorded(
+    registry_pg: psycopg.Connection[Any],
+) -> None:
+    async def scenario(store: RegistryStore) -> None:
+        created = await store.insert_model(
+            _new_model(), user_id=None, org_id="org_acme", email=None
+        )
+        assert (created.updated_by_user_id, created.updated_by_org_id) == (None, "org_acme")
+        assert await store.get_model(created.id) == created
+
+        result = await store.update_model(
+            created.id,
+            {"region": "eu"},
+            expected_updated_at=created.updated_at,
+            user_id=None,
+            org_id="org_acme",
+            email=None,
+        )
+        assert result is not None
+        assert result[1].updated_by_org_id == "org_acme"
+
+        changes = (await store.recent_history())[created.id]
+        assert [change.changed_by_org_id for change in changes] == ["org_acme", "org_acme"]
+        assert "updated_by_org_id" not in changes[0].new
+
+    _with_store(registry_pg, scenario)
+
+
 def test_insert_rejects_a_duplicate_natural_key(registry_pg: psycopg.Connection[Any]) -> None:
     async def scenario(store: RegistryStore) -> None:
         await store.insert_model(_new_model(), **_EDITOR)

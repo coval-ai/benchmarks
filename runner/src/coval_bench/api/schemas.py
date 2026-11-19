@@ -514,7 +514,7 @@ class AdminChangeOut(BaseModel):
     id: int
     old: dict[str, Any] | None = None
     new: dict[str, Any]
-    changed_by_user_id: str
+    changed_by_user_id: str | None = None
     changed_by_org_id: str | None = None
     changed_by_email: str | None = None
     changed_at: datetime
@@ -544,7 +544,7 @@ class AdminModelOut(BaseModel):
     architecture: Architecture | None = None
     orchestration: Orchestration | None = None
     version: int
-    updated_by_user_id: str
+    updated_by_user_id: str | None = None
     updated_by_email: str | None = None
     updated_at: datetime
     history: list[AdminChangeOut] = []
