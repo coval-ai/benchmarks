@@ -24,7 +24,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 import numpy as np
 from scipy import signal
@@ -34,7 +34,6 @@ from coval_bench.providers.base import TranscriptionResult
 from coval_bench.providers.stt._realtime import RealtimeSTTProvider
 from coval_bench.providers.stt._streaming import Transcription
 
-_WS_URL = "wss://api.openai.com/v1/realtime?intent=transcription"
 _INPUT_SAMPLE_RATE = 24000
 _READY_TIMEOUT_S = 30.0
 
@@ -51,10 +50,12 @@ class OpenAISTTProvider(RealtimeSTTProvider):
     """OpenAI Realtime API STT provider for the realtime transcription models."""
 
     _LABEL = "OpenAI"
+    _URL: ClassVar[str] = "wss://api.openai.com/v1/realtime?intent=transcription"
+    _KEY_FIELD: ClassVar[str] = "openai_api_key"
 
     def __init__(self, settings: Settings, model: str = "gpt-realtime-whisper") -> None:
         super().__init__(settings, model)
-        self._api_key = self._require_secret("openai_api_key")
+        self._api_key = self._require_secret(self._KEY_FIELD)
 
     @property
     def name(self) -> str:
@@ -64,7 +65,7 @@ class OpenAISTTProvider(RealtimeSTTProvider):
         return _OpenAITranscription(result)
 
     def _ws_url(self, sample_rate: int) -> str:
-        return _WS_URL
+        return self._URL
 
     def _session(self) -> dict[str, Any]:
         return {
@@ -94,7 +95,7 @@ class OpenAISTTProvider(RealtimeSTTProvider):
         return cast(bytes, clipped.tobytes()), byte_rate
 
     def _error_message(self, event: dict[str, Any]) -> str:
-        return str(event.get("error", {}).get("message", "OpenAI error"))
+        return str(event.get("error", {}).get("message", f"{self._LABEL} error"))
 
     def _on_message(self, msg: Any, now: float, tx: Transcription) -> bool:
         tx = cast(_OpenAITranscription, tx)
@@ -117,13 +118,13 @@ class OpenAISTTProvider(RealtimeSTTProvider):
             return True
 
         if event_type == "conversation.item.input_audio_transcription.failed":
-            tx.fail(str(msg.get("error", {}).get("message", "OpenAI transcription failed")))
-            self._log.warning("openai_stt_error", msg=msg)
+            tx.fail(str(msg.get("error", {}).get("message", f"{self._LABEL} transcription failed")))
+            self._log.warning(f"{self.key()}_stt_error", msg=msg)
             return True
 
         if event_type == "error":
             tx.fail(self._error_message(msg))
-            self._log.warning("openai_stt_error", msg=msg)
+            self._log.warning(f"{self.key()}_stt_error", msg=msg)
             return True
 
         return False
