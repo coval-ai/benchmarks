@@ -60,7 +60,7 @@ def _probe_every_model(postgresql: Any) -> None:
 
 async def _providers(client: AsyncClient, org_id: str | None) -> set[str]:
     headers = {} if org_id is None else bearer(sub="u", org_id=org_id)
-    response = await client.get("/v3/latency", headers=headers)
+    response = await client.get("/v3/stt/latency", headers=headers)
     assert response.status_code == 200
     return {row["provider"] for row in response.json()["latency"]}
 
@@ -126,8 +126,8 @@ async def test_a_models_level_is_not_taken_from_its_namesake_in_another_modality
     )
     _probe_every_model(postgresql)
 
-    stt = (await client.get("/v3/latency?modality=STT")).json()["latency"]
-    tts = (await client.get("/v3/latency?modality=TTS")).json()["latency"]
+    stt = (await client.get("/v3/stt/latency")).json()["latency"]
+    tts = (await client.get("/v3/tts/latency")).json()["latency"]
 
     assert EA_PROVIDER not in {row["provider"] for row in stt}
     assert EA_PROVIDER in {row["provider"] for row in tts}
@@ -192,7 +192,7 @@ async def test_an_orgs_api_key_gets_the_same_view_as_its_session(
     monkeypatch.setattr(clerk, "api_key_owner", owner)
 
     async def get(key: str) -> Any:
-        return await client.get("/v3/latency", headers={"Authorization": f"Bearer {key}"})
+        return await client.get("/v3/stt/latency", headers={"Authorization": f"Bearer {key}"})
 
     linked, stranger, down = await get("ak_linked"), await get("ak_other"), await get("ak_down")
 

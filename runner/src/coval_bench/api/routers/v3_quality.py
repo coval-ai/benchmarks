@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""GET /v3/quality: each model's quality scores, from the quality sweep."""
+"""GET /v3/{modality}/quality: each model's quality scores, from the quality sweep."""
 
 from __future__ import annotations
 
@@ -13,16 +13,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
+from coval_bench.api import v3
 from coval_bench.api.deps import get_pool
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ErrorResponse, QualityOut, QualityResponse
 from coval_bench.api.v3_access import Sees, visible
 from coval_bench.db.sweep_store import fetch_quality
-from coval_bench.registries import is_metric_excluded
+from coval_bench.registries import Benchmark, is_metric_excluded
 
 router = APIRouter(tags=["quality"])
-
-ModalityLiteral = Literal["STT", "TTS"]
 
 _POOL_KEY = (
     "model_id",
@@ -62,7 +61,7 @@ def _pooled(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 @limiter.limit("60/minute")
 async def get_quality(
     request: Request,  # required by slowapi
-    modality: ModalityLiteral | None = Query(default=None),
+    modality: Benchmark = Depends(v3.path_modality),
     benchmark: str | None = Query(default=None),
     metric: str | None = Query(default=None),
     model_id: int | None = Query(default=None),
@@ -70,7 +69,7 @@ async def get_quality(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     sees: Sees = Depends(visible),
 ) -> QualityResponse:
-    """One row per model, benchmark and metric, pooled across the benchmark's conditions.
+    """One row per model, benchmark and metric of the modality, pooled across conditions.
 
     ``breakdown=condition`` returns one row per condition instead, each naming its
     ``condition``; a response never holds both levels. ``value`` is pooled: ``errors``
@@ -92,7 +91,7 @@ async def get_quality(
         row
         for row in rows
         if sees(row["model_id"], row["metric"], benchmark=row["benchmark_visibility"])
-        and modality in (None, row["modality"])
+        and row["modality"] == modality
         and benchmark in (None, row["benchmark"])
         and metric in (None, row["metric"])
         and model_id in (None, row["model_id"])

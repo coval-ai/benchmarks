@@ -763,7 +763,7 @@ class LatencyOut(BaseModel):
 
 
 class LatencyResponse(BaseModel):
-    """Response schema for GET /v3/latency."""
+    """Response schema for GET /v3/{modality}/latency."""
 
     latency: list[LatencyOut]
 
@@ -779,7 +779,7 @@ class LatencyPointOut(BaseModel):
 
 
 class LatencyPointsResponse(BaseModel):
-    """Response schema for GET /v3/latency/points."""
+    """Response schema for GET /v3/{modality}/latency/points."""
 
     metric: Literal["TTFT", "TTFS", "TTFA"]
     unit: Literal["milliseconds"] = "milliseconds"
@@ -807,7 +807,7 @@ class ProbeOut(BaseModel):
 
 
 class ProbesResponse(BaseModel):
-    """Response schema for GET /v3/latency/probes."""
+    """Response schema for GET /v3/{modality}/latency/probes."""
 
     probes: list[ProbeOut]
 
@@ -835,7 +835,7 @@ class QualityOut(BaseModel):
 
 
 class QualityResponse(BaseModel):
-    """Response schema for GET /v3/quality."""
+    """Response schema for GET /v3/{modality}/quality."""
 
     quality: list[QualityOut]
 
@@ -864,7 +864,7 @@ class SweepOut(BaseModel):
 
 
 class SweepsResponse(BaseModel):
-    """Response schema for GET /v3/sweeps."""
+    """Response schema for GET /v3/{modality}/sweeps."""
 
     sweeps: list[SweepOut]
 
@@ -898,7 +898,7 @@ class SweepItemOut(BaseModel):
 
 
 class SweepItemsResponse(BaseModel):
-    """Response schema for GET /v3/sweeps/{sweep_id}/items."""
+    """Response schema for GET /v3/{modality}/sweeps/{sweep_id}/items."""
 
     items: list[SweepItemOut]
 

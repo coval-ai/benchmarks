@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
+from coval_bench.api import v3
 from coval_bench.api.deps import get_pool
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
@@ -23,6 +24,7 @@ from coval_bench.api.schemas import (
 )
 from coval_bench.api.v3_access import coval_only
 from coval_bench.db.sweep_store import fetch_sweep_items, fetch_sweeps
+from coval_bench.registries import Benchmark
 
 router = APIRouter(tags=["sweeps"], dependencies=[Depends(coval_only)])
 
@@ -31,9 +33,10 @@ router = APIRouter(tags=["sweeps"], dependencies=[Depends(coval_only)])
 @limiter.limit("60/minute")
 async def get_sweeps(
     request: Request,  # required by slowapi
+    modality: Benchmark = Depends(v3.path_modality),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> SweepsResponse:
-    """One row per sweep, oldest first, finished or not.
+    """One row per sweep of the modality, oldest first, finished or not.
 
     ``result_count`` items have run, ``queued_count`` are still to run and
     ``gave_up_count`` ran out of tries. A sweep with ``completed_at`` set has nothing
@@ -44,7 +47,7 @@ async def get_sweeps(
         rows = await fetch_sweeps(pool)
     except psycopg.Error as exc:
         raise HTTPException(503, "sweeps are unavailable") from exc
-    return SweepsResponse(sweeps=[SweepOut(**row) for row in rows])
+    return SweepsResponse(sweeps=[SweepOut(**row) for row in rows if row["modality"] == modality])
 
 
 @router.get(
@@ -56,6 +59,7 @@ async def get_sweeps(
 async def get_sweep_items(
     request: Request,  # required by slowapi
     sweep_id: int,
+    modality: Benchmark = Depends(v3.path_modality),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> SweepItemsResponse:
     """Every item of a sweep in sample and voice order, the ones that haven't run included.
@@ -66,7 +70,7 @@ async def get_sweep_items(
     hasn't run yet or is waiting to retry, and a ``gave_up`` item ran out of tries.
     """
     try:
-        rows = await fetch_sweep_items(pool, sweep_id)
+        rows = await fetch_sweep_items(pool, sweep_id, modality)
     except psycopg.Error as exc:
         raise HTTPException(503, "sweeps are unavailable") from exc
     if rows is None:
