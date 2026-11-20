@@ -576,6 +576,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v3/companies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Companies
+         * @description The companies behind the models the caller may see, in slug order.
+         *
+         *     A company is listed when it serves or makes a model the caller sees, so one whose
+         *     models are all unpublished stays unlisted. A company's org always sees its own, and
+         *     coval staff see every company with its Clerk org and who last changed it.
+         */
+        get: operations["get_companies_v3_companies_get"];
+        put?: never;
+        /**
+         * Create
+         * @description Add a company. Coval staff only. Its slug is the provider string its models carry.
+         */
+        post: operations["create_v3_companies_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v3/companies/{slug}/org": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Org
+         * @description Set the company's Clerk org, so that org sees the company's unpublished models.
+         */
+        put: operations["set_org_v3_companies__slug__org_put"];
+        post?: never;
+        /**
+         * Clear Org
+         * @description Remove the company's Clerk org. Coval staff only.
+         */
+        delete: operations["clear_org_v3_companies__slug__org_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v3/latency": {
         parameters: {
             query?: never;
@@ -646,6 +698,57 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v3/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Models
+         * @description Every model the caller may see, in id order.
+         *
+         *     The public sees public models. A company's org also sees that company's
+         *     partner-level models, and coval staff see every model with how it is run and who
+         *     last changed it. ``updated_at``, quoted, is the ``If-Match`` tag a PATCH needs.
+         */
+        get: operations["get_models_v3_models_get"];
+        put?: never;
+        /**
+         * Create
+         * @description Add a model. Coval staff only. The change is recorded against the caller's org.
+         */
+        post: operations["create_v3_models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v3/models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update
+         * @description Change some of a model's fields. Coval staff only.
+         *
+         *     ``If-Match`` must carry the model's last-seen ``ETag``, so an edit made from a stale
+         *     copy is refused. The change is recorded against the caller's org.
+         */
+        patch: operations["update_v3_models__model_id__patch"];
         trace?: never;
     };
     "/v3/quality": {
@@ -861,7 +964,7 @@ export interface components {
                 [key: string]: unknown;
             };
             /** Changed By User Id */
-            changed_by_user_id: string;
+            changed_by_user_id?: string | null;
             /** Changed By Org Id */
             changed_by_org_id?: string | null;
             /** Changed By Email */
@@ -952,11 +1055,6 @@ export interface components {
             /** Visibility */
             visibility?: ("public" | "partner" | "coval") | null;
             /**
-             * Published
-             * @default false
-             */
-            published: boolean;
-            /**
              * Tags
              * @default []
              */
@@ -967,6 +1065,11 @@ export interface components {
             display_name?: string | null;
             architecture?: components["schemas"]["Architecture"] | null;
             orchestration?: components["schemas"]["Orchestration"] | null;
+            /**
+             * Published
+             * @default false
+             */
+            published: boolean;
         };
         /**
          * AdminModelHealthOut
@@ -1048,7 +1151,7 @@ export interface components {
             /** Version */
             version: number;
             /** Updated By User Id */
-            updated_by_user_id: string;
+            updated_by_user_id?: string | null;
             /** Updated By Email */
             updated_by_email?: string | null;
             /**
@@ -1064,10 +1167,7 @@ export interface components {
         };
         /**
          * AdminModelPatch
-         * @description PATCH body for /v1/admin/models/{id}; absent fields stay unchanged.
-         *
-         *     ``color`` null returns the model to the site's built-in palette; ``display_name``
-         *     null returns it to the site's built-in label. ``version`` only moves up by one.
+         * @description PATCH body for /v1/admin/models/{id}, which also takes the older ``published``.
          */
         AdminModelPatch: {
             /** Provider */
@@ -1092,8 +1192,6 @@ export interface components {
             collected?: boolean | null;
             /** Visibility */
             visibility?: ("public" | "partner" | "coval") | null;
-            /** Published */
-            published?: boolean | null;
             /** Tags */
             tags?: string[] | null;
             /** Color */
@@ -1104,6 +1202,8 @@ export interface components {
             orchestration?: components["schemas"]["Orchestration"] | null;
             /** Version */
             version?: number | null;
+            /** Published */
+            published?: boolean | null;
         };
         /**
          * AdminModelPricingOut
@@ -1337,6 +1437,14 @@ export interface components {
             /** Stream */
             stream?: boolean | null;
         };
+        /**
+         * CompaniesResponse
+         * @description Response schema for GET /v3/companies.
+         */
+        CompaniesResponse: {
+            /** Companies */
+            companies: components["schemas"]["CompanyOut"][];
+        };
         /** Company */
         Company: {
             /** Slug */
@@ -1346,7 +1454,9 @@ export interface components {
             /** Org Id */
             org_id: string | null;
             /** Updated By User Id */
-            updated_by_user_id: string;
+            updated_by_user_id: string | null;
+            /** Updated By Org Id */
+            updated_by_org_id?: string | null;
             /** Updated By Email */
             updated_by_email: string | null;
             /**
@@ -1354,6 +1464,22 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * CompanyOut
+         * @description A company on ``/v3``. The fields after ``name`` are null unless coval staff ask.
+         */
+        CompanyOut: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Org Id */
+            org_id?: string | null;
+            /** Updated By Org */
+            updated_by_org?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /** DashboardMaterialization */
         DashboardMaterialization: {
@@ -1584,6 +1710,64 @@ export interface components {
          */
         Licensing: "proprietary" | "open-weight";
         /**
+         * ModelCreate
+         * @description POST body for /v3/models. The defaults land the model unpublished.
+         */
+        ModelCreate: {
+            modality: components["schemas"]["Benchmark"];
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Voice */
+            voice?: string | null;
+            /**
+             * Voices
+             * @default []
+             */
+            voices: components["schemas"]["Voice"][];
+            /** Creator */
+            creator?: string | null;
+            /** @default official-api */
+            source: components["schemas"]["Source"];
+            /** @default proprietary */
+            licensing: components["schemas"]["Licensing"];
+            /**
+             * On Prem
+             * @default false
+             */
+            on_prem: boolean;
+            /** Region */
+            region?: ("us" | "eu" | "asia") | null;
+            /**
+             * Arena Enabled
+             * @default true
+             */
+            arena_enabled: boolean;
+            /**
+             * Collected
+             * @default true
+             */
+            collected: boolean;
+            /**
+             * Visibility
+             * @default partner
+             * @enum {string}
+             */
+            visibility: "public" | "partner" | "coval";
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+            /** Color */
+            color?: string | null;
+            /** Display Name */
+            display_name?: string | null;
+            architecture?: components["schemas"]["Architecture"] | null;
+            orchestration?: components["schemas"]["Orchestration"] | null;
+        };
+        /**
          * ModelInfo
          * @description A single model entry under a provider, with admin-disabled flag.
          */
@@ -1609,6 +1793,98 @@ export interface components {
             color?: string | null;
             /** Display Name */
             display_name?: string | null;
+        };
+        /**
+         * ModelOut
+         * @description A model on ``/v3``. The fields after ``visibility`` are null unless coval staff ask.
+         */
+        ModelOut: {
+            /** Id */
+            id: number;
+            modality: components["schemas"]["Benchmark"];
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Display Name */
+            display_name?: string | null;
+            /** Creator */
+            creator?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+            /** Color */
+            color?: string | null;
+            source: components["schemas"]["Source"];
+            licensing: components["schemas"]["Licensing"];
+            /** On Prem */
+            on_prem: boolean;
+            /** Region */
+            region?: ("us" | "eu" | "asia") | null;
+            architecture?: components["schemas"]["Architecture"] | null;
+            orchestration?: components["schemas"]["Orchestration"] | null;
+            /** Version */
+            version: number;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "partner" | "coval";
+            /** Collected */
+            collected?: boolean | null;
+            /** Arena Enabled */
+            arena_enabled?: boolean | null;
+            /** Voice */
+            voice?: string | null;
+            /** Voices */
+            voices?: components["schemas"]["Voice"][] | null;
+            /** Updated By Org */
+            updated_by_org?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * ModelPatch
+         * @description PATCH body for /v3/models/{id}; absent fields stay unchanged.
+         *
+         *     ``color`` null returns the model to the site's built-in palette; ``display_name``
+         *     null returns it to the site's built-in label. ``version`` only moves up by one.
+         */
+        ModelPatch: {
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Voice */
+            voice?: string | null;
+            /** Voices */
+            voices?: components["schemas"]["Voice"][] | null;
+            /** Creator */
+            creator?: string | null;
+            source?: components["schemas"]["Source"] | null;
+            licensing?: components["schemas"]["Licensing"] | null;
+            /** On Prem */
+            on_prem?: boolean | null;
+            /** Region */
+            region?: ("us" | "eu" | "asia") | null;
+            /** Arena Enabled */
+            arena_enabled?: boolean | null;
+            /** Collected */
+            collected?: boolean | null;
+            /** Visibility */
+            visibility?: ("public" | "partner" | "coval") | null;
+            /** Tags */
+            tags?: string[] | null;
+            /** Color */
+            color?: string | null;
+            /** Display Name */
+            display_name?: string | null;
+            architecture?: components["schemas"]["Architecture"] | null;
+            orchestration?: components["schemas"]["Orchestration"] | null;
+            /** Version */
+            version?: number | null;
         };
         /**
          * ModelStatEntry
@@ -1665,6 +1941,26 @@ export interface components {
             value: string;
             /** Label */
             label: string;
+        };
+        /**
+         * ModelUpdateResponse
+         * @description PATCH /v3/models/{id} response: the updated model plus warnings a rename leaves behind.
+         */
+        ModelUpdateResponse: {
+            model: components["schemas"]["ModelOut"];
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
+        };
+        /**
+         * ModelsResponse
+         * @description Response schema for GET /v3/models.
+         */
+        ModelsResponse: {
+            /** Models */
+            models: components["schemas"]["ModelOut"][];
         };
         /**
          * Orchestration
@@ -3442,6 +3738,250 @@ export interface operations {
             };
         };
     };
+    get_companies_v3_companies_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompaniesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_v3_companies_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCompanyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_org_v3_companies__slug__org_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCompanyOrgPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_org_v3_companies__slug__org_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_latency_v3_latency_get: {
         parameters: {
             query?: {
@@ -3563,6 +4103,175 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_models_v3_models_get: {
+        parameters: {
+            query?: {
+                modality?: components["schemas"]["Benchmark"] | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_v3_models_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_v3_models__model_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                model_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelUpdateResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
