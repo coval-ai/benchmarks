@@ -277,14 +277,8 @@ class Settings(BaseSettings):
     # Public base URL of the API service, for sync-llm; deployed only to that job.
     llm_proxy_public_url: str | None = None
     coval_api_base: str = "https://api.coval.dev/v1"
-    # The S2S latency metric id + per-provider Coval agent ids (opaque, not secret).
+    # The S2S latency metric id (opaque, not secret).
     coval_s2s_latency_metric_id: str | None = None
-    coval_s2s_openai_agent_id: str | None = None
-    coval_s2s_gemini_agent_id: str | None = None
-    coval_s2s_xai_agent_id: str | None = None
-    coval_s2s_xai_think_fast_2_agent_id: str | None = None
-    coval_s2s_gray_agent_id: str | None = None
-    coval_s2s_red_agent_id: str | None = None
     # The S2S instruction-adherence metric id (opaque, not secret). Optional: the
     # fetch pulls its per-conversation scores only when set, so latency still
     # ingests without it.
@@ -297,13 +291,6 @@ class Settings(BaseSettings):
     # other sims on the same agents (e.g. the single-turn set) would be ingested
     # and pooled into the same provider. Opaque id, not secret.
     coval_s2s_test_set_id: str | None = None
-    # Test set for agents evaluated on the happy-path scenarios instead of the
-    # shared one above. Opaque id, not secret.
-    coval_s2s_happypath_test_set_id: str | None = None
-    # Test set for agents evaluated on the dental-appointment scenarios. Its own
-    # field, not a repoint of the happy-path one: the two are different domains
-    # and different populations. Opaque id, not secret.
-    coval_s2s_dental_test_set_id: str | None = None
     # The caller persona whose audio carries background noise; its runs land
     # under their own dataset instead of pooling into the clean numbers. Unset
     # means every persona is clean. Superseded by coval_s2s_condition_personas.

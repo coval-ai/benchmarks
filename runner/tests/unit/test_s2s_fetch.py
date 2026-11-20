@@ -30,7 +30,7 @@ from coval_bench.runner.capture import (
     build_capture_identity,
     identity_digest,
 )
-from coval_bench.s2s import coval_runs, fetch_v2v, identity, ingest, specs
+from coval_bench.s2s import conditions, coval_runs, fetch_v2v, identity, ingest, specs
 from coval_bench.s2s.conditions import (
     DATASET_ID,
     DATASET_ID_BANK,
@@ -68,6 +68,45 @@ def _settings(**kwargs: Any) -> Settings:
     defaults: dict[str, Any] = {"benchmark_artifact_bucket": "test-artifacts"}
     defaults.update(kwargs)
     return Settings(**defaults)
+
+
+def _bank_settings(**kwargs: Any) -> Settings:
+    """One scenario agent: GPT Realtime on the bank set."""
+    defaults: dict[str, Any] = {
+        "coval_s2s_latency_metric_id": "MID",
+        "coval_s2s_scenarios": {
+            "bank": ScenarioCovalIds(
+                test_set_id="TSB", agents={"gpt-realtime": "a1"}, personas={"clean": "PID"}
+            )
+        },
+        "coval_s2s_bank_test_set_id": "TSB",
+        "coval_s2s_bank_instruction_metric_id": "BIM",
+        "coval_s2s_bank_persona_id": "PID",
+    }
+    defaults.update(kwargs)
+    return _settings(**defaults)
+
+
+def _bank_run(run_id: str = "R1") -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "test_set_id": "TSB",
+        "persona_id": "PID",
+        "create_time": _iso(timedelta(hours=1)),
+    }
+
+
+BANK_RUN_JSON: dict[str, Any] = {
+    "run": {
+        "error_status": "SUCCESS",
+        "results": {
+            "metrics": {
+                "MID": {"values": [{"simulation_output_id": "s1", "value": 0.5}]},
+                "BIM": {"values": [{"simulation_output_id": "s1", "value": 0.75}]},
+            }
+        },
+    }
+}
 
 
 # Results handed to each envelope, keyed by envelope identity, so capture fakes
@@ -114,6 +153,7 @@ LATENCY_IDS = {Metric.V2V: "MID"}
 ALL_IDS = {**IDS, Metric.INTERRUPTION_RATE: "RID"}
 
 SPEC = AgentSpec(agent_id="a1", provider="openai", model="gpt-realtime")
+BANK_STATUS_KEY = f"{FAMILY_BANK}:openai:gpt-realtime"
 
 
 _JUDGE_FIELDS: dict[str, dict[str, str]] = {
@@ -474,24 +514,20 @@ async def test_backfill_publishes_no_samples() -> None:
 
 
 def test_expected_sample_models_excludes_non_publishing_agents() -> None:
-    settings = Settings.model_construct(
-        coval_s2s_openai_agent_id="a1",
-        coval_s2s_gray_agent_id="a2",
-        coval_s2s_red_agent_id="a3",
-    )
-    expected = fetch_v2v._expected_sample_models(settings, DATASET_ID_DENTAL)
-
-    assert ("openai", "gpt-realtime") in expected
-    assert ("colors", "gray") not in expected
-    assert ("colors", "red") not in expected
-    assert ("phonely", "phonely-agent") not in expected
+    settings = _adherence_settings()
+    configured = [spec for spec in s2s_specs(settings) if spec.agent_id]
+    assert {spec.publish_samples for spec in configured} == {True, False}
+    for spec in configured:
+        dataset_id = conditions.dataset_id_for(spec.family, Condition.CLEAN)
+        assert dataset_id is not None
+        expected = fetch_v2v._expected_sample_models(settings, dataset_id)
+        assert ((spec.provider, spec.model) in expected) is spec.publish_samples
 
 
 def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
     """An agent counts only on its own dataset: a model absent from another set is
     not a missing provider there."""
     settings = Settings.model_construct(
-        coval_s2s_openai_agent_id="a1",
         coval_s2s_scenarios={
             "bank": ScenarioCovalIds(
                 test_set_id="TSB",
@@ -510,14 +546,13 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
                     "gemini-3.8-live-extended-thinking": "b12",
                     "prism": "b13",
                     "phonic-1": "b14",
+                    "resia-fullplex-1": "b15",
                 },
             )
         },
     )
 
-    assert fetch_v2v._expected_sample_models(settings, DATASET_ID_DENTAL) == {
-        ("openai", "gpt-realtime")
-    }
+    assert fetch_v2v._expected_sample_models(settings, DATASET_ID_DENTAL) == set()
     assert fetch_v2v._expected_sample_models(settings, DATASET_ID_BANK) == {
         ("openai", "gpt-realtime"),
         ("openai", "gpt-live-1"),
@@ -533,6 +568,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
         ("google", "gemini-3.8-live-extended-thinking"),
         ("rime", "prism"),
         ("phonic", "phonic-1"),
+        ("resia", "resia-fullplex-1"),
     }
 
 
@@ -1020,18 +1056,11 @@ async def test_fetch_one_provider_ingests_errored_run() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    # gemini agent id left unset (None) -> that provider is skipped.
-    monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
-    settings = _settings(
-        coval_s2s_latency_metric_id="MID",
-        coval_s2s_openai_agent_id="a1",
-        coval_s2s_dental_test_set_id="TSD",
-    )
+    # Only gpt-realtime has an agent id; every other model is skipped.
+    settings = _bank_settings()
 
     writer = _stub_writer()
-    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
-    values = [{"simulation_output_id": f"s{i}", "value": 0.5} for i in range(2)]
-    client = _fake_client(list_json, _run_json(values))
+    client = _fake_client(_list_json(_bank_run()), BANK_RUN_JSON)
 
     @contextlib.asynccontextmanager
     async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
@@ -1043,8 +1072,7 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
 
     statuses = await fetch_v2v.fetch_and_write_v2v(settings)
 
-    # only openai runs (gemini unset), and it fully succeeds.
-    assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
+    assert statuses == {BANK_STATUS_KEY: RunStatus.SUCCEEDED}
 
 
 @pytest.mark.asyncio
@@ -1299,7 +1327,6 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = _settings(
-        coval_s2s_openai_agent_id="s2s-agent",
         coval_s2s_bank_test_set_id="TSB",
         coval_s2s_bank_instruction_metric_id="IID",
         coval_s2s_bank_persona_id="PID",
@@ -1480,8 +1507,8 @@ async def test_fetch_and_write_llm_names_the_missing_suite_setting() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_and_write_v2v_still_requires_the_latency_metric_for_legacy_agents() -> None:
-    settings = _settings(coval_s2s_openai_agent_id="a1", coval_s2s_dental_test_set_id="TSD")
+async def test_fetch_and_write_v2v_requires_the_latency_metric_for_a_configured_agent() -> None:
+    settings = _bank_settings(coval_s2s_latency_metric_id=None)
 
     with pytest.raises(RuntimeError, match="coval_s2s_latency_metric_id is not set"):
         await fetch_v2v.fetch_and_write_v2v(settings)
@@ -1517,25 +1544,17 @@ async def test_fetch_one_provider_rejects_a_dataset_from_another_benchmark() -> 
 async def test_samples_publish_without_the_shared_test_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A dental-only deployment still publishes: the gate reads the run's own set.
+    """Samples still publish with no shared test set: the gate reads the run's own set.
 
     ``coval_s2s_test_set_id`` is deliberately unset here. Gating publication on it
     would fill ``sampled_runs`` and then silently never ship them, leaving the
     public sample card frozen while ingestion looked healthy.
     """
-    monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
-    settings = _settings(
-        coval_s2s_latency_metric_id="MID",
-        coval_s2s_openai_agent_id="a1",
-        coval_s2s_dental_test_set_id="TSD",
-        s2s_samples_bucket="bucket",
-    )
+    settings = _bank_settings(s2s_samples_bucket="bucket")
     assert settings.coval_s2s_test_set_id is None
 
     writer = _stub_writer()
-    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
-    values = [{"simulation_output_id": "s1", "value": 0.5}]
-    client = _fake_client(list_json, _run_json(values))
+    client = _fake_client(_list_json(_bank_run()), BANK_RUN_JSON)
 
     @contextlib.asynccontextmanager
     async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
@@ -1551,55 +1570,37 @@ async def test_samples_publish_without_the_shared_test_set(
 
     publish.assert_awaited_once()
     assert publish.await_args is not None
-    assert publish.await_args.kwargs["test_set_id"] == "TSD"
-    assert publish.await_args.kwargs["dataset_id"] == DATASET_ID_DENTAL
+    assert publish.await_args.kwargs["test_set_id"] == "TSB"
+    assert publish.await_args.kwargs["dataset_id"] == DATASET_ID_BANK
 
 
 @pytest.mark.asyncio
 async def test_each_dataset_publishes_its_own_sample_tick(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Dental and the bank set never share a tick: each partition gets its own
-    publish with only its own runs and only its own expected models."""
-    monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
-    settings = _settings(
-        coval_s2s_latency_metric_id="MID",
-        coval_s2s_openai_agent_id="a1",
-        coval_s2s_dental_test_set_id="TSD",
+    """Two scenarios never share a tick: each partition gets its own publish with
+    only its own runs and only its own expected models."""
+    settings = _bank_settings(
         coval_s2s_scenarios={
             "bank": ScenarioCovalIds(
                 test_set_id="TSB", agents={"gpt-realtime": "b1"}, personas={"clean": "PID"}
-            )
+            ),
+            "happy-smile": ScenarioCovalIds(
+                test_set_id="TSS", agents={"gpt-realtime": "h1"}, personas={"clean": "PID"}
+            ),
         },
-        coval_s2s_bank_test_set_id="TSB",
-        coval_s2s_bank_instruction_metric_id="BIM",
         s2s_samples_bucket="bucket",
+    )
+    smile_dataset = conditions.dataset_id_for(
+        conditions.scenario_family("happy-smile"), Condition.CLEAN
     )
 
     writer = _stub_writer()
-    created = _iso(timedelta(hours=1))
     list_json = _list_json(
-        {"run_id": "R1", "agent_id": "a1", "create_time": created, "persona_id": "PID"},
-        {
-            "run_id": "R2",
-            "agent_id": "b1",
-            "test_set_id": "TSB",
-            "create_time": created,
-            "persona_id": "PID",
-        },
+        {**_bank_run("R1"), "agent_id": "h1", "test_set_id": "TSS"},
+        {**_bank_run("R2"), "agent_id": "b1"},
     )
-    run_json = {
-        "run": {
-            "error_status": "SUCCESS",
-            "results": {
-                "metrics": {
-                    "MID": {"values": [{"simulation_output_id": "s1", "value": 0.5}]},
-                    "BIM": {"values": [{"simulation_output_id": "s1", "value": 0.75}]},
-                }
-            },
-        }
-    }
-    client = _fake_client(list_json, run_json)
+    client = _fake_client(list_json, BANK_RUN_JSON)
 
     @contextlib.asynccontextmanager
     async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
@@ -1614,34 +1615,28 @@ async def test_each_dataset_publishes_its_own_sample_tick(
     await fetch_v2v.fetch_and_write_v2v(settings)
 
     calls = {c.kwargs["dataset_id"]: c.kwargs for c in publish.await_args_list}
-    assert set(calls) == {DATASET_ID_DENTAL, DATASET_ID_BANK}
-    dental, bank = calls[DATASET_ID_DENTAL], calls[DATASET_ID_BANK]
-    assert dental["test_set_id"] == "TSD"
-    assert {r.key for r in dental["runs"]} == {("openai", "gpt-realtime")}
-    assert dental["expected_models"] == {("openai", "gpt-realtime")}
+    assert set(calls) == {smile_dataset, DATASET_ID_BANK}
+    smile, bank = calls[smile_dataset], calls[DATASET_ID_BANK]
+    assert smile["test_set_id"] == "TSS"
+    assert all(r.dataset_id == smile_dataset for r in smile["runs"])
+    assert smile["expected_models"] == {("openai", "gpt-realtime")}
     assert bank["test_set_id"] == "TSB"
     assert all(r.dataset_id == DATASET_ID_BANK for r in bank["runs"])
     assert bank["expected_models"] == {("openai", "gpt-realtime")}
-    # The bank run's judge fraction landed as a percentage under the instruction metric.
+    # The judge fraction landed as a percentage under the instruction metric.
     rows = [r for call in writer.capture_results.await_args_list for r in call.args[0]]
-    assert [r.metric_value for r in rows if r.metric_type == "InstructionFollowing"] == [75.0]
+    assert [r.metric_value for r in rows if r.metric_type == "InstructionFollowing"] == [75.0, 75.0]
 
 
 @pytest.mark.asyncio
 async def test_fetch_and_write_v2v_noop_tick_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
-    settings = _settings(
-        coval_s2s_latency_metric_id="MID",
-        coval_s2s_openai_agent_id="a1",
-        coval_s2s_dental_test_set_id="TSD",
-    )
+    settings = _bank_settings()
 
     writer = _stub_writer()
     writer.coval_metric_ingested = AsyncMock(return_value=True)  # nothing new this tick
-    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
-    client = _fake_client(list_json, {})
+    client = _fake_client(_list_json(_bank_run()), {})
 
     @contextlib.asynccontextmanager
     async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
@@ -1653,7 +1648,7 @@ async def test_fetch_and_write_v2v_noop_tick_succeeds(
 
     statuses = await fetch_v2v.fetch_and_write_v2v(settings)
 
-    assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
+    assert statuses == {BANK_STATUS_KEY: RunStatus.SUCCEEDED}
 
 
 @pytest.mark.asyncio
@@ -2030,37 +2025,17 @@ async def test_fetch_and_write_rejects_noisy_persona_without_a_test_set() -> Non
     # Without a test set the persona split can never fire, so fail loudly.
     settings = _settings(
         coval_s2s_latency_metric_id="MID",
-        coval_s2s_openai_agent_id="a1",
-        coval_s2s_dental_test_set_id="TSD",
         coval_s2s_noisy_persona_id="PN",
     )
     with pytest.raises(RuntimeError, match="requires coval_s2s_test_set_id"):
         await fetch_v2v.fetch_and_write_v2v(settings)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "setting", ["coval_s2s_happypath_test_set_id", "coval_s2s_dental_test_set_id"]
-)
-async def test_fetch_and_write_rejects_a_blank_test_set(setting: str) -> None:
-    # Blank would skip its agents with only a warning, indistinguishable from unset.
-    settings = _settings(
-        coval_s2s_latency_metric_id="MID", coval_s2s_openai_agent_id="a1", **{setting: "   "}
-    )
-    with pytest.raises(RuntimeError, match=f"{setting} must not be blank"):
-        await fetch_v2v.fetch_and_write_v2v(settings)
-
-
-@pytest.mark.asyncio
-async def test_fetch_and_write_requires_a_dental_test_set_for_a_dental_agent() -> None:
-    # Unset skipped the agent with only a warning, which is how gray and red
-    # went five days without ingesting a row.
-    settings = _settings(
-        coval_s2s_latency_metric_id="MID",
-        coval_s2s_gray_agent_id="a2",
-    )
-    with pytest.raises(RuntimeError, match="coval_s2s_dental_test_set_id is required"):
-        await fetch_v2v.fetch_and_write_v2v(settings)
+def test_an_agent_on_its_own_test_set_requires_that_test_set() -> None:
+    # Unset would skip the agent with only a warning, which reads the same as
+    # never having configured it.
+    with pytest.raises(RuntimeError, match="coval_s2s_bank_test_set_id is required"):
+        fetch_v2v._require_family_test_sets(_settings(), [LLM_SPEC])
 
 
 @pytest.mark.asyncio
@@ -2073,9 +2048,7 @@ async def test_fetch_and_write_rejects_a_metric_with_no_row_builder(
     monkeypatch.setattr(fetch_v2v, "VALUE_MAPPERS", mappers)
     settings = _settings(
         coval_s2s_latency_metric_id="MID",
-        coval_s2s_openai_agent_id="a1",
         coval_s2s_test_set_id="TS1",
-        coval_s2s_dental_test_set_id="TSD",
         coval_s2s_instruction_metric_id="IID",
         coval_s2s_interruption_metric_id="RID",
     )
@@ -2387,7 +2360,6 @@ async def test_fetch_and_write_requires_id_pair(monkeypatch: pytest.MonkeyPatch)
     # instruction id set but test-set id missing -> startup failure (must be paired).
     settings = _settings(
         coval_s2s_latency_metric_id="MID",
-        coval_s2s_openai_agent_id="a1",
         coval_s2s_instruction_metric_id="IID",
     )
     with pytest.raises(RuntimeError, match="set together"):
@@ -3111,13 +3083,7 @@ async def test_fetch_and_write_v2v_propagates_capture_gate(
     monkeypatch: pytest.MonkeyPatch,
     snapshot_failure: bool,
 ) -> None:
-    monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
-    settings = _settings(
-        coval_s2s_latency_metric_id="MID",
-        coval_s2s_openai_agent_id="a1",
-        coval_s2s_dental_test_set_id="TSD",
-        benchmark_artifact_bucket="private-artifacts",
-    )
+    settings = _bank_settings(benchmark_artifact_bucket="private-artifacts")
     client = _fake_client({}, {})
     writer = _stub_writer()
     if snapshot_failure:
@@ -3136,7 +3102,7 @@ async def test_fetch_and_write_v2v_propagates_capture_gate(
     statuses = await fetch_v2v.fetch_and_write_v2v(settings)
 
     writer.refresh_window_views.assert_awaited_once_with()
-    assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
+    assert statuses == {BANK_STATUS_KEY: RunStatus.SUCCEEDED}
     assert fetch_one.await_args is not None
     assert fetch_one.await_args.kwargs["artifact_bucket"] == "private-artifacts"
 

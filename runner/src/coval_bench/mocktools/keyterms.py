@@ -3,7 +3,7 @@
 
 """Domain vocabulary, read back out of the fixtures.
 
-``stack.json`` pins Deepgram nova-3 and recovers dental vocabulary through
+``stack.json`` pins Deepgram nova-3 and recovers domain vocabulary through
 keyterm prompting rather than a medical model, because no hosted platform offers
 one. The keyterms are generated from the seeded world instead of hand-kept: the
 words the agent has to hear correctly are exactly the patient names, providers

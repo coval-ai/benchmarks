@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -21,12 +20,10 @@ from coval_bench.scenarios import (
     has_private_contract,
     load_stack,
     public_contract_sha256,
-    read_contract_file,
     read_private_fixture,
     register_fixture_provider,
     stack_as_dict,
 )
-from coval_bench.variants.platforms import redact_identifiers
 from tests.tool_fixtures import SYNTHETIC_SUITE
 
 # Bump deliberately, in the same commit that changes a committed contract file or
@@ -104,30 +101,6 @@ def test_vendor_payload_excludes_rationale() -> None:
     assert payload["llm"] == {"provider": "openai", "model": "gpt-4.1", "temperature": 0}
 
 
-def test_identifiers_are_withheld_from_the_committed_dumps() -> None:
-    """This repo is public. A live dial target must never reach it."""
-    agent = json.loads(read_contract_file("dental", "_source/coval-agent.json"))
-    assert agent["phone_number"] == "[REDACTED]"
-    assert agent["id"] == "[REDACTED]"
-    assert agent["customer_agent_id"] == "[REDACTED]"
-    # Methodology stays: a reader needs to know which voice was used.
-    assert agent["metadata"]["voice_id"]
-    assert agent["display_name"]
-
-
-def test_redact_identifiers_leaves_methodology_alone() -> None:
-    found: list[str] = []
-    out = redact_identifiers(
-        {"id": "abc", "display_name": "keep", "nested": [{"phone_number": "sip:x@y"}]}, found
-    )
-    assert out == {
-        "id": "[REDACTED]",
-        "display_name": "keep",
-        "nested": [{"phone_number": "[REDACTED]"}],
-    }
-    assert found == ["id", "nested[0].phone_number"]
-
-
 # --- the fixture fallback chain ---------------------------------------------
 #
 # `_private/` is gitignored and the image is built from a git checkout, so the
@@ -171,7 +144,7 @@ def test_a_provider_answers_when_the_checkout_has_none(
     no_providers: None, checkout_without_fixtures: None
 ) -> None:
     register_fixture_provider(_serving(SEEDED))
-    assert read_private_fixture("dental") == SEEDED
+    assert read_private_fixture(SYNTHETIC_SUITE) == SEEDED
 
 
 @pytest.fixture
@@ -197,12 +170,12 @@ def test_a_provider_without_the_suite_falls_through(
 
     register_fixture_provider(absent)
     register_fixture_provider(_serving(SEEDED))
-    assert read_private_fixture("dental") == SEEDED
+    assert read_private_fixture(SYNTHETIC_SUITE) == SEEDED
 
 
 def test_an_empty_chain_still_raises(no_providers: None, checkout_without_fixtures: None) -> None:
     with pytest.raises(FileNotFoundError):
-        read_private_fixture("dental")
+        read_private_fixture(SYNTHETIC_SUITE)
 
 
 def test_the_published_hash_is_the_same_whichever_source_supplied_the_bytes(
