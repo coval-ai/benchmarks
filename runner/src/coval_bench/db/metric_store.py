@@ -10,6 +10,7 @@ import psycopg.rows
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
+from coval_bench.config import Settings
 from coval_bench.registries import Visibility
 
 MetricPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]
@@ -65,3 +66,16 @@ class MetricStore:
             update={"visibility": row["was_visibility"], "collected": row["was_collected"]}
         )
         return before, after
+
+
+def load_collected_metrics(settings: Settings) -> frozenset[str]:
+    """The codes of the collected metrics, read through a short-lived pool, for a job."""
+    import asyncio
+
+    from coval_bench.db.conn import lifespan_pool
+
+    async def _load() -> frozenset[str]:
+        async with lifespan_pool(settings) as pool:
+            return frozenset(m.code for m in await MetricStore(pool).metrics() if m.collected)
+
+    return asyncio.run(_load())
