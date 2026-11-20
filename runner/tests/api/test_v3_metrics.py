@@ -7,8 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from httpx import AsyncClient
 
+from coval_bench.api.routers import v3_metrics
+from coval_bench.config import Settings
 from tests.api.conftest import COVAL_ORG, bearer
 
 URL = "/v3/metrics"
@@ -83,3 +86,22 @@ async def test_only_staff_change_a_metric(client: AsyncClient) -> None:
     )
     assert (both.json()["visibility"], both.json()["collected"]) == ("coval", True)
     assert "WER" not in await _listed(client, None)
+
+
+async def test_a_collected_change_starts_the_sync(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started: list[Settings] = []
+
+    async def start(settings: Settings) -> bool:
+        started.append(settings)
+        return True
+
+    monkeypatch.setattr(v3_metrics, "_start_sync", start)
+
+    await client.patch(f"{URL}/WER", json={"visibility": "partner"}, headers=_staff())
+    await client.patch(f"{URL}/WER", json={"collected": True}, headers=_staff())
+    assert started == []
+
+    await client.patch(f"{URL}/WER", json={"collected": False}, headers=_staff())
+    assert len(started) == 1

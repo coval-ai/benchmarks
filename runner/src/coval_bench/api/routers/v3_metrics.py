@@ -14,11 +14,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
-from coval_bench.api.deps import get_pool
+from coval_bench.api.deps import get_pool, get_settings
 from coval_bench.api.internal import _VISIBLE_TO
 from coval_bench.api.ratelimit import limiter
+from coval_bench.api.routers.admin_models import _start_sync
 from coval_bench.api.schemas import ErrorResponse, MetricOut, MetricPatch, MetricsResponse
 from coval_bench.api.v3_access import Caller, coval_only, viewer, writer
+from coval_bench.config import Settings
 from coval_bench.db.metric_store import MetricStore, RegisteredMetric
 
 router = APIRouter(tags=["metrics"])
@@ -71,11 +73,13 @@ async def update(
     body: MetricPatch,
     who: Caller = Depends(coval_only),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    settings: Settings = Depends(get_settings),
 ) -> MetricOut:
     """Change who sees a metric, whether it is collected, or both. Coval staff only.
 
-    ``visibility`` takes effect on the next request. ``collected`` is stored but no job
-    reads it yet, so changing it does not start or stop a metric being scored.
+    ``visibility`` takes effect on the next request. A ``collected`` change starts the
+    S2S sync, which sets the daily workflow-bank templates' metrics; nothing else reads
+    the flag yet.
     """
     org = writer(who)
     if body.visibility is None and body.collected is None:
@@ -95,4 +99,6 @@ async def update(
         was_collected=before.collected,
         org=org,
     )
+    if before.collected != after.collected:
+        await _start_sync(settings)
     return _out(after, who)

@@ -1,12 +1,12 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Set who runs in the S2S daily templates from the registry's ``collected``."""
+"""Set who runs and what is scored in the S2S daily templates from ``collected``."""
 
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 import click
@@ -17,11 +17,18 @@ from google.api_core.exceptions import GoogleAPIError
 
 from coval_bench.alerts import coval_error_text, publish_coval_failure
 from coval_bench.config import get_settings
+from coval_bench.db.metric_store import load_collected_metrics
 from coval_bench.db.registry_store import load_models
 from coval_bench.logging import configure_logging
 from coval_bench.platform_assets import COVAL_API_BASE, COVAL_API_KEY, CovalClient, SyncError
+from coval_bench.registries import Metric
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.s2s.scenario_map import daily_scenario, read_scenario_map
+from coval_bench.s2s.scenario_map import (
+    DAILY_ANCHOR,
+    daily_metrics,
+    daily_scenario,
+    read_scenario_map,
+)
 
 logger = structlog.get_logger("coval_bench.s2s.sync")
 
@@ -45,10 +52,24 @@ class TemplateChange:
     removed: tuple[str, ...]
     unknown: tuple[str, ...]
     agent_ids: tuple[str, ...]
+    metrics_added: tuple[str, ...] = ()
+    metrics_removed: tuple[str, ...] = ()
+    unknown_metrics: tuple[str, ...] = ()
+    metric_ids: tuple[str, ...] = ()
+
+    @property
+    def body(self) -> dict[str, object]:
+        """The fields to send to Coval; empty when the template already matches."""
+        body: dict[str, object] = {}
+        if self.added or self.removed:
+            body["agent_ids"] = list(self.agent_ids)
+        if self.metrics_added or self.metrics_removed:
+            body["metric_ids"] = list(self.metric_ids)
+        return body
 
     @property
     def changed(self) -> bool:
-        return bool(self.added or self.removed)
+        return bool(self.body)
 
 
 def wanted_agents(
@@ -71,11 +92,33 @@ def wanted_agents(
     return wanted
 
 
-def _live_agent_ids(template: dict[str, object], template_id: str) -> set[str]:
-    agent_ids = template.get("agent_ids")
-    if not isinstance(agent_ids, list):
-        raise SyncRefused(f"run template {template_id} has no agent_ids list")
-    return {str(agent_id) for agent_id in agent_ids}
+def wanted_metrics(
+    metrics: Mapping[str, tuple[Metric | None, str]],
+    collected: Collection[str],
+    anchor: Metric,
+) -> dict[str, str]:
+    """Coval metric id to its map name, for each allowed metric that is collected.
+
+    ``metrics`` maps a map name to (our metric, Coval metric id). A name we don't store
+    has no flag and is kept. Refuses to drop the anchor: the fetch writes nothing for a
+    run without it.
+    """
+    if anchor not in {metric for metric, _ in metrics.values()}:
+        raise SyncRefused(f"the daily scenario does not list its anchor metric {anchor.value}")
+    if anchor.value not in collected:
+        raise SyncRefused(f"{anchor.value} anchors the daily datasets; not removing it")
+    return {
+        coval_id: name
+        for name, (metric, coval_id) in metrics.items()
+        if metric is None or metric.value in collected
+    }
+
+
+def _live_ids(template: dict[str, object], template_id: str, field: str) -> set[str]:
+    ids = template.get(field)
+    if not isinstance(ids, list):
+        raise SyncRefused(f"run template {template_id} has no {field} list")
+    return {str(item) for item in ids}
 
 
 def plan_templates(
@@ -83,29 +126,44 @@ def plan_templates(
     template_ids: Mapping[str, str],
     wanted: Mapping[str, str],
     names: Mapping[str, str],
+    metrics: Mapping[str, str] | None = None,
+    metric_names: Mapping[str, str] | None = None,
 ) -> list[TemplateChange]:
-    """What each template's agent list should become, read before anything is written.
+    """What each template's agent and metric lists should become, read before any write.
 
-    Only agents the map defines are added or removed; an agent the map doesn't know is
-    left in place and reported, so a hand-added experiment is never dropped.
+    Only agents and metrics the map defines are added or removed; one the map doesn't
+    know is left in place and reported, so a hand-added experiment is never dropped.
+    ``metrics`` is the wanted metrics by Coval id; None leaves every metric list alone.
     """
     if not template_ids:
         raise SyncRefused("the daily scenario's live version has no run templates")
     changes = []
     for condition, template_id in sorted(template_ids.items()):
-        live = _live_agent_ids(client.get_run_template(template_id), template_id)
+        template = client.get_run_template(template_id)
+        live = _live_ids(template, template_id, "agent_ids")
         defined = live & names.keys()
         unknown = live - names.keys()
-        changes.append(
-            TemplateChange(
-                condition=condition,
-                template_id=template_id,
-                added=tuple(sorted(wanted[a] for a in wanted.keys() - live)),
-                removed=tuple(sorted(names[a] for a in defined - wanted.keys())),
-                unknown=tuple(sorted(unknown)),
-                agent_ids=tuple(sorted(wanted.keys() | unknown)),
-            )
+        change = TemplateChange(
+            condition=condition,
+            template_id=template_id,
+            added=tuple(sorted(wanted[a] for a in wanted.keys() - live)),
+            removed=tuple(sorted(names[a] for a in defined - wanted.keys())),
+            unknown=tuple(sorted(unknown)),
+            agent_ids=tuple(sorted(wanted.keys() | unknown)),
         )
+        if metrics is not None and metric_names is not None:
+            scored = _live_ids(template, template_id, "metric_ids")
+            stray = scored - metric_names.keys()
+            change = replace(
+                change,
+                metrics_added=tuple(sorted(metrics[m] for m in metrics.keys() - scored)),
+                metrics_removed=tuple(
+                    sorted(metric_names[m] for m in (scored & metric_names.keys()) - metrics.keys())
+                ),
+                unknown_metrics=tuple(sorted(stray)),
+                metric_ids=tuple(sorted(metrics.keys() | stray)),
+            )
+        changes.append(change)
     return changes
 
 
@@ -125,10 +183,10 @@ def _coval_failure(exc: Exception) -> str:
     "--coval-api-base", envvar="COVAL_API_BASE", default=COVAL_API_BASE, show_default=True
 )
 def sync_s2s(dry_run: bool, coval_api_base: str) -> None:
-    """Set who runs in the S2S daily templates from the registry's ``collected``.
+    """Set who runs and what is scored in the S2S daily templates from ``collected``.
 
-    Only the daily scenario's live templates are touched; their agents come from the
-    scenario map, kept when their registry row is collected.
+    Only the daily scenario's live templates are touched; their agents and metrics come
+    from the scenario map, kept when their registry row or metric is collected.
     """
     settings = get_settings()
     configure_logging(level=settings.log_level)
@@ -145,6 +203,14 @@ def sync_s2s(dry_run: bool, coval_api_base: str) -> None:
         )
         wanted = wanted_agents(agents, collected)
         names = {agent_id: key for key, (_, _, agent_id) in agents.items()}
+        allowed = daily_metrics(scenario)
+        metric_names = {coval_id: name for name, (_, coval_id) in allowed.items()}
+        metrics: dict[str, str] | None
+        try:
+            metrics = wanted_metrics(allowed, load_collected_metrics(settings), DAILY_ANCHOR)
+        except psycopg.Error:
+            logger.warning("s2s_sync_metric_flags_unreadable")
+            metrics = None
     except (SyncRefused, ValueError, RuntimeError, psycopg.Error, GoogleAPIError) as exc:
         logger.error("RUN_FAILED", error=str(exc))
         raise click.ClickException(str(exc)) from exc
@@ -152,12 +218,12 @@ def sync_s2s(dry_run: bool, coval_api_base: str) -> None:
     applied: list[str] = []
     try:
         with CovalClient(COVAL_API_KEY.resolve(), coval_api_base) as client:
-            changes = plan_templates(client, scenario.run_template_ids, wanted, names)
+            changes = plan_templates(
+                client, scenario.run_template_ids, wanted, names, metrics, metric_names
+            )
             for change in changes:
                 if change.changed and not dry_run:
-                    client.update_run_template(
-                        change.template_id, {"agent_ids": list(change.agent_ids)}
-                    )
+                    client.update_run_template(change.template_id, change.body)
                     applied.append(change.condition)
     except SyncRefused as exc:
         logger.error("RUN_FAILED", error=str(exc))
@@ -182,16 +248,27 @@ def sync_s2s(dry_run: bool, coval_api_base: str) -> None:
                 template_id=change.template_id,
                 agent_ids=list(change.unknown),
             )
+        if change.unknown_metrics:
+            logger.warning(
+                "s2s_sync_unknown_metrics",
+                condition=change.condition,
+                template_id=change.template_id,
+                metric_ids=list(change.unknown_metrics),
+            )
         logger.info(
             "s2s_sync_template",
             condition=change.condition,
             template_id=change.template_id,
             added=list(change.added),
             removed=list(change.removed),
+            metrics_added=list(change.metrics_added),
+            metrics_removed=list(change.metrics_removed),
             dry_run=dry_run,
         )
+        added = (*change.added, *change.metrics_added)
+        removed = (*change.removed, *change.metrics_removed)
         summary = (
-            f"+ {', '.join(change.added) or '-'}  − {', '.join(change.removed) or '-'}"
+            f"+ {', '.join(added) or '-'}  − {', '.join(removed) or '-'}"
             if change.changed
             else "unchanged"
         )

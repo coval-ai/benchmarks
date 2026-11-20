@@ -5,16 +5,18 @@ from __future__ import annotations
 
 from typing import Any
 
+import psycopg
 import pytest
 from click.testing import CliRunner
 
 from coval_bench.config import Settings
 from coval_bench.platform_assets import SyncError
+from coval_bench.registries import Metric
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import RegisteredModel
 from coval_bench.s2s import sync
-from coval_bench.s2s.scenario_map import daily_scenario
-from coval_bench.s2s.sync import SyncRefused, plan_templates, wanted_agents
+from coval_bench.s2s.scenario_map import daily_metrics, daily_scenario
+from coval_bench.s2s.sync import SyncRefused, plan_templates, wanted_agents, wanted_metrics
 
 AGENTS = {
     "openai/gpt-realtime-2": ("openai", "gpt-realtime", "A_RT2"),
@@ -24,12 +26,26 @@ AGENTS = {
 NAMES = {agent_id: key for key, (_, _, agent_id) in AGENTS.items()}
 TEMPLATES = {"clean": "T_CLEAN", "hard": "T_HARD"}
 WANTED = {"A_RT21": "openai/gpt-realtime-2.1", "A_GEM": "google/gemini-3.8-live"}
+METRIC_IDS = {"judge": "J", "latency": "M_LAT", "call_length": "M_LEN"}
+METRIC_NAMES = {coval_id: name for name, coval_id in METRIC_IDS.items()}
+ALLOWED: dict[str, tuple[Metric | None, str]] = {
+    "judge": (Metric.WORKFLOW_ADHERENCE, "J"),
+    "latency": (Metric.V2V, "M_LAT"),
+    "call_length": (Metric.CALL_LENGTH, "M_LEN"),
+}
+ALL_COLLECTED = frozenset({"WorkflowAdherence", "V2V", "CallLength"})
 
 
 class _FakeClient:
-    def __init__(self, live: dict[str, Any], fail_on_update: str | None = None) -> None:
+    def __init__(
+        self,
+        live: dict[str, Any],
+        fail_on_update: str | None = None,
+        metrics: list[str] | None = None,
+    ) -> None:
         self.live = live
         self.fail_on_update = fail_on_update
+        self.metrics = sorted(METRIC_NAMES) if metrics is None else metrics
         self.updates: list[tuple[str, dict[str, object]]] = []
 
     def __enter__(self) -> _FakeClient:
@@ -39,7 +55,11 @@ class _FakeClient:
         return None
 
     def get_run_template(self, template_id: str) -> dict[str, object]:
-        return {"id": template_id, "agent_ids": self.live[template_id]}
+        return {
+            "id": template_id,
+            "agent_ids": self.live[template_id],
+            "metric_ids": self.metrics,
+        }
 
     def update_run_template(self, template_id: str, body: dict[str, object]) -> dict[str, object]:
         if template_id == self.fail_on_update:
@@ -107,6 +127,54 @@ def test_plan_refuses_a_scenario_without_templates() -> None:
         plan_templates(_FakeClient({}), {}, WANTED, NAMES)
 
 
+def test_wanted_metrics_keeps_only_collected_ones() -> None:
+    wanted = wanted_metrics(ALLOWED, {"WorkflowAdherence", "CallLength"}, Metric.WORKFLOW_ADHERENCE)
+
+    assert wanted == {"J": "judge", "M_LEN": "call_length"}
+
+
+def test_wanted_metrics_keeps_a_metric_we_do_not_store() -> None:
+    allowed = {**ALLOWED, "talk_ratio": (None, "M_TALK")}
+
+    wanted = wanted_metrics(allowed, {"WorkflowAdherence"}, Metric.WORKFLOW_ADHERENCE)
+
+    assert wanted == {"J": "judge", "M_TALK": "talk_ratio"}
+
+
+def test_wanted_metrics_refuses_to_drop_the_anchor() -> None:
+    with pytest.raises(SyncRefused, match="anchors"):
+        wanted_metrics(ALLOWED, {"V2V", "CallLength"}, Metric.WORKFLOW_ADHERENCE)
+    with pytest.raises(SyncRefused, match="does not list"):
+        wanted_metrics({"latency": ALLOWED["latency"]}, ALL_COLLECTED, Metric.WORKFLOW_ADHERENCE)
+
+
+def test_plan_drops_an_uncollected_metric_and_keeps_a_stray_one() -> None:
+    live = {"T_CLEAN": ["A_GEM", "A_RT21"], "T_HARD": ["A_GEM", "A_RT21"]}
+    client = _FakeClient(live, metrics=["J", "M_LAT", "M_HAND"])
+    metrics = {"J": "judge", "M_LEN": "call_length"}
+
+    changes = plan_templates(client, TEMPLATES, WANTED, NAMES, metrics, METRIC_NAMES)
+
+    assert [(c.metrics_added, c.metrics_removed, c.unknown_metrics) for c in changes] == [
+        (("call_length",), ("latency",), ("M_HAND",))
+    ] * 2
+    assert changes[0].body == {"metric_ids": ["J", "M_HAND", "M_LEN"]}
+
+
+def test_plan_leaves_metrics_alone_without_flags() -> None:
+    client = _FakeClient(
+        {"T_CLEAN": ["A_GEM", "A_RT21"], "T_HARD": ["A_GEM", "A_RT21"]}, metrics=[]
+    )
+
+    assert not any(c.changed for c in plan_templates(client, TEMPLATES, WANTED, NAMES))
+
+
+def test_daily_metrics_names_the_judge_and_the_built_ins() -> None:
+    scenario = daily_scenario({"workflow-bank": {"v1": _version(enabled=True)}})
+
+    assert daily_metrics(scenario) == ALLOWED
+
+
 def _version(*, enabled: bool) -> dict[str, object]:
     return {
         "test_set_id": "TSW",
@@ -129,7 +197,7 @@ def _version(*, enabled: bool) -> dict[str, object]:
         },
         "personas": {"clean": {"id": "P"}},
         "judge": {"id": "J"},
-        "metric_ids": {},
+        "metric_ids": METRIC_IDS,
         "run_template_ids": TEMPLATES,
         "schedules": {"clean": {"enabled": enabled}},
     }
@@ -160,7 +228,10 @@ def _row(provider: str, model: str, *, collected: bool) -> RegisteredModel:
 
 
 def _run_cli(
-    monkeypatch: pytest.MonkeyPatch, client: _FakeClient, *args: str
+    monkeypatch: pytest.MonkeyPatch,
+    client: _FakeClient,
+    *args: str,
+    collected: frozenset[str] = ALL_COLLECTED,
 ) -> tuple[int, list[dict[str, object]]]:
     published: list[dict[str, object]] = []
     settings = Settings.model_construct(
@@ -180,6 +251,7 @@ def _run_cli(
             _row("google", "gemini-3.8-live", collected=True),
         ],
     )
+    monkeypatch.setattr(sync, "load_collected_metrics", lambda _s: collected)
     monkeypatch.setenv("COVAL_API_KEY", "k")
     monkeypatch.setattr(sync, "CovalClient", lambda _key, _base: client)
     monkeypatch.setattr(sync, "publish_coval_failure", lambda topic, **card: published.append(card))
@@ -222,3 +294,44 @@ def test_cli_coval_failure_posts_a_card_without_the_body(monkeypatch: pytest.Mon
     assert card["job"] == "s2s-sync"
     assert card["error"] == "PATCH /run-templates/T_HARD -> 503; updated before failing: clean"
     assert "secret body" not in str(card)
+
+
+def test_cli_drops_a_metric_that_is_not_collected(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient({"T_CLEAN": ["A_GEM", "A_RT21"], "T_HARD": ["A_GEM", "A_RT21"]})
+
+    code, _ = _run_cli(
+        monkeypatch, client, collected=frozenset({"WorkflowAdherence", "CallLength"})
+    )
+
+    assert code == 0
+    assert client.updates == [
+        ("T_CLEAN", {"metric_ids": ["J", "M_LEN"]}),
+        ("T_HARD", {"metric_ids": ["J", "M_LEN"]}),
+    ]
+
+
+def test_cli_refuses_to_drop_the_anchor(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient({"T_CLEAN": ["A_RT2"], "T_HARD": ["A_RT2"]})
+
+    code, _ = _run_cli(monkeypatch, client, collected=frozenset({"V2V"}))
+
+    assert code != 0
+    assert client.updates == []
+
+
+def test_cli_still_syncs_agents_when_the_flags_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient({"T_CLEAN": ["A_RT2", "A_GEM"], "T_HARD": ["A_GEM", "A_RT21"]}, metrics=[])
+
+    def unreadable(_settings: Settings) -> frozenset[str]:
+        raise psycopg.errors.UndefinedColumn("collected")
+
+    code, _ = _run_cli(monkeypatch, client)
+    assert code == 0
+    client.updates.clear()
+    monkeypatch.setattr(sync, "load_collected_metrics", unreadable)
+    result = CliRunner().invoke(sync.sync_s2s, [])
+
+    assert result.exit_code == 0
+    assert client.updates == [("T_CLEAN", {"agent_ids": ["A_GEM", "A_RT21"]})]
