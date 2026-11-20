@@ -22,6 +22,8 @@ from coval_bench.api.schemas import ErrorResponse, MetricOut, MetricPatch, Metri
 from coval_bench.api.v3_access import Caller, coval_only, viewer, writer
 from coval_bench.config import Settings
 from coval_bench.db.metric_store import MetricStore, RegisteredMetric
+from coval_bench.registries import Benchmark, Metric
+from coval_bench.registries.metrics import METRIC_SPECS
 
 router = APIRouter(tags=["metrics"])
 logger = structlog.get_logger("coval_bench.api.v3_metrics")
@@ -99,6 +101,9 @@ async def update(
         was_collected=before.collected,
         org=org,
     )
-    if before.collected != after.collected:
-        await _start_sync(settings)
+    scored_daily = (
+        after.code in Metric and Benchmark.S2S in METRIC_SPECS[Metric(after.code)].benchmarks
+    )
+    if before.collected != after.collected and scored_daily and not await _start_sync(settings):
+        logger.warning("metric_sync_not_started", code=after.code)
     return _out(after, who)

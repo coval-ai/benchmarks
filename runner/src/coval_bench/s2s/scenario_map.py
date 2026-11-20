@@ -249,13 +249,17 @@ def daily_scenario(raw: object) -> _ScenarioVersion:
 DAILY_ANCHOR = ADHERENCE_SLUGS[_DAILY_SCENARIO]
 
 
-def daily_metrics(scenario: _ScenarioVersion) -> dict[str, tuple[Metric | None, str]]:
-    """Each metric the daily scenario allows: map name to (our metric, Coval metric id).
+def daily_metrics(scenario: _ScenarioVersion) -> dict[str, tuple[Metric, str]]:
+    """Each metric the daily scenario allows that we store: map name to (metric, Coval id).
 
-    Our metric is None for a name we don't store, which no ``collected`` flag covers.
+    A name we don't store has no ``collected`` flag, so it is left out and never managed.
     """
     codes = {"judge": DAILY_ANCHOR, **_PLATFORM_METRICS}
-    return {name: (codes.get(name), coval_id) for name, coval_id in scenario.metric_ids.items()}
+    return {
+        name: (codes[name], coval_id)
+        for name, coval_id in scenario.metric_ids.items()
+        if name in codes
+    }
 
 
 def with_scenario_map(settings: Settings) -> Settings:

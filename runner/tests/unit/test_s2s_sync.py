@@ -28,7 +28,7 @@ TEMPLATES = {"clean": "T_CLEAN", "hard": "T_HARD"}
 WANTED = {"A_RT21": "openai/gpt-realtime-2.1", "A_GEM": "google/gemini-3.8-live"}
 METRIC_IDS = {"judge": "J", "latency": "M_LAT", "call_length": "M_LEN"}
 METRIC_NAMES = {coval_id: name for name, coval_id in METRIC_IDS.items()}
-ALLOWED: dict[str, tuple[Metric | None, str]] = {
+ALLOWED: dict[str, tuple[Metric, str]] = {
     "judge": (Metric.WORKFLOW_ADHERENCE, "J"),
     "latency": (Metric.V2V, "M_LAT"),
     "call_length": (Metric.CALL_LENGTH, "M_LEN"),
@@ -133,14 +133,6 @@ def test_wanted_metrics_keeps_only_collected_ones() -> None:
     assert wanted == {"J": "judge", "M_LEN": "call_length"}
 
 
-def test_wanted_metrics_keeps_a_metric_we_do_not_store() -> None:
-    allowed = {**ALLOWED, "talk_ratio": (None, "M_TALK")}
-
-    wanted = wanted_metrics(allowed, {"WorkflowAdherence"}, Metric.WORKFLOW_ADHERENCE)
-
-    assert wanted == {"J": "judge", "M_TALK": "talk_ratio"}
-
-
 def test_wanted_metrics_refuses_to_drop_the_anchor() -> None:
     with pytest.raises(SyncRefused, match="anchors"):
         wanted_metrics(ALLOWED, {"V2V", "CallLength"}, Metric.WORKFLOW_ADHERENCE)
@@ -170,9 +162,10 @@ def test_plan_leaves_metrics_alone_without_flags() -> None:
 
 
 def test_daily_metrics_names_the_judge_and_the_built_ins() -> None:
-    scenario = daily_scenario({"workflow-bank": {"v1": _version(enabled=True)}})
+    version = _version(enabled=True)
+    version["metric_ids"] = {**METRIC_IDS, "talk_ratio": "M_TALK"}
 
-    assert daily_metrics(scenario) == ALLOWED
+    assert daily_metrics(daily_scenario({"workflow-bank": {"v1": version}})) == ALLOWED
 
 
 def _version(*, enabled: bool) -> dict[str, object]:
@@ -310,13 +303,17 @@ def test_cli_drops_a_metric_that_is_not_collected(monkeypatch: pytest.MonkeyPatc
     ]
 
 
-def test_cli_refuses_to_drop_the_anchor(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _FakeClient({"T_CLEAN": ["A_RT2"], "T_HARD": ["A_RT2"]})
+def test_cli_syncs_agents_and_alerts_when_the_anchor_is_switched_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient({"T_CLEAN": ["A_RT2", "A_GEM"], "T_HARD": ["A_GEM", "A_RT21"]})
 
-    code, _ = _run_cli(monkeypatch, client, collected=frozenset({"V2V"}))
+    code, published = _run_cli(monkeypatch, client, collected=frozenset({"V2V"}))
 
-    assert code != 0
-    assert client.updates == []
+    assert code == 0
+    assert client.updates == [("T_CLEAN", {"agent_ids": ["A_GEM", "A_RT21"]})]
+    (card,) = published
+    assert (card["failure"], "anchors" in str(card["error"])) == ("metric_sync", True)
 
 
 def test_cli_still_syncs_agents_when_the_flags_cannot_be_read(

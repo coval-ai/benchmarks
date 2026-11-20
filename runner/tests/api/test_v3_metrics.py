@@ -99,9 +99,10 @@ async def test_a_collected_change_starts_the_sync(
 
     monkeypatch.setattr(v3_metrics, "_start_sync", start)
 
-    await client.patch(f"{URL}/WER", json={"visibility": "partner"}, headers=_staff())
-    await client.patch(f"{URL}/WER", json={"collected": True}, headers=_staff())
+    await client.patch(f"{URL}/V2V", json={"visibility": "partner"}, headers=_staff())
+    await client.patch(f"{URL}/V2V", json={"collected": True}, headers=_staff())
+    await client.patch(f"{URL}/TTFA", json={"collected": False}, headers=_staff())
     assert started == []
 
-    await client.patch(f"{URL}/WER", json={"collected": False}, headers=_staff())
+    await client.patch(f"{URL}/V2V", json={"collected": False}, headers=_staff())
     assert len(started) == 1

@@ -93,24 +93,21 @@ def wanted_agents(
 
 
 def wanted_metrics(
-    metrics: Mapping[str, tuple[Metric | None, str]],
+    metrics: Mapping[str, tuple[Metric, str]],
     collected: Collection[str],
     anchor: Metric,
 ) -> dict[str, str]:
     """Coval metric id to its map name, for each allowed metric that is collected.
 
-    ``metrics`` maps a map name to (our metric, Coval metric id). A name we don't store
-    has no flag and is kept. Refuses to drop the anchor: the fetch writes nothing for a
-    run without it.
+    ``metrics`` maps a map name to (our metric, Coval metric id). Refuses to drop the
+    anchor: the fetch writes nothing for a run without it.
     """
     if anchor not in {metric for metric, _ in metrics.values()}:
         raise SyncRefused(f"the daily scenario does not list its anchor metric {anchor.value}")
     if anchor.value not in collected:
         raise SyncRefused(f"{anchor.value} anchors the daily datasets; not removing it")
     return {
-        coval_id: name
-        for name, (metric, coval_id) in metrics.items()
-        if metric is None or metric.value in collected
+        coval_id: name for name, (metric, coval_id) in metrics.items() if metric.value in collected
     }
 
 
@@ -208,8 +205,14 @@ def sync_s2s(dry_run: bool, coval_api_base: str) -> None:
         metrics: dict[str, str] | None
         try:
             metrics = wanted_metrics(allowed, load_collected_metrics(settings), DAILY_ANCHOR)
-        except psycopg.Error:
-            logger.warning("s2s_sync_metric_flags_unreadable")
+        except psycopg.errors.UndefinedColumn:
+            logger.warning("s2s_sync_metric_flags_missing")
+            metrics = None
+        except SyncRefused as exc:
+            logger.error("s2s_sync_metrics_refused", error=str(exc))
+            publish_coval_failure(
+                settings.alerts_topic, job="s2s-sync", failure="metric_sync", error=str(exc)
+            )
             metrics = None
     except (SyncRefused, ValueError, RuntimeError, psycopg.Error, GoogleAPIError) as exc:
         logger.error("RUN_FAILED", error=str(exc))
