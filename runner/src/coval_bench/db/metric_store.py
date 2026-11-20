@@ -47,6 +47,7 @@ class MetricStore:
             WITH before AS (
                 SELECT code, display_name, visibility, collected
                 FROM benchmarks_v2.metrics WHERE code = %s
+                FOR UPDATE
             )
             UPDATE benchmarks_v2.metrics m
             SET visibility = COALESCE(%s, m.visibility), collected = COALESCE(%s, m.collected)
