@@ -12,6 +12,7 @@ from httpx import AsyncClient
 
 from coval_bench.api.routers import v3_metrics
 from coval_bench.config import Settings
+from coval_bench.s2s.scenario_map import DAILY_ANCHOR
 from tests.api.conftest import COVAL_ORG, bearer
 
 URL = "/v3/metrics"
@@ -86,6 +87,17 @@ async def test_only_staff_change_a_metric(client: AsyncClient) -> None:
     )
     assert (both.json()["visibility"], both.json()["collected"]) == ("coval", True)
     assert "WER" not in await _listed(client, None)
+
+
+async def test_the_daily_anchor_stays_collected(client: AsyncClient) -> None:
+    anchor = f"{URL}/{DAILY_ANCHOR.value}"
+
+    refused = await client.patch(anchor, json={"collected": False}, headers=_staff())
+    assert refused.status_code == 400
+    assert (await _listed(client, _staff()))[DAILY_ANCHOR.value]["collected"] is True
+
+    hidden = await client.patch(anchor, json={"visibility": "coval"}, headers=_staff())
+    assert (hidden.status_code, hidden.json()["collected"]) == (200, True)
 
 
 async def test_a_collected_change_starts_the_sync(
