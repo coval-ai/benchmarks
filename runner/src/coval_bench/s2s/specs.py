@@ -20,7 +20,6 @@ from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import Orchestration, RegisteredModel
 from coval_bench.s2s.conditions import (
     ADHERENCE_SLUGS,
-    FAMILY_DENTAL,
     FAMILY_MULTITURN,
     HARNESS_SLUGS,
     PLATFORM_SLUGS,
@@ -67,59 +66,8 @@ class AgentSpec:
     workspace_id: str | None = None
 
 
-# Model strings are display labels. Every agent runs the dental test set: the
-# shared multi-turn set stays queryable but is no longer written to, so a spec
-# left on it would go stale rather than idle.
 def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
-    return (
-        AgentSpec(
-            agent_id=settings.coval_s2s_openai_agent_id,
-            provider="openai",
-            model="gpt-realtime",
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_DENTAL,
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_gemini_agent_id,
-            provider="google",
-            model="gemini-live",
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_DENTAL,
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_xai_agent_id,
-            provider="xai",
-            model="grok-voice-think-fast-1.0",
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_DENTAL,
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_xai_think_fast_2_agent_id,
-            provider="xai",
-            model="grok-voice-think-fast-2.0",
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_DENTAL,
-        ),
-        # Pre-launch models under codenames: the provider and model strings are what
-        # land in stored results, so they carry no vendor identity of their own.
-        AgentSpec(
-            agent_id=settings.coval_s2s_gray_agent_id,
-            provider="colors",
-            model="gray",
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_DENTAL,
-            publish_samples=False,
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_red_agent_id,
-            provider="colors",
-            model="red",
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_DENTAL,
-            publish_samples=False,
-        ),
-        *scenario_specs(settings),
-    )
+    return scenario_specs(settings)
 
 
 # The models every instruction-following scenario runs, keyed by the model string
