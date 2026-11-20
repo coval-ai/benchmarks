@@ -17,7 +17,7 @@ from pydantic import BaseModel, StringConstraints
 from coval_bench import gcs
 from coval_bench.config import ScenarioCovalIds, Settings
 from coval_bench.registries import Metric
-from coval_bench.s2s.conditions import HARNESS_SLUGS, PLATFORM_SLUGS
+from coval_bench.s2s.conditions import ADHERENCE_SLUGS, HARNESS_SLUGS, PLATFORM_SLUGS
 
 logger = structlog.get_logger("coval_bench.s2s.scenario_map")
 
@@ -244,6 +244,22 @@ def daily_scenario(raw: object) -> _ScenarioVersion:
     if not isinstance(raw, dict):
         raise ValueError("scenario map is not a JSON object")
     return _live_version(_DAILY_SCENARIO, raw.get(_DAILY_SCENARIO))
+
+
+DAILY_ANCHOR = ADHERENCE_SLUGS[_DAILY_SCENARIO]
+
+
+def daily_metrics(scenario: _ScenarioVersion) -> dict[str, tuple[Metric, str]]:
+    """Each metric the daily scenario allows that we store: map name to (metric, Coval id).
+
+    A name we don't store has no ``collected`` flag, so it is left out and never managed.
+    """
+    codes = {"judge": DAILY_ANCHOR, **_PLATFORM_METRICS}
+    return {
+        name: (codes[name], coval_id)
+        for name, coval_id in scenario.metric_ids.items()
+        if name in codes
+    }
 
 
 def with_scenario_map(settings: Settings) -> Settings:
