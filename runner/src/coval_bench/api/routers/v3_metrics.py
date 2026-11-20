@@ -24,6 +24,7 @@ from coval_bench.config import Settings
 from coval_bench.db.metric_store import MetricStore, RegisteredMetric
 from coval_bench.registries import Benchmark, Metric
 from coval_bench.registries.metrics import METRIC_SPECS
+from coval_bench.s2s.scenario_map import DAILY_ANCHOR
 
 router = APIRouter(tags=["metrics"])
 logger = structlog.get_logger("coval_bench.api.v3_metrics")
@@ -81,11 +82,14 @@ async def update(
 
     ``visibility`` takes effect on the next request. A ``collected`` change starts the
     S2S sync, which sets the daily workflow-bank templates' metrics; nothing else reads
-    the flag yet.
+    the flag yet. The daily datasets' anchor metric cannot be turned off: the fetch writes
+    nothing for a run without it.
     """
     org = writer(who)
     if body.visibility is None and body.collected is None:
         raise HTTPException(400, "give visibility, collected or both")
+    if body.collected is False and code == DAILY_ANCHOR.value:
+        raise HTTPException(400, f"{code} anchors the daily S2S datasets and stays collected")
     changed = await _guarded(
         MetricStore(pool).update(code, visibility=body.visibility, collected=body.collected)
     )
