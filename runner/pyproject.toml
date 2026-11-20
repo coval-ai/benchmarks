@@ -53,6 +53,7 @@ dependencies = [
     "opentelemetry-sdk>=1.30",
     "opentelemetry-exporter-gcp-monitoring>=1.15.0a0",
     "opentelemetry-exporter-otlp-proto-http>=1.30",
+    "clerk-backend-api>=7.1.0",
 ]
 
 [project.optional-dependencies]
@@ -102,6 +103,7 @@ extend-select = ["E", "F", "I", "B", "UP", "SIM", "S", "ANN"]
 # FastAPI uses Depends/Query in function argument defaults by design
 "src/coval_bench/api/routers/*.py" = ["B008"]
 "src/coval_bench/api/internal.py" = ["B008"]
+"src/coval_bench/api/v3_access.py" = ["B008"]
 "src/coval_bench/api/deps.py" = ["B008"]
 # One prompt sample per source line, even past 100 chars
 "src/coval_bench/arena/prompts.py" = ["E501"]

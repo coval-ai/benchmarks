@@ -32,12 +32,13 @@ def palabra_settings() -> Settings:
 
 def _audio_events(pcm: bytes) -> list[str | bytes]:
     return [
+        json.dumps({"message_type": "init_response", "data": {}}),
         json.dumps(
             {
                 "message_type": "audio_chunk",
                 "data": {"audio": base64.b64encode(pcm).decode("ascii"), "last_chunk": True},
             }
-        )
+        ),
     ]
 
 
@@ -56,6 +57,39 @@ async def test_palabra_tts_sends_voice(palabra_settings: Settings, voice: str) -
     assert init["voice_options"] == {"voice_id": voice}
     assert result.audio_path is not None
     result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_palabra_tts_sends_text_after_init_response(palabra_settings: Settings) -> None:
+    pending_at_send: list[int] = []
+    ws = FakeWebSocket(
+        _audio_events(make_pcm_bytes(240)),
+        on_send=lambda _msg: pending_at_send.append(len(ws.events)),
+    )
+    provider = PalabraTTSProvider(palabra_settings, model=_MODEL, voice=_FEMALE)
+
+    with patch("coval_bench.providers.tts.palabra.ws_client.connect", return_value=ws):
+        result = await provider.synthesize("Hello from Palabra")
+
+    assert result.error is None, f"Unexpected error: {result.error}"
+    assert [json.loads(msg)["type"] for msg in ws.sent] == ["init", "text"]
+    assert pending_at_send == [2, 1]
+    assert result.audio_path is not None
+    result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_palabra_tts_fails_on_init_error(palabra_settings: Settings) -> None:
+    ws = FakeWebSocket(
+        [json.dumps({"message_type": "error", "data": {"code": "E1", "desc": "bad init"}})]
+    )
+    provider = PalabraTTSProvider(palabra_settings, model=_MODEL, voice=_FEMALE)
+
+    with patch("coval_bench.providers.tts.palabra.ws_client.connect", return_value=ws):
+        result = await provider.synthesize("Hello from Palabra")
+
+    assert result.error is not None and "bad init" in result.error
+    assert len(ws.sent) == 1
 
 
 def test_palabra_tts_rejects_unknown_voice(palabra_settings: Settings) -> None:

@@ -32,6 +32,7 @@ from coval_bench.registries.models import (
     Orchestration,
     RegisteredModel,
     Source,
+    Visibility,
     Voice,
 )
 
@@ -56,7 +57,7 @@ EDITABLE_FIELDS = frozenset(
         "region",
         "arena_enabled",
         "collected",
-        "published",
+        "visibility",
         "tags",
         "color",
         "display_name",
@@ -102,7 +103,7 @@ class NewModel(BaseModel):
     region: Literal["us", "eu", "asia"] | None = None
     arena_enabled: bool = True
     collected: bool = True
-    published: bool = False
+    visibility: Visibility = "partner"
     tags: tuple[str, ...] = ()
     color: HexColor = None
     display_name: str | None = None
@@ -121,7 +122,8 @@ class ModelRecord(NewModel):
 
     id: int
     version: int = 1
-    updated_by_user_id: str
+    updated_by_user_id: str | None = None
+    updated_by_org_id: str | None = None
     updated_by_email: str | None = None
     updated_at: datetime
 
@@ -136,7 +138,7 @@ class ModelChange(BaseModel):
     model: str
     old: dict[str, Any] | None = None
     new: dict[str, Any]
-    changed_by_user_id: str
+    changed_by_user_id: str | None = None
     changed_by_org_id: str | None = None
     changed_by_email: str | None = None
     changed_at: datetime
@@ -145,9 +147,10 @@ class ModelChange(BaseModel):
 _SELECT_MODELS = """
     SELECT m.id, m.modality, m.provider, m.model, m.voice, m.voices, m.creator,
            m.source, m.licensing, m.on_prem, m.region, m.arena_enabled,
-           m.collected, m.published, m.color, m.display_name,
+           m.collected, m.visibility, m.color, m.display_name,
            m.architecture, m.orchestration, m.version, m.updated_by_user_id,
-           m.updated_by_email, m.updated_at, COALESCE(t.tags, '{}') AS tags
+           m.updated_by_org_id, m.updated_by_email, m.updated_at,
+           COALESCE(t.tags, '{}') AS tags
     FROM benchmarks_v2.models m
     LEFT JOIN (
         SELECT model_id, array_agg(tag ORDER BY tag) AS tags
@@ -159,9 +162,10 @@ _SELECT_MODELS = """
 _INSERT_MODEL = """
     INSERT INTO benchmarks_v2.models
         (modality, provider, model, voice, voices, creator, source, licensing,
-         on_prem, region, arena_enabled, collected, published, color, display_name,
-         architecture, orchestration, updated_by_user_id, updated_by_email)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         on_prem, region, arena_enabled, collected, visibility, color, display_name,
+         architecture, orchestration, updated_by_user_id, updated_by_org_id,
+         updated_by_email)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     RETURNING id, updated_at
 """
 
@@ -169,9 +173,9 @@ _UPDATE_MODEL = """
     UPDATE benchmarks_v2.models
     SET provider = %s, model = %s, voice = %s, voices = %s, creator = %s,
         source = %s, licensing = %s, on_prem = %s, region = %s,
-        arena_enabled = %s, collected = %s, published = %s, color = %s,
+        arena_enabled = %s, collected = %s, visibility = %s, color = %s,
         display_name = %s, architecture = %s, orchestration = %s, version = %s,
-        updated_by_user_id = %s, updated_by_email = %s,
+        updated_by_user_id = %s, updated_by_org_id = %s, updated_by_email = %s,
         -- Strictly monotonic per row: the 412 stale check compares this exactly,
         -- so same-microsecond updates must still produce a new value.
         updated_at = GREATEST(now(), updated_at + interval '1 microsecond')
@@ -192,7 +196,15 @@ _INSERT_HISTORY = """
 # the read behind /v1/providers and the orchestrator's roster — the whole site
 # goes dark if it fails for the window between the two. Each missing column
 # reads as unset until it exists.
-_SELECT_MODELS_BEFORE_VERSION = _SELECT_MODELS.replace("m.version,", "1 AS version,")
+_SELECT_MODELS_BEFORE_UPDATED_BY_ORG = _SELECT_MODELS.replace(
+    "m.updated_by_org_id,", "NULL AS updated_by_org_id,"
+)
+_SELECT_MODELS_BEFORE_VISIBILITY = _SELECT_MODELS_BEFORE_UPDATED_BY_ORG.replace(
+    "m.visibility,", "CASE WHEN m.published THEN 'public' ELSE 'partner' END AS visibility,"
+)
+_SELECT_MODELS_BEFORE_VERSION = _SELECT_MODELS_BEFORE_VISIBILITY.replace(
+    "m.version,", "1 AS version,"
+)
 _SELECT_MODELS_BEFORE_AGENT_KIND = _SELECT_MODELS_BEFORE_VERSION.replace(
     "m.architecture, m.orchestration,", "NULL AS architecture, NULL AS orchestration,"
 )
@@ -204,6 +216,8 @@ _SELECT_MODELS_BEFORE_COLOR = _SELECT_MODELS_BEFORE_DISPLAY_NAME.replace(
 )
 _SELECT_MODELS_SHAPES = (
     _SELECT_MODELS,
+    _SELECT_MODELS_BEFORE_UPDATED_BY_ORG,
+    _SELECT_MODELS_BEFORE_VISIBILITY,
     _SELECT_MODELS_BEFORE_VERSION,
     _SELECT_MODELS_BEFORE_AGENT_KIND,
     _SELECT_MODELS_BEFORE_DISPLAY_NAME,
@@ -216,8 +230,11 @@ def _record(row: Mapping[str, Any]) -> ModelRecord:
 
 
 def _snapshot(record: ModelRecord) -> Jsonb:
-    """The row minus the email label: scrubbing must not leave copies in history."""
-    return Jsonb(record.model_dump(mode="json", exclude={"updated_by_email"}))
+    """The row minus the email label: scrubbing must not leave copies in history.
+
+    The org is left out too; the history row names it in its own column.
+    """
+    return Jsonb(record.model_dump(mode="json", exclude={"updated_by_email", "updated_by_org_id"}))
 
 
 class RegistryStore:
@@ -249,6 +266,25 @@ class RegistryStore:
             rows = await self._select_models(conn, "ORDER BY m.id", ())
         return [_record(row) for row in rows]
 
+    async def list_models_and_metric_levels(
+        self,
+    ) -> tuple[list[ModelRecord], dict[str, str] | None]:
+        """The roster and each metric's visibility level, read on one connection.
+
+        The levels are ``None`` when they cannot be read, so the roster still loads.
+        """
+        async with self._pool.connection() as conn:
+            rows = await self._select_models(conn, "ORDER BY m.id", ())
+            try:
+                level_rows = await (
+                    await conn.execute("SELECT code, visibility FROM benchmarks_v2.metrics")
+                ).fetchall()
+            except psycopg.Error:
+                await conn.rollback()
+                return [_record(row) for row in rows], None
+        levels = {row["code"]: row["visibility"] for row in level_rows}
+        return [_record(row) for row in rows], levels
+
     async def get_model(self, model_id: int) -> ModelRecord | None:
         async with self._pool.connection() as conn:
             rows = await self._select_models(conn, "WHERE m.id = %s", (model_id,))
@@ -275,7 +311,7 @@ class RegistryStore:
         self,
         new: NewModel,
         *,
-        user_id: str,
+        user_id: str | None,
         org_id: str | None,
         email: str | None,
     ) -> ModelRecord:
@@ -298,12 +334,13 @@ class RegistryStore:
                             new.region,
                             new.arena_enabled,
                             new.collected,
-                            new.published,
+                            new.visibility,
                             new.color,
                             new.display_name,
                             new.architecture,
                             new.orchestration,
                             user_id,
+                            org_id,
                             email,
                         ),
                     )
@@ -315,6 +352,7 @@ class RegistryStore:
                         **new.model_dump(),
                         "id": row["id"],
                         "updated_by_user_id": user_id,
+                        "updated_by_org_id": org_id,
                         "updated_by_email": email,
                         "updated_at": row["updated_at"],
                     }
@@ -346,7 +384,7 @@ class RegistryStore:
         changes: Mapping[str, Any],
         *,
         expected_updated_at: datetime,
-        user_id: str,
+        user_id: str | None,
         org_id: str | None,
         email: str | None,
     ) -> tuple[ModelRecord, ModelRecord] | None:
@@ -389,13 +427,14 @@ class RegistryStore:
                             merged.region,
                             merged.arena_enabled,
                             merged.collected,
-                            merged.published,
+                            merged.visibility,
                             merged.color,
                             merged.display_name,
                             merged.architecture,
                             merged.orchestration,
                             merged.version,
                             user_id,
+                            org_id,
                             email,
                             model_id,
                         ),
@@ -411,6 +450,7 @@ class RegistryStore:
                 after = merged.model_copy(
                     update={
                         "updated_by_user_id": user_id,
+                        "updated_by_org_id": org_id,
                         "updated_by_email": email,
                         "updated_at": updated["updated_at"],
                     }
@@ -498,7 +538,7 @@ def _registered(record: ModelRecord) -> RegisteredModel:
         on_prem=record.on_prem,
         region=record.region,
         collected=record.collected,
-        published=record.published,
+        visibility=record.visibility,
         arena_enabled=record.arena_enabled,
         color=record.color,
         display_name=record.display_name,
@@ -515,6 +555,14 @@ async def fetch_models(pool: RegistryPool) -> list[RegisteredModel]:
     ``/v1/providers`` serves per modality.
     """
     return [_registered(record) for record in await RegistryStore(pool).list_models()]
+
+
+async def fetch_models_and_metric_levels(
+    pool: RegistryPool,
+) -> tuple[list[tuple[int, RegisteredModel]], dict[str, str] | None]:
+    """Every registered model with its row id, plus each metric's visibility level."""
+    records, levels = await RegistryStore(pool).list_models_and_metric_levels()
+    return [(record.id, _registered(record)) for record in records], levels
 
 
 async def fetch_models_with_ids(pool: RegistryPool) -> list[tuple[int, RegisteredModel]]:

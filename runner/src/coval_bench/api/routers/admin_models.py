@@ -34,6 +34,7 @@ from coval_bench.api.schemas import (
     AdminModelPatch,
     AdminModelsResponse,
     AdminModelUpdateResponse,
+    ModelPatch,
 )
 from coval_bench.config import Settings
 from coval_bench.db.pricing_store import PricingStore
@@ -45,7 +46,7 @@ from coval_bench.db.registry_store import (
     RegistryStore,
     StaleEdit,
 )
-from coval_bench.registries import Benchmark, Gender
+from coval_bench.registries import Benchmark, Gender, Visibility
 from coval_bench.registries.metrics import METRIC_EXCLUSIONS
 from coval_bench.registries.provider_keys import provider_names
 from coval_bench.s2s.sync_trigger import start_s2s_sync
@@ -67,9 +68,15 @@ def _model_out(record: ModelRecord, history: list[ModelChange]) -> AdminModelOut
     return AdminModelOut.model_validate(
         {
             **record.model_dump(),
+            "published": record.visibility == "public",
             "history": [AdminChangeOut.model_validate(change.model_dump()) for change in history],
         }
     )
+
+
+def _level(published: bool) -> Visibility:
+    """The level the older ``published`` flag asks for."""
+    return "public" if published else "partner"
 
 
 def _implemented_providers(modality: Benchmark) -> frozenset[str] | None:
@@ -171,18 +178,34 @@ async def create_admin_model(
     """Create a model. It starts collecting immediately; nothing is public yet."""
     never_shared(response)
     store = RegistryStore(pool)
-    new = NewModel.model_validate(body.model_dump())
+    new = NewModel.model_validate(
+        {**body.model_dump(), "visibility": body.visibility or _level(body.published)}
+    )
+    record = await create_model(
+        new, store, settings, user_id=admin.user_id, org_id=None, email=admin.email
+    )
+    response.headers["ETag"] = etag(record)
+    return _model_out(record, await store.history(record.id))
+
+
+async def create_model(
+    new: NewModel,
+    store: RegistryStore,
+    settings: Settings,
+    *,
+    org_id: str | None,
+    user_id: str | None = None,
+    email: str | None = None,
+) -> ModelRecord:
+    """Validate and insert a model, and start the S2S sync when it joins the daily runs."""
     await _validate_model(new, store)
     try:
-        record = await store.insert_model(
-            new, user_id=admin.user_id, org_id=None, email=admin.email
-        )
+        record = await store.insert_model(new, user_id=user_id, org_id=org_id, email=email)
     except DuplicateKey as exc:
         raise HTTPException(409, str(exc)) from exc
-    response.headers["ETag"] = _etag(record)
     if _changes_daily_s2s(None, record):
         await _start_sync(settings)
-    return _model_out(record, await store.history(record.id))
+    return record
 
 
 def _changes_daily_s2s(before: ModelRecord | None, after: ModelRecord) -> bool:
@@ -207,7 +230,7 @@ async def _start_sync(settings: Settings) -> bool:
         return False
 
 
-def _etag(record: ModelRecord) -> str:
+def etag(record: ModelRecord) -> str:
     """Quoted updated_at, via pydantic so it is byte-identical to the JSON body."""
     stamp = record.model_dump(mode="json")["updated_at"]
     return f'"{stamp}"'
@@ -225,6 +248,33 @@ async def update_admin_model(
 ) -> AdminModelUpdateResponse:
     """Partially update a model; the history's ``old`` is what the editor saw."""
     never_shared(response)
+    after, warnings = await update_model(
+        model_id,
+        body,
+        if_match,
+        pool,
+        settings,
+        user_id=admin.user_id,
+        org_id=None,
+        email=admin.email,
+    )
+    response.headers["ETag"] = etag(after)
+    history = await RegistryStore(pool).history(model_id)
+    return AdminModelUpdateResponse(model=_model_out(after, history), warnings=warnings)
+
+
+async def update_model(
+    model_id: int,
+    body: ModelPatch,
+    if_match: str | None,
+    pool: AsyncConnectionPool[Any],
+    settings: Settings,
+    *,
+    org_id: str | None,
+    user_id: str | None = None,
+    email: str | None = None,
+) -> tuple[ModelRecord, list[str]]:
+    """Validate and apply a partial update: the updated model and what a rename left behind."""
     if if_match is None:
         raise HTTPException(428, "If-Match is required: send the model's last-seen ETag")
     if if_match.strip() == "*":
@@ -248,6 +298,9 @@ async def update_admin_model(
         raise HTTPException(404, "no such model")
     if changes.get("version", current.version + 1) != current.version + 1:
         raise HTTPException(422, f"version only moves up by one, to {current.version + 1}")
+    published = changes.pop("published", None)
+    if published is not None and published != (current.visibility == "public"):
+        changes.setdefault("visibility", _level(published))
     candidate = ModelRecord.model_validate({**current.model_dump(), **changes})
     await _validate_model(candidate, store)
     try:
@@ -255,9 +308,9 @@ async def update_admin_model(
             model_id,
             changes,
             expected_updated_at=expected,
-            user_id=admin.user_id,
-            org_id=None,
-            email=admin.email,
+            user_id=user_id,
+            org_id=org_id,
+            email=email,
         )
     except StaleEdit as exc:
         raise HTTPException(
@@ -269,13 +322,11 @@ async def update_admin_model(
     if result is None:  # pragma: no cover — the row was read above
         raise HTTPException(404, "no such model")
     before, after = result
-    response.headers["ETag"] = _etag(after)
-    history = await store.history(model_id)
     warnings = _rename_warnings(before, after)
     warnings.extend(await _pricing_rename_warnings(before, after, pool))
     if _changes_daily_s2s(before, after) and not await _start_sync(settings):
         warnings.append(_SYNC_NOT_STARTED)
-    return AdminModelUpdateResponse(model=_model_out(after, history), warnings=warnings)
+    return after, warnings
 
 
 async def _pricing_rename_warnings(

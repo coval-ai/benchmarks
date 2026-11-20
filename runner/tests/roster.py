@@ -26,13 +26,13 @@ def _arena_tts(provider: str, model: str) -> RegisteredModel:
             Voice(id=f"{model}-m", gender=Gender.MALE, name="M", accent="en-US"),
         ),
         collected=True,
-        published=True,
+        visibility="public",
     )
 
 
 TEST_ROSTER: list[RegisteredModel] = [
     RegisteredModel(
-        benchmark=Benchmark.STT, provider="seed", model="stt", collected=True, published=True
+        benchmark=Benchmark.STT, provider="seed", model="stt", collected=True, visibility="public"
     ),
     _arena_tts("seed", "tts-a"),
     _arena_tts("seed-b", "tts-b"),

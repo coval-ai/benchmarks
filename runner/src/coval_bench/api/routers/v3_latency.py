@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""GET /v3/latency: each model's latency over a time range, from the latency probe."""
+"""GET /v3/{modality}/latency: each model's latency over a time range, from the latency probe."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
+from coval_bench.api import v3
 from coval_bench.api.common import WINDOW_DURATIONS, WindowLiteral
-from coval_bench.api.deps import get_pool, get_settings
-from coval_bench.api.internal import hidden_early_access
+from coval_bench.api.deps import get_models_by_id, get_pool, get_settings
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
     ErrorResponse,
@@ -23,14 +23,16 @@ from coval_bench.api.schemas import (
     LatencyPointOut,
     LatencyPointsResponse,
     LatencyResponse,
+    ProbeOut,
+    ProbesResponse,
 )
+from coval_bench.api.v3_access import Sees, coval_only, visible
 from coval_bench.config import Settings
-from coval_bench.db.probe_store import fetch_latency, fetch_latency_points
-from coval_bench.registries import is_metric_excluded
+from coval_bench.db.probe_store import fetch_latency, fetch_latency_points, fetch_probes
+from coval_bench.registries import Benchmark, RegisteredModel, is_metric_excluded
 
 router = APIRouter(tags=["latency"])
 
-ModalityLiteral = Literal["STT", "TTS"]
 MetricLiteral = Literal["TTFT", "TTFS", "TTFA"]
 
 _METRICS: dict[str, tuple[MetricLiteral, ...]] = {"STT": ("TTFT", "TTFS"), "TTS": ("TTFA",)}
@@ -40,11 +42,11 @@ _METRICS: dict[str, tuple[MetricLiteral, ...]] = {"STT": ("TTFT", "TTFS"), "TTS"
 @limiter.limit("60/minute")
 async def get_latency(
     request: Request,  # required by slowapi
-    modality: ModalityLiteral | None = Query(default=None),
+    modality: Benchmark = Depends(v3.path_modality),
     metric: MetricLiteral | None = Query(default=None),
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
-    hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    sees: Sees = Depends(visible),
 ) -> LatencyResponse:
     """One row per model and metric: percentiles over the probes that succeeded in the window.
 
@@ -64,8 +66,8 @@ async def get_latency(
 
     def wanted(row: dict[str, Any], code: str) -> bool:
         return (
-            (row["provider"], row["model"]) not in hidden
-            and modality in (None, row["modality"])
+            sees(row["model_id"], code)
+            and row["modality"] == modality
             and metric in (None, code)
             and not is_metric_excluded(row["provider"], row["model"], code)
         )
@@ -118,27 +120,33 @@ async def get_latency(
 @limiter.limit("60/minute")
 async def get_latency_points(
     request: Request,  # required by slowapi
+    modality: Benchmark = Depends(v3.path_modality),
     metric: MetricLiteral = Query(...),
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     settings: Settings = Depends(get_settings),
-    hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    sees: Sees = Depends(visible),
 ) -> LatencyPointsResponse:
-    """Every model's *metric* over the window, as points for a chart.
+    """Every model of the modality's *metric* over the window, as points for a chart.
 
     The last 24 hours has one point per probe tick. Seven days is averaged by the hour and
     thirty by the day, and ``bucket_seconds`` says which. A point with a null value is a
-    tick or bucket where every probe failed on the provider's side.
+    tick or bucket where every probe failed on the provider's side. A metric the modality
+    doesn't have has no points.
     """
     bucket = {
         "24h": timedelta(seconds=settings.schedule_period_seconds),
         "7d": timedelta(hours=1),
         "30d": timedelta(days=1),
     }[window]
+    if metric not in _METRICS.get(modality, ()):
+        return LatencyPointsResponse(
+            metric=metric, bucket_seconds=int(bucket.total_seconds()), points=[]
+        )
     try:
         rows = await fetch_latency_points(
             pool,
-            modality="TTS" if metric == "TTFA" else "STT",
+            modality=modality,
             metric=metric,
             since=datetime.now(UTC) - WINDOW_DURATIONS[window],
             bucket=bucket,
@@ -155,9 +163,41 @@ async def get_latency_points(
             value=None if row["value"] is None else round(row["value"], 1),
         )
         for row in rows
-        if (row["provider"], row["model"]) not in hidden
+        if sees(row["model_id"], metric)
         and not is_metric_excluded(row["provider"], row["model"], metric)
     ]
     return LatencyPointsResponse(
         metric=metric, bucket_seconds=int(bucket.total_seconds()), points=points
     )
+
+
+@router.get(
+    "/latency/probes",
+    response_model=ProbesResponse,
+    responses={400: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
+    dependencies=[Depends(coval_only)],
+)
+@limiter.limit("60/minute")
+async def get_probes(
+    request: Request,  # required by slowapi
+    modality: Benchmark = Depends(v3.path_modality),
+    model_id: int = Query(...),
+    window: WindowLiteral = Query(default="24h"),
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    models: dict[int, RegisteredModel] = Depends(get_models_by_id),
+) -> ProbesResponse:
+    """Every probe of one model over the window, oldest first. Coval staff only.
+
+    Unlike ``/latency``, a probe that failed on our side is listed too, with a
+    ``failure_origin`` of ``runner``.
+    """
+    model = models.get(model_id)
+    if model is None or model.benchmark != modality:
+        raise HTTPException(404, "no such model in this modality")
+    try:
+        rows = await fetch_probes(
+            pool, model_id=model_id, since=datetime.now(UTC) - WINDOW_DURATIONS[window]
+        )
+    except psycopg.Error as exc:
+        raise HTTPException(503, "latency results are unavailable") from exc
+    return ProbesResponse(probes=[ProbeOut(**row) for row in rows])

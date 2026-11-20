@@ -975,6 +975,9 @@ async def test_timeline_historical_bounds_groups_cache_and_visibility(
         _make_db_url(postgresql), autocommit=True
     ) as conn:
         await register_metric_definitions(conn)
+        await conn.execute(
+            "UPDATE benchmarks_v2.metrics SET visibility = 'public' WHERE code = 'FutureMetric'"
+        )
     runs = {at: await _insert_run(postgresql, scheduled_at=at) for at in {row[3] for row in rows}}
     for model, metric, dataset, at, value in rows:
         await _insert_value(

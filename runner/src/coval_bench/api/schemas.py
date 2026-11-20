@@ -19,6 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from coval_bench.api.common import BenchmarkLiteral, StatisticLiteral, WindowLiteral
 from coval_bench.arena.domains import ArenaDomain
+from coval_bench.db.benchmark_store import RegisteredBenchmark
+from coval_bench.db.company_store import Company
 from coval_bench.registries import (
     Architecture,
     Benchmark,
@@ -27,6 +29,7 @@ from coval_bench.registries import (
     Orchestration,
     Source,
     TagCategory,
+    Visibility,
     Voice,
 )
 from coval_bench.scenarios import binding_for_dataset
@@ -511,7 +514,7 @@ class AdminChangeOut(BaseModel):
     id: int
     old: dict[str, Any] | None = None
     new: dict[str, Any]
-    changed_by_user_id: str
+    changed_by_user_id: str | None = None
     changed_by_org_id: str | None = None
     changed_by_email: str | None = None
     changed_at: datetime
@@ -533,6 +536,7 @@ class AdminModelOut(BaseModel):
     region: Literal["us", "eu", "asia"] | None = None
     arena_enabled: bool
     collected: bool
+    visibility: Visibility
     published: bool
     tags: list[str] = []
     color: str | None = None
@@ -540,7 +544,7 @@ class AdminModelOut(BaseModel):
     architecture: Architecture | None = None
     orchestration: Orchestration | None = None
     version: int
-    updated_by_user_id: str
+    updated_by_user_id: str | None = None
     updated_by_email: str | None = None
     updated_at: datetime
     history: list[AdminChangeOut] = []
@@ -552,8 +556,8 @@ class AdminModelsResponse(BaseModel):
     models: list[AdminModelOut]
 
 
-class AdminModelCreate(BaseModel):
-    """POST body for /v1/admin/models. The defaults land the model Hidden."""
+class ModelCreate(BaseModel):
+    """POST body for /v3/models. The defaults land the model unpublished."""
 
     modality: Benchmark
     provider: str = Field(min_length=1)
@@ -567,7 +571,7 @@ class AdminModelCreate(BaseModel):
     region: Literal["us", "eu", "asia"] | None = None
     arena_enabled: bool = True
     collected: bool = True
-    published: bool = False
+    visibility: Visibility = "partner"
     tags: list[str] = []
     color: HexColor = None
     display_name: str | None = Field(default=None, min_length=1)
@@ -575,8 +579,19 @@ class AdminModelCreate(BaseModel):
     orchestration: Orchestration | None = None
 
 
-class AdminModelPatch(BaseModel):
-    """PATCH body for /v1/admin/models/{id}; absent fields stay unchanged.
+class AdminModelCreate(ModelCreate):
+    """POST body for /v1/admin/models. The defaults land the model Hidden.
+
+    ``visibility`` is the level. ``published`` is the older way to say public or
+    partner, and is only read when ``visibility`` is left out.
+    """
+
+    visibility: Visibility | None = None  # type: ignore[assignment]
+    published: bool = False
+
+
+class ModelPatch(BaseModel):
+    """PATCH body for /v3/models/{id}; absent fields stay unchanged.
 
     ``color`` null returns the model to the site's built-in palette; ``display_name``
     null returns it to the site's built-in label. ``version`` only moves up by one.
@@ -593,13 +608,59 @@ class AdminModelPatch(BaseModel):
     region: Literal["us", "eu", "asia"] | None = None
     arena_enabled: bool | None = None
     collected: bool | None = None
-    published: bool | None = None
+    visibility: Visibility | None = None
     tags: list[str] | None = None
     color: HexColor = None
     display_name: str | None = Field(default=None, min_length=1)
     architecture: Architecture | None = None
     orchestration: Orchestration | None = None
     version: int | None = None
+
+
+class AdminModelPatch(ModelPatch):
+    """PATCH body for /v1/admin/models/{id}, which also takes the older ``published``."""
+
+    published: bool | None = None
+
+
+class ModelOut(BaseModel):
+    """A model on ``/v3``. The fields after ``visibility`` are null unless coval staff ask."""
+
+    id: int
+    modality: Benchmark
+    provider: str
+    model: str
+    display_name: str | None = None
+    creator: str | None = None
+    tags: list[str] = []
+    color: str | None = None
+    source: Source
+    licensing: Licensing
+    on_prem: bool
+    region: Literal["us", "eu", "asia"] | None = None
+    architecture: Architecture | None = None
+    orchestration: Orchestration | None = None
+    version: int
+    visibility: Visibility
+    collected: bool | None = None
+    arena_enabled: bool | None = None
+    voice: str | None = None
+    voices: list[Voice] | None = None
+    updated_by_org: str | None = None
+    updated_at: datetime | None = None
+
+
+class ModelsResponse(BaseModel):
+    """Response schema for GET /v3/models."""
+
+    models: list[ModelOut]
+
+
+class ModelUpdateResponse(BaseModel):
+    """PATCH /v3/models/{id} response: the updated model plus warnings a rename leaves behind."""
+
+    model: ModelOut
+    warnings: list[str] = []
 
 
 class AdminModelUpdateResponse(BaseModel):
@@ -702,7 +763,7 @@ class LatencyOut(BaseModel):
 
 
 class LatencyResponse(BaseModel):
-    """Response schema for GET /v3/latency."""
+    """Response schema for GET /v3/{modality}/latency."""
 
     latency: list[LatencyOut]
 
@@ -718,7 +779,7 @@ class LatencyPointOut(BaseModel):
 
 
 class LatencyPointsResponse(BaseModel):
-    """Response schema for GET /v3/latency/points."""
+    """Response schema for GET /v3/{modality}/latency/points."""
 
     metric: Literal["TTFT", "TTFS", "TTFA"]
     unit: Literal["milliseconds"] = "milliseconds"
@@ -726,15 +787,42 @@ class LatencyPointsResponse(BaseModel):
     points: list[LatencyPointOut]
 
 
+class ProbeOut(BaseModel):
+    """One probe of a model. Timings are milliseconds and null when not measured.
+
+    A failed probe has its ``error``, the ``status_code`` if the provider sent one, and
+    a ``failure_origin`` of ``provider`` or ``runner``.
+    """
+
+    scheduled_at: datetime
+    sent_at: datetime
+    voice: str | None
+    status: Literal["succeeded", "failed"]
+    ttft_ms: float | None
+    ttfs_ms: float | None
+    ttfa_ms: float | None
+    error: str | None
+    failure_origin: Literal["provider", "runner"] | None
+    status_code: int | None
+
+
+class ProbesResponse(BaseModel):
+    """Response schema for GET /v3/{modality}/latency/probes."""
+
+    probes: list[ProbeOut]
+
+
 class QualityOut(BaseModel):
-    """One model's score on one dataset, pooled over every item of its latest completed sweep."""
+    """One model's score on a benchmark, pooled over every scored item. ``condition`` is set
+    only on a per-condition row."""
 
     model_id: int
     provider: str
     model: str
     model_version: int
-    dataset: str
-    dataset_version: str
+    benchmark: str
+    benchmark_version: str
+    condition: str | None
     metric: str
     metric_version: str
     value: float | None
@@ -747,9 +835,88 @@ class QualityOut(BaseModel):
 
 
 class QualityResponse(BaseModel):
-    """Response schema for GET /v3/quality."""
+    """Response schema for GET /v3/{modality}/quality."""
 
     quality: list[QualityOut]
+
+
+class SweepOut(BaseModel):
+    """One sweep: a model version run over one version of a dataset.
+
+    ``benchmark`` and ``condition`` are null for a dataset no benchmark owns.
+    """
+
+    id: int
+    model_id: int
+    modality: str
+    provider: str
+    model: str
+    model_version: int
+    benchmark: str | None
+    condition: str | None
+    dataset_id: str
+    dataset_version: str
+    created_at: datetime
+    completed_at: datetime | None
+    result_count: int
+    queued_count: int
+    gave_up_count: int
+
+
+class SweepsResponse(BaseModel):
+    """Response schema for GET /v3/{modality}/sweeps."""
+
+    sweeps: list[SweepOut]
+
+
+class SweepScoreOut(BaseModel):
+    """One item's score on a metric, as error and reference counts."""
+
+    metric: str
+    metric_version: str
+    errors: int
+    reference_units: int
+
+
+class SweepItemOut(BaseModel):
+    """One item of a sweep: a sample, and for TTS the voice it was spoken in.
+
+    A ``done`` item has what the model produced. A ``queued`` or ``gave_up`` item has
+    ``tries_left`` and, if it has failed, ``last_error``.
+    """
+
+    sample_id: str
+    voice: str | None
+    status: Literal["done", "queued", "gave_up"]
+    transcript: str | None
+    timings: dict[str, Any] | None
+    audio_uri: str | None
+    ran_at: datetime | None
+    tries_left: int | None
+    last_error: str | None
+    scores: list[SweepScoreOut]
+
+
+class SweepItemsResponse(BaseModel):
+    """Response schema for GET /v3/{modality}/sweeps/{sweep_id}/items."""
+
+    items: list[SweepItemOut]
+
+
+class CompanyOut(BaseModel):
+    """A company on ``/v3``. The fields after ``name`` are null unless coval staff ask."""
+
+    slug: str
+    name: str
+    org_id: str | None = None
+    updated_by_org: str | None = None
+    updated_at: datetime | None = None
+
+
+class CompaniesResponse(BaseModel):
+    """Response schema for GET /v3/companies."""
+
+    companies: list[CompanyOut]
 
 
 class ErrorOut(BaseModel):
@@ -764,3 +931,52 @@ class ErrorResponse(BaseModel):
     """The body of every ``/v3`` error."""
 
     error: ErrorOut
+
+
+_SLUG = r"^[a-z0-9]+(-[a-z0-9]+)*$"
+
+
+class AdminBenchmarkCreate(BaseModel):
+    """POST body for /v1/admin/benchmarks."""
+
+    slug: str = Field(pattern=_SLUG)
+    modality: Benchmark
+    name: str = Field(min_length=1)
+    visibility: Visibility = "coval"
+
+
+class AdminBenchmarkPatch(BaseModel):
+    """PATCH body for /v1/admin/benchmarks/{slug}."""
+
+    visibility: Visibility
+
+
+class AdminBenchmarkDatasetPut(BaseModel):
+    """PUT body for a benchmark's dataset; a null condition is its one unconditioned dataset."""
+
+    condition: str | None = Field(default=None, pattern=_SLUG)
+
+
+class AdminBenchmarksResponse(BaseModel):
+    """Response schema for GET /v1/admin/benchmarks."""
+
+    benchmarks: list[RegisteredBenchmark]
+
+
+class AdminCompanyCreate(BaseModel):
+    """POST body for /v1/admin/companies."""
+
+    slug: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+
+
+class AdminCompanyOrgPut(BaseModel):
+    """PUT body for /v1/admin/companies/{slug}/org."""
+
+    org_id: str = Field(pattern=r"^org_[A-Za-z0-9]+$")
+
+
+class AdminCompaniesResponse(BaseModel):
+    """Response schema for GET /v1/admin/companies."""
+
+    companies: list[Company]

@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 import structlog
 
+import coval_bench.scenarios as scenarios
 from coval_bench.config import Settings
+from tests.tool_fixtures import SYNTHETIC_SUITE, TOOL_DEFINITIONS_JSON
 
 _structlog_configure = structlog.configure
 
@@ -37,3 +40,20 @@ def pytest_configure(config: pytest.Config) -> None:
             ),
         ]
     )
+
+
+@pytest.fixture
+def synthetic_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Supply an independent suite through the package's contract-file reader."""
+    contract = tmp_path / SYNTHETIC_SUITE
+    contract.mkdir()
+    (contract / "tool-definitions.json").write_text(TOOL_DEFINITIONS_JSON)
+    read_bytes = scenarios._read_bytes
+
+    def read(*parts: str) -> bytes:
+        if parts[0] == SYNTHETIC_SUITE:
+            return contract.joinpath(*parts[1:]).read_bytes()
+        return read_bytes(*parts)
+
+    monkeypatch.setattr(scenarios, "_read_bytes", read)
+    return contract

@@ -143,7 +143,7 @@ def _every_s2s_row() -> list[RegisteredModel]:
             provider=spec.provider,
             model=spec.model,
             collected=True,
-            published=False,
+            visibility="partner",
         )
         for spec in s2s_specs(Settings.model_construct(**agent_fields))
     ]
@@ -159,7 +159,7 @@ PHONELY = RegisteredModel(
     provider="phonely",
     model="phonely-agent",
     collected=True,
-    published=False,
+    visibility="partner",
 )
 LLM_SPEC = AgentSpec(
     agent_id="a1",
@@ -1159,7 +1159,7 @@ def _platform_row(
         provider=provider,
         model="pinned",
         collected=True,
-        published=False,
+        visibility="partner",
         architecture=Architecture.CASCADED,
         orchestration=orchestration,
     )
@@ -1317,7 +1317,7 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
         provider="paused",
         model="paused-agent",
         collected=False,
-        published=False,
+        visibility="partner",
     )
     monkeypatch.setattr(fetch_v2v, "s2s_specs", lambda _s: (SPEC,))
     monkeypatch.setattr(fetch_v2v, "fetch_models", AsyncMock(return_value=[PHONELY, paused]))

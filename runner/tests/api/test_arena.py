@@ -417,7 +417,7 @@ async def test_leaderboard_hides_retired_models(client: AsyncClient, postgresql:
             model="sonic-old",
             voice="v",
             collected=False,
-            published=True,
+            visibility="public",
         ),
     )
     computed = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)

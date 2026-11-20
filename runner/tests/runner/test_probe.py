@@ -73,14 +73,14 @@ async def test_run_probe_no_persist(monkeypatch: pytest.MonkeyPatch) -> None:
             provider="baseten",
             model="whisper-large-v3",
             collected=False,
-            published=False,
+            visibility="partner",
         ),
         RegisteredModel(
             benchmark=Benchmark.TTS,
             provider="baseten",
             model="qwen3-tts-1.7b",
             collected=False,
-            published=False,
+            visibility="partner",
         ),
     ]
     # settings is forwarded to the patched runners (which ignore it); cast a stub.
@@ -132,7 +132,7 @@ async def test_run_probe_closes_http_pools_even_on_failure(
             provider="baseten",
             model="whisper-large-v3",
             collected=False,
-            published=False,
+            visibility="partner",
         ),
     ]
     with pytest.raises(RuntimeError, match="dataset unavailable"):

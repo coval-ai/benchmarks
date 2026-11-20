@@ -43,7 +43,7 @@ def _model(
         provider=provider,
         model=model,
         collected=collected,
-        published=published,
+        visibility="public" if published else "partner",
         **fields,
     )
 

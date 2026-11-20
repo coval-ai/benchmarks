@@ -122,6 +122,34 @@ def test_insert_model_roundtrips_and_writes_history(
     _with_store(registry_pg, scenario)
 
 
+def test_a_change_by_an_org_with_no_user_is_recorded(
+    registry_pg: psycopg.Connection[Any],
+) -> None:
+    async def scenario(store: RegistryStore) -> None:
+        created = await store.insert_model(
+            _new_model(), user_id=None, org_id="org_acme", email=None
+        )
+        assert (created.updated_by_user_id, created.updated_by_org_id) == (None, "org_acme")
+        assert await store.get_model(created.id) == created
+
+        result = await store.update_model(
+            created.id,
+            {"region": "eu"},
+            expected_updated_at=created.updated_at,
+            user_id=None,
+            org_id="org_acme",
+            email=None,
+        )
+        assert result is not None
+        assert result[1].updated_by_org_id == "org_acme"
+
+        changes = (await store.recent_history())[created.id]
+        assert [change.changed_by_org_id for change in changes] == ["org_acme", "org_acme"]
+        assert "updated_by_org_id" not in changes[0].new
+
+    _with_store(registry_pg, scenario)
+
+
 def test_insert_rejects_a_duplicate_natural_key(registry_pg: psycopg.Connection[Any]) -> None:
     async def scenario(store: RegistryStore) -> None:
         await store.insert_model(_new_model(), **_EDITOR)
@@ -150,7 +178,7 @@ def test_update_applies_changes_and_appends_history(
         created = await store.insert_model(_new_model(), **_EDITOR)
         result = await store.update_model(
             created.id,
-            {"published": True, "region": "us"},
+            {"visibility": "public", "region": "us"},
             expected_updated_at=created.updated_at,
             user_id="user_second",
             org_id="org_partner",
@@ -159,7 +187,7 @@ def test_update_applies_changes_and_appends_history(
         assert result is not None
         before, after = result
         assert before == created
-        assert (after.published, after.region) == (True, "us")
+        assert (after.visibility, after.region) == ("public", "us")
         assert after.updated_at != before.updated_at
         assert after.updated_by_user_id == "user_second"
         assert after.updated_by_email is None
@@ -168,8 +196,8 @@ def test_update_applies_changes_and_appends_history(
         changes = (await store.recent_history())[created.id]
         assert [change.old is None for change in changes] == [False, True]
         assert changes[0].old is not None
-        assert changes[0].old["published"] is False
-        assert changes[0].new["published"] is True
+        assert changes[0].old["visibility"] == "partner"
+        assert changes[0].new["visibility"] == "public"
         assert changes[0].changed_by_org_id == "org_partner"
 
     _with_store(registry_pg, scenario)
@@ -180,7 +208,7 @@ def test_update_from_a_stale_row_raises(registry_pg: psycopg.Connection[Any]) ->
         created = await store.insert_model(_new_model(), **_EDITOR)
         result = await store.update_model(
             created.id,
-            {"published": True},
+            {"visibility": "public"},
             expected_updated_at=created.updated_at,
             **_EDITOR,
         )
@@ -204,7 +232,7 @@ def test_a_noop_update_writes_nothing(registry_pg: psycopg.Connection[Any]) -> N
         created = await store.insert_model(_new_model(), **_EDITOR)
         result = await store.update_model(
             created.id,
-            {"published": created.published, "provider": created.provider},
+            {"visibility": created.visibility, "provider": created.provider},
             expected_updated_at=created.updated_at,
             user_id="user_second",
             org_id=None,
@@ -287,7 +315,7 @@ def test_update_of_a_missing_model_returns_none(registry_pg: psycopg.Connection[
         assert (
             await store.update_model(
                 created.id + 1,
-                {"published": True},
+                {"visibility": "public"},
                 expected_updated_at=created.updated_at,
                 **_EDITOR,
             )

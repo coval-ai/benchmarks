@@ -44,6 +44,8 @@ from coval_bench.api.internal import never_shared
 from coval_bench.api.ratelimit import _rate_limit_handler, limiter
 from coval_bench.api.request_logging import RequestLoggingMiddleware
 from coval_bench.api.routers import (
+    admin_benchmarks,
+    admin_companies,
     admin_health,
     admin_models,
     admin_pricing,
@@ -61,8 +63,11 @@ from coval_bench.api.routers import (
     runs,
     s2s_samples,
     tags,
+    v3_companies,
     v3_latency,
+    v3_models,
     v3_quality,
+    v3_sweeps,
 )
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
@@ -91,7 +96,9 @@ async def _never_shared_http_error(request: Request, exc: Exception) -> Response
     response: Response
     if request.url.path.startswith(v3.PREFIX):
         response = JSONResponse(
-            v3.http_error_body(http_exc), status_code=http_exc.status_code, headers=http_exc.headers
+            v3.http_error_body(http_exc),
+            status_code=v3.http_status(http_exc),
+            headers=http_exc.headers,
         )
     else:
         response = await http_exception_handler(request, http_exc)
@@ -244,11 +251,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(pricing.router, prefix="/v1")
     app.include_router(s2s_samples.router, prefix="/v1")
     app.include_router(arena.router, prefix="/v1")
+    app.include_router(admin_benchmarks.router, prefix="/v1")
+    app.include_router(admin_companies.router, prefix="/v1")
     app.include_router(admin_health.router, prefix="/v1")
     app.include_router(admin_models.router, prefix="/v1")
     app.include_router(admin_pricing.router, prefix="/v1")
-    app.include_router(v3_latency.router, prefix=v3.PREFIX)
-    app.include_router(v3_quality.router, prefix=v3.PREFIX)
+    app.include_router(v3_companies.router, prefix=v3.PREFIX)
+    app.include_router(v3_latency.router, prefix=v3.MODALITY_PREFIX, responses=v3.NO_MODALITY)
+    app.include_router(v3_models.router, prefix=v3.PREFIX)
+    app.include_router(v3_quality.router, prefix=v3.MODALITY_PREFIX, responses=v3.NO_MODALITY)
+    app.include_router(v3_sweeps.router, prefix=v3.MODALITY_PREFIX, responses=v3.NO_MODALITY)
     # Not under /v1 and not rate limited: an appliance the agents call, not
     # public read API. slowapi carries no default limit, so /mock and /llm are exempt
     # by construction — a 429 mid-conversation would be graded as the agent failing.

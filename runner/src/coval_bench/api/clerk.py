@@ -12,17 +12,23 @@ switching into a partner org previews exactly their view. The coval org
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import jwt
 import structlog
+from cachetools import TTLCache
+from clerk_backend_api import Clerk, models
+from pydantic import SecretStr
 
 from coval_bench.config import Settings
 
 logger = structlog.get_logger("coval_bench.api.clerk")
+
+CallerLevel = Literal["public", "partner", "coval"]
 
 
 @dataclass(frozen=True)
@@ -35,6 +41,37 @@ class CovalAdmin:
 
     user_id: str
     email: str | None
+
+
+class UnknownApiKey(Exception):  # noqa: N818
+    """Clerk doesn't know the key, or it is revoked or expired."""
+
+
+_API_KEY_OWNERS: TTLCache[str, str] = TTLCache(maxsize=1024, ttl=60)
+
+
+@functools.lru_cache(maxsize=2)
+def _backend(secret: str) -> Clerk:
+    return Clerk(bearer_auth=secret)
+
+
+async def api_key_owner(key: str, secret: SecretStr) -> str:
+    """The user or org id that owns a Clerk API key, remembered for a minute."""
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    owner = _API_KEY_OWNERS.get(digest)
+    if owner is not None:
+        return owner
+    try:
+        found = await _backend(secret.get_secret_value()).api_keys.verify_api_key_async(secret=key)
+    except (
+        models.VerifyAPIKeyAPIKeysResponseBody,
+        models.VerifyAPIKeyAPIKeysResponseResponseBody,
+    ) as exc:
+        raise UnknownApiKey from exc
+    if found.revoked or found.expired:
+        raise UnknownApiKey
+    _API_KEY_OWNERS[digest] = found.subject
+    return found.subject
 
 
 @functools.lru_cache(maxsize=4)
@@ -208,3 +245,29 @@ def allowed_pairs(
     if settings.clerk_coval_org and org_id == settings.clerk_coval_org:
         return embargoed
     return frozenset()
+
+
+def caller_level(authorization: str | None, settings: Settings) -> CallerLevel:
+    """Who is asking: a mapped or exclusive org is a partner, even for coval staff.
+
+    A mapped org whose entry names nothing is public, so a malformed entry narrows a view.
+    """
+    claims = bearer_claims(authorization, settings)
+    if claims is None:
+        return "public"
+    org_id = claims.get("org_id")
+    if not isinstance(org_id, str):
+        return "public"
+    if settings.clerk_org_exclusive is not None:
+        exclusive = _parse_exclusive(settings.clerk_org_exclusive)
+        if exclusive is None:
+            return "public"
+        if org_id in exclusive:
+            return "partner"
+    if settings.clerk_org_providers is not None:
+        entries = _parse_org_entries(settings.clerk_org_providers).get(org_id)
+        if entries is not None:
+            return "partner" if entries else "public"
+    if settings.clerk_coval_org and org_id == settings.clerk_coval_org:
+        return "coval"
+    return "public"

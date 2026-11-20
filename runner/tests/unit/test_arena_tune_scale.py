@@ -35,7 +35,7 @@ def _tts(name: str) -> RegisteredModel:
             Voice(id=f"{name}-m", gender=Gender.MALE),
         ),
         collected=True,
-        published=True,
+        visibility="public",
     )
 
 

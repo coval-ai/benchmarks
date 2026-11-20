@@ -102,7 +102,7 @@ def _stt_entry(
         model=model,
         source=source,
         collected=active,
-        published=True,
+        visibility="public",
     )
 
 
@@ -113,7 +113,7 @@ def _tts_entry(provider: str, model: str, voice: str, *, active: bool = True) ->
         model=model,
         voice=voice,
         collected=active,
-        published=True,
+        visibility="public",
     )
 
 
@@ -122,7 +122,7 @@ def _paused_registry(benchmark: Benchmark) -> list[RegisteredModel]:
 
     Paused entries must never be scheduled, whatever else the matrix holds.
     """
-    paused = {"collected": False, "published": True}
+    paused = {"collected": False, "visibility": "public"}
     if benchmark is Benchmark.STT:
         return [
             _stt_entry("paused-stt", "one").model_copy(update=paused),
@@ -2350,7 +2350,7 @@ async def test_tts_empty_ttfa_marked_failed(audio_file: Path, settings: Settings
     # Activate exactly one hume entry; pause the rest of the TTS registry.
     matrix = [
         *_paused_registry(Benchmark.TTS),
-        hume_entry.model_copy(update={"collected": True, "published": True}),
+        hume_entry.model_copy(update={"collected": True, "visibility": "public"}),
     ]
 
     run = _make_run()
@@ -2405,7 +2405,7 @@ async def test_tts_provider_error_wins_over_contamination(
 
     matrix = [
         *_paused_registry(Benchmark.TTS),
-        hume_entry.model_copy(update={"collected": True, "published": True}),
+        hume_entry.model_copy(update={"collected": True, "visibility": "public"}),
     ]
 
     run = _make_run()
@@ -2504,7 +2504,7 @@ async def test_tts_whisper_failure_emits_no_wer_row(settings: Settings) -> None:
 
         matrix = [
             *_paused_registry(Benchmark.TTS),
-            hume_entry.model_copy(update={"collected": True, "published": True}),
+            hume_entry.model_copy(update={"collected": True, "visibility": "public"}),
         ]
 
         run = _make_run()
@@ -2563,7 +2563,7 @@ async def test_tts_wer_compute_failure_marked_failed(settings: Settings) -> None
 
         matrix = [
             *_paused_registry(Benchmark.TTS),
-            hume_entry.model_copy(update={"collected": True, "published": True}),
+            hume_entry.model_copy(update={"collected": True, "visibility": "public"}),
         ]
 
         run = _make_run()
@@ -2669,7 +2669,7 @@ async def test_tts_transport_gate_nulls_without_failing(settings: Settings) -> N
 
         matrix = [
             *_paused_registry(Benchmark.TTS),
-            hume_entry.model_copy(update={"collected": True, "published": True}),
+            hume_entry.model_copy(update={"collected": True, "visibility": "public"}),
         ]
 
         run = _make_run()
@@ -3765,7 +3765,7 @@ async def test_stt_missing_endpoint_url_yields_error_rows(
         model="qwen3-asr-1.7b",
         source=Source.DEDICATED_INFERENCE,
         collected=True,
-        published=False,
+        visibility="partner",
     )
     item = SimpleNamespace(
         path=audio_file,
@@ -3908,7 +3908,7 @@ async def test_stt_provider_is_built_from_settings(audio_file: Path, settings: S
         model="daytona-stt",
         source=Source.OFFICIAL_API,
         collected=True,
-        published=False,
+        visibility="partner",
     )
     item = SimpleNamespace(
         path=audio_file,

@@ -43,7 +43,11 @@ _ORG_ID = "org_2abc123"
 
 def _model(benchmark: Benchmark, provider: str, model: str, *, published: bool) -> RegisteredModel:
     return RegisteredModel(
-        benchmark=benchmark, provider=provider, model=model, collected=True, published=published
+        benchmark=benchmark,
+        provider=provider,
+        model=model,
+        collected=True,
+        visibility="public" if published else "partner",
     )
 
 
@@ -132,6 +136,33 @@ def _resolve(
     return hidden, response.headers[EA_STATUS_HEADER]
 
 
+def test_a_coval_level_model_and_its_old_name_stay_hidden_from_a_granted_org(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    internal = RegisteredModel(
+        benchmark=Benchmark.S2S,
+        provider=XAI_1[0],
+        model=XAI_1[1],
+        collected=True,
+        visibility="coval",
+    )
+    models = [internal if (m.provider, m.model) == XAI_1 else m for m in _MODELS]
+    monkeypatch.setattr("tests.api.test_clerk_scope._MODELS", models)
+    partner = f"Bearer {_mint({'org_id': _ORG_ID})}"
+
+    granted, _ = _resolve(
+        _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: "xai"})), partner
+    )
+    exclusive, _ = _resolve(
+        _settings(monkeypatch, org_exclusive=json.dumps({_ORG_ID: ["xai"]})), partner
+    )
+    staff, _ = _resolve(_settings(monkeypatch), f"Bearer {_mint({'org_id': _COVAL_ORG})}")
+
+    assert granted == {COLORS, OPENAI_RETIRED, XAI_1, XAI_RETIRED}
+    assert exclusive == EVERYTHING - {XAI_2}
+    assert staff == frozenset()
+
+
 def test_org_sees_its_own_providers_models_and_no_others(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -167,6 +198,29 @@ def test_mapped_org_naming_nothing_unlocks_nothing(monkeypatch: pytest.MonkeyPat
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
     assert hidden == EMBARGOED
+
+
+def test_caller_level_is_partner_only_for_an_org_that_names_something(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = f"Bearer {_mint({'org_id': _ORG_ID})}"
+    named = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: ["lab"]}))
+    assert clerk.caller_level(token, named) == "partner"
+    empty = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: []}))
+    assert clerk.caller_level(token, empty) == "public"
+    assert clerk.caller_level(None, named) == "public"
+
+
+def test_caller_level_keeps_an_empty_mapping_public_even_for_the_coval_org(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = f"Bearer {_mint({'org_id': _ORG_ID})}"
+    staff = _settings(monkeypatch, coval_org=_ORG_ID)
+    assert clerk.caller_level(token, staff) == "coval"
+    mapped_empty = _settings(
+        monkeypatch, coval_org=_ORG_ID, org_providers=json.dumps({_ORG_ID: []})
+    )
+    assert clerk.caller_level(token, mapped_empty) == "public"
 
 
 def test_malformed_org_entry_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:

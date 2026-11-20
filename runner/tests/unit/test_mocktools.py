@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -21,7 +22,8 @@ from coval_bench.mocktools.dispatch import (
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture, parse_fixtures
 from coval_bench.mocktools.keyterms import extract_keyterms
 from coval_bench.mocktools.resolver import FUZZY_THRESHOLD, resolve
-from coval_bench.scenarios import has_private_contract
+from coval_bench.scenarios import FIXTURE_FILE
+from tests.tool_fixtures import SYNTHETIC_SUITE
 
 PHONE = "2065550180"
 PHONE_WITH_SEPARATORS = "206-555-0180"
@@ -400,14 +402,7 @@ def test_a_tool_without_a_fallback_is_refused() -> None:
         parse_fixtures(json.dumps({"tools": {"lookup_patient": {"seeds": []}}}))
 
 
-# --- the committed contract, exercised in CI --------------------------------
-#
-# The seeded world is the answer key and is never committed, so the tests above
-# build their own fixtures. That leaves the real load path — the committed
-# `tool-definitions.json` driving dispatch — unexercised exactly where tests run.
-# These cover it without needing the private file.
-
-SUITE = "dental"
+# --- loading the synthetic contract from package files -----------------------
 
 
 def _plausible(spec: ToolSpec, name: str) -> Any:
@@ -428,9 +423,9 @@ def _fixtures_covering(specs: dict[str, ToolSpec]) -> MockFixtures:
     )
 
 
-def test_the_committed_contract_parses_into_specs() -> None:
-    specs = load_tool_specs(SUITE)
-    assert specs, "the committed tool-definitions.json declares no tools"
+def test_the_synthetic_contract_parses_into_specs(synthetic_contract: Path) -> None:
+    specs = load_tool_specs(SYNTHETIC_SUITE)
+    assert specs, "the synthetic tool-definitions.json declares no tools"
     for spec in specs.values():
         assert spec.required <= spec.properties, (
             f"{spec.name} requires arguments it does not declare: "
@@ -438,9 +433,9 @@ def test_the_committed_contract_parses_into_specs() -> None:
         )
 
 
-def test_every_committed_tool_is_callable_through_dispatch() -> None:
+def test_every_synthetic_tool_is_callable_through_dispatch(synthetic_contract: Path) -> None:
     """Drives the real contract through resolution, including types and enums."""
-    specs = load_tool_specs(SUITE)
+    specs = load_tool_specs(SYNTHETIC_SUITE)
     dispatcher = Dispatcher(specs, _fixtures_covering(specs))
     assert dispatcher.tools == frozenset(specs)
     for name, spec in specs.items():
@@ -452,8 +447,10 @@ def test_every_committed_tool_is_callable_through_dispatch() -> None:
         assert outcome.resolution is not None
 
 
-def test_a_committed_tool_called_without_its_arguments_is_rejected() -> None:
-    specs = load_tool_specs(SUITE)
+def test_a_synthetic_tool_called_without_its_arguments_is_rejected(
+    synthetic_contract: Path,
+) -> None:
+    specs = load_tool_specs(SYNTHETIC_SUITE)
     dispatcher = Dispatcher(specs, _fixtures_covering(specs))
     required = {n: s for n, s in specs.items() if s.required}
     assert required, "expected at least one tool with required arguments"
@@ -461,15 +458,18 @@ def test_a_committed_tool_called_without_its_arguments_is_rejected() -> None:
     assert dispatcher.call(name, {}).http_status == 422
 
 
-def test_build_dispatcher_says_so_when_the_fixtures_are_not_installed() -> None:
-    """The production load path, on the branch CI actually takes."""
-    if has_private_contract(SUITE):
-        pytest.skip("private fixtures are installed; the absent branch cannot be taken")
+def test_build_dispatcher_says_so_when_the_fixtures_are_not_installed(
+    synthetic_contract: Path,
+) -> None:
     with pytest.raises((FileNotFoundError, NotADirectoryError)):
-        build_dispatcher(SUITE)
+        build_dispatcher(SYNTHETIC_SUITE)
 
 
-def test_build_dispatcher_covers_the_contract_when_the_fixtures_are_installed() -> None:
-    if not has_private_contract(SUITE):
-        pytest.skip("private fixtures are not installed")
-    assert build_dispatcher(SUITE).tools == frozenset(load_tool_specs(SUITE))
+def test_build_dispatcher_covers_the_contract_when_the_fixtures_are_installed(
+    synthetic_contract: Path,
+) -> None:
+    specs = load_tool_specs(SYNTHETIC_SUITE)
+    private = synthetic_contract / "_private"
+    private.mkdir()
+    (private / FIXTURE_FILE).write_text(_fixtures_covering(specs).model_dump_json())
+    assert build_dispatcher(SYNTHETIC_SUITE).tools == frozenset(specs)

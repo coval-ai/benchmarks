@@ -151,7 +151,11 @@ def test_daily_scenario_needs_an_enabled_schedule() -> None:
 
 def _row(provider: str, model: str, *, collected: bool) -> RegisteredModel:
     return RegisteredModel(
-        benchmark=Benchmark.S2S, provider=provider, model=model, collected=collected, published=True
+        benchmark=Benchmark.S2S,
+        provider=provider,
+        model=model,
+        collected=collected,
+        visibility="public",
     )
 
 

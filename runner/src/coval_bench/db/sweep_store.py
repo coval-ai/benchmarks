@@ -194,42 +194,59 @@ async def complete_sweep(pool: Pool, sweep_id: int) -> bool:
 
 
 _QUALITY = """
+    WITH scored AS (
+        SELECT sw.*, bd.benchmark, bd.condition
+        FROM benchmarks_v2.sweeps sw
+        JOIN benchmarks_v2.benchmark_datasets bd ON bd.dataset_id = sw.dataset_id
+        WHERE sw.completed_at IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM benchmarks_v2.sweep_results r
+            JOIN benchmarks_v2.sweep_scores sc ON sc.sweep_result_id = r.id
+            WHERE r.sweep_id = sw.id
+          )
+    ), sizes AS (
+        SELECT benchmark, count(*) AS conditions
+        FROM benchmarks_v2.benchmark_datasets GROUP BY benchmark
+    ), complete AS (
+        SELECT DISTINCT ON (s.model_id, s.benchmark)
+               s.model_id, s.benchmark, s.model_version, s.dataset_version, z.conditions
+        FROM scored s JOIN sizes z USING (benchmark)
+        GROUP BY s.model_id, s.benchmark, s.model_version, s.dataset_version, z.conditions
+        HAVING count(*) = z.conditions
+        ORDER BY s.model_id, s.benchmark, s.model_version DESC, max(s.completed_at) DESC
+    )
     SELECT m.id AS model_id, m.modality, m.provider, m.model, s.model_version,
-           s.dataset_id AS dataset, s.dataset_version, sc.metric, sc.metric_version,
+           s.benchmark, b.visibility AS benchmark_visibility,
+           s.dataset_version AS benchmark_version, s.condition, c.conditions,
+           sc.metric, sc.metric_version,
            sum(sc.errors) AS errors, sum(sc.reference_units) AS reference_units,
            count(*) AS sample_count,
            (SELECT count(*) FROM benchmarks_v2.sweep_results r WHERE r.sweep_id = s.id)
              + (SELECT count(*) FROM benchmarks_v2.sweep_queue q WHERE q.sweep_id = s.id)
              AS expected_sample_count,
            s.completed_at AS measured_at
-    FROM (
-        SELECT DISTINCT ON (model_id, dataset_id) *
-        FROM benchmarks_v2.sweeps sw
-        WHERE completed_at IS NOT NULL
-          AND EXISTS (
-            SELECT 1 FROM benchmarks_v2.sweep_results r
-            JOIN benchmarks_v2.sweep_scores sc ON sc.sweep_result_id = r.id
-            WHERE r.sweep_id = sw.id
-          )
-        ORDER BY model_id, dataset_id, model_version DESC, completed_at DESC
-    ) s
+    FROM scored s
+    JOIN complete c USING (model_id, benchmark, model_version, dataset_version)
     JOIN benchmarks_v2.models m ON m.id = s.model_id
+    JOIN benchmarks_v2.benchmarks b ON b.slug = s.benchmark
     JOIN benchmarks_v2.sweep_results r ON r.sweep_id = s.id
     JOIN benchmarks_v2.sweep_scores sc ON sc.sweep_result_id = r.id
-    GROUP BY m.id, s.id, s.model_version, s.dataset_id, s.dataset_version, s.completed_at,
-             sc.metric, sc.metric_version
-    ORDER BY m.id, s.dataset_id, sc.metric, sc.metric_version
+    GROUP BY m.id, s.id, s.model_version, s.dataset_version, s.completed_at,
+             s.benchmark, b.visibility, s.condition, c.conditions, sc.metric, sc.metric_version
+    ORDER BY m.id, s.benchmark, s.condition NULLS FIRST, sc.metric, sc.metric_version
 """
 
 
 async def fetch_quality(pool: Pool) -> list[dict[str, Any]]:
-    """Each model's score on each dataset, from its latest completed sweep.
+    """Each model's score on each condition of each benchmark, one row per registered dataset.
 
-    The latest is the highest model version with a completed sweep that scored anything,
-    so a model keeps its previous score while a new version is being swept, and when every
-    item of the new sweep failed. Errors and reference units
-    are summed over every scored item, voices included. Raises ``QueryCanceled`` after
-    ten seconds.
+    A model's rows for a benchmark come from its highest version that has a completed
+    sweep, with something scored, of every dataset the benchmark owns at one dataset
+    version. So a model keeps its previous scores until the last condition of a new
+    version finishes, and has no rows for a benchmark it has never finished.
+    ``conditions`` is how many datasets the benchmark owns. A dataset the benchmark
+    registry doesn't know is left out. Errors and reference units are summed over every
+    scored item, voices included. Raises ``QueryCanceled`` after ten seconds.
     """
     async with (
         pool.connection() as conn,
@@ -238,5 +255,86 @@ async def fetch_quality(pool: Pool) -> list[dict[str, Any]]:
     ):
         await cur.execute("SET LOCAL statement_timeout = '10s'")
         await cur.execute(_QUALITY)
+        rows: list[dict[str, Any]] = await cur.fetchall()
+        return rows
+
+
+_SWEEPS = """
+    SELECT s.id, s.model_id, m.modality, m.provider, m.model, s.model_version,
+           bd.benchmark, bd.condition, s.dataset_id, s.dataset_version,
+           s.created_at, s.completed_at,
+           (SELECT count(*) FROM benchmarks_v2.sweep_results r WHERE r.sweep_id = s.id)
+             AS result_count,
+           (SELECT count(*) FROM benchmarks_v2.sweep_queue q
+             WHERE q.sweep_id = s.id AND q.tries_left > 0) AS queued_count,
+           (SELECT count(*) FROM benchmarks_v2.sweep_queue q
+             WHERE q.sweep_id = s.id AND q.tries_left = 0) AS gave_up_count
+    FROM benchmarks_v2.sweeps s
+    JOIN benchmarks_v2.models m ON m.id = s.model_id
+    LEFT JOIN benchmarks_v2.benchmark_datasets bd ON bd.dataset_id = s.dataset_id
+    ORDER BY s.created_at, s.id
+"""
+
+
+async def fetch_sweeps(pool: Pool) -> list[dict[str, Any]]:
+    """Every sweep, oldest first, with how far through its items it is.
+
+    ``result_count`` is the items that ran, ``queued_count`` the ones still to run and
+    ``gave_up_count`` the ones that ran out of tries. Raises ``QueryCanceled`` after ten
+    seconds.
+    """
+    async with (
+        pool.connection() as conn,
+        conn.transaction(),
+        conn.cursor(row_factory=dict_row) as cur,
+    ):
+        await cur.execute("SET LOCAL statement_timeout = '10s'")
+        await cur.execute(_SWEEPS)
+        rows: list[dict[str, Any]] = await cur.fetchall()
+        return rows
+
+
+_SWEEP_ITEMS = """
+    SELECT r.sample_id, NULLIF(r.voice, '') AS voice, 'done' AS status,
+           r.transcript, r.timings, r.audio_uri, r.created_at AS ran_at,
+           NULL::integer AS tries_left, NULL::text AS last_error,
+           COALESCE((
+               SELECT jsonb_agg(jsonb_build_object(
+                          'metric', sc.metric, 'metric_version', sc.metric_version,
+                          'errors', sc.errors, 'reference_units', sc.reference_units)
+                        ORDER BY sc.metric, sc.metric_version)
+               FROM benchmarks_v2.sweep_scores sc WHERE sc.sweep_result_id = r.id
+           ), '[]'::jsonb) AS scores
+    FROM benchmarks_v2.sweep_results r
+    WHERE r.sweep_id = %(sweep_id)s
+    UNION ALL
+    SELECT q.sample_id, NULLIF(q.voice, ''),
+           CASE WHEN q.tries_left > 0 THEN 'queued' ELSE 'gave_up' END,
+           NULL, NULL, NULL, NULL, q.tries_left, q.last_error, '[]'::jsonb
+    FROM benchmarks_v2.sweep_queue q
+    WHERE q.sweep_id = %(sweep_id)s
+    ORDER BY sample_id, voice NULLS FIRST
+"""
+
+
+async def fetch_sweep_items(
+    pool: Pool, sweep_id: int, modality: str
+) -> list[dict[str, Any]] | None:
+    """A sweep's items in sample and voice order, or None if *modality* has no such sweep.
+
+    An item that ran is ``done`` and has its transcript, timings, audio URI and scores. One
+    still in the queue is ``queued``, or ``gave_up`` once it has no tries left, and has
+    its last error if it has failed.
+    """
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT 1 FROM benchmarks_v2.sweeps sw"
+            " JOIN benchmarks_v2.models m ON m.id = sw.model_id"
+            " WHERE sw.id = %s AND m.modality = %s",
+            (sweep_id, modality),
+        )
+        if await cur.fetchone() is None:
+            return None
+        await cur.execute(_SWEEP_ITEMS, {"sweep_id": sweep_id})
         rows: list[dict[str, Any]] = await cur.fetchall()
         return rows

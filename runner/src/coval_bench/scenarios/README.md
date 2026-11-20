@@ -6,11 +6,9 @@ place a pinned value is written down.
 ## Why this lives inside the package
 
 `Dockerfile.api` builds from `runner/` and copies only `pyproject.toml`,
-`uv.lock`, `README.md`, `src/` and `alembic.ini`. The mock-tool router runs
-inside that container and reads `tool-definitions.json` and the fixtures at
-request time, so a contract at the repo root would not exist when it is needed.
-Everything here ships in the wheel and is read with `importlib.resources`, the
-same way `datasets/manifests` is.
+`uv.lock`, `README.md`, `src/` and `alembic.ini`. The API loads each active
+mock-tool suite's tools and fixtures at startup. Committed contract files ship
+in the wheel and are read with `importlib.resources`, just like dataset manifests.
 
 ## Layout
 
@@ -20,9 +18,6 @@ scenarios/
   personas.json       the caller personas: label, description, order, dataset id
   annotated.py        the shared contract-model base
   dental/
-    system-prompt.txt      \  the agent under test. byte-identical across
-    first-message.txt       |  variants, covered by the contract hash
-    tool-definitions.json  /
     _source/               pulled from the platform, never edited by hand
     _private/              the evaluator. hashed, never committed
   bank/
@@ -37,7 +32,7 @@ scenarios/
 
 ## The two rules
 
-1. **`stack.json` and the public `dental/` files are byte-identical across every variant.** A
+1. **The pinned stack and the suite contract are shared across variants.** A
    platform config may not restate a pinned value; it references this. If two
    platforms could drift apart, the comparison is void.
 2. **`platforms/` holds the declared difference.** Each file records how one

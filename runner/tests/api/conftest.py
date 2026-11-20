@@ -52,6 +52,7 @@ from coval_bench.config import Settings
 from coval_bench.db.dashboard_rollups import rebuild_slots
 from coval_bench.db.dashboard_windows import refresh_window_views
 from coval_bench.registries import RegisteredModel
+from coval_bench.registries.metrics import METRIC_SPECS
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 from tests.roster import TEST_ROSTER
 
@@ -301,6 +302,18 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(pooled_workflow, "op", SimpleNamespace(execute=conn.execute)):
             pooled_workflow.upgrade()
+        # Prod had every registry metric before visibility arrived, so they stayed public.
+        for metric, spec in METRIC_SPECS.items():
+            conn.execute(
+                "INSERT INTO benchmarks_v2.metrics (code, display_name) VALUES (%s, %s)"
+                " ON CONFLICT (code) DO NOTHING",
+                (metric.value, spec.display_name),
+            )
+        visibility = import_module(
+            "coval_bench.db.migrations.versions.20261116_0064_metric_visibility"
+        )
+        with patch.object(visibility, "op", SimpleNamespace(execute=conn.execute)):
+            visibility.upgrade()
         # Model/tag registry tables (mirrors migration 20260824_0020).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.models (
@@ -377,6 +390,10 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 sweep_id  bigint NOT NULL REFERENCES benchmarks_v2.sweeps (id),
                 sample_id text NOT NULL,
                 voice     text NOT NULL DEFAULT '',
+                transcript text,
+                timings    jsonb NOT NULL DEFAULT '{}'::jsonb,
+                audio_uri  text,
+                created_at timestamptz NOT NULL DEFAULT now(),
                 UNIQUE (sweep_id, sample_id, voice)
             );
             CREATE TABLE IF NOT EXISTS benchmarks_v2.sweep_scores (
@@ -393,6 +410,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 sample_id  text NOT NULL,
                 voice      text NOT NULL DEFAULT '',
                 tries_left integer NOT NULL DEFAULT 3,
+                last_error text,
                 PRIMARY KEY (sweep_id, sample_id, voice)
             );
         """)
@@ -416,6 +434,29 @@ def _load_schema(**connect_kwargs: Any) -> None:
             CREATE INDEX IF NOT EXISTS model_history_model_id_changed_at
                 ON benchmarks_v2.model_history (model_id, changed_at DESC)
         """)
+        benchmark_registry = import_module(
+            "coval_bench.db.migrations.versions.20261117_0065_benchmark_registry"
+        )
+        with patch.object(benchmark_registry, "op", SimpleNamespace(execute=conn.execute)):
+            benchmark_registry.upgrade()
+        companies = import_module("coval_bench.db.migrations.versions.20261117_0066_companies")
+        with patch.object(companies, "op", SimpleNamespace(execute=conn.execute)):
+            companies.upgrade()
+        model_visibility = import_module(
+            "coval_bench.db.migrations.versions.20261117_0067_model_visibility"
+        )
+        with patch.object(model_visibility, "op", SimpleNamespace(execute=conn.execute)):
+            model_visibility.upgrade()
+        benchmark_visibility = import_module(
+            "coval_bench.db.migrations.versions.20261117_0068_benchmark_visibility"
+        )
+        with patch.object(benchmark_visibility, "op", SimpleNamespace(execute=conn.execute)):
+            benchmark_visibility.upgrade()
+        updated_by_org = import_module(
+            "coval_bench.db.migrations.versions.20261119_0069_updated_by_org"
+        )
+        with patch.object(updated_by_org, "op", SimpleNamespace(execute=conn.execute)):
+            updated_by_org.upgrade()
         # Pricing log (mirrors migration 20260903_0027).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.pricing_rates (
@@ -475,7 +516,7 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
             """
             INSERT INTO benchmarks_v2.models
                 (modality, provider, model, voice, voices, creator, source, licensing,
-                 on_prem, region, arena_enabled, collected, published, color,
+                 on_prem, region, arena_enabled, collected, visibility, color,
                  display_name, architecture, orchestration, updated_by_user_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'tests')
             RETURNING id
@@ -493,7 +534,7 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
                 model.region,
                 model.arena_enabled,
                 model.collected,
-                model.published,
+                model.visibility,
                 model.color,
                 model.display_name,
                 model.architecture,
@@ -552,6 +593,17 @@ def add_models(postgresql: Any, *models: RegisteredModel) -> None:
         conn.commit()
 
 
+def set_company_org(postgresql: Any, company: str, org_id: str) -> None:
+    """Give *company* the Clerk org *org_id* in one test's database."""
+    with psycopg.connect(_make_db_url(postgresql)) as conn:
+        conn.execute(
+            "INSERT INTO benchmarks_v2.companies (slug, name, clerk_org_id, updated_by_user_id)"
+            " VALUES (%s, %s, %s, 'tests')",
+            (company, company, org_id),
+        )
+        conn.commit()
+
+
 postgresql_proc = factories.postgresql_proc(load=[_load_schema, _seed_registry])
 postgresql = factories.postgresql("postgresql_proc")
 
@@ -585,6 +637,7 @@ async def app(
     monkeypatch.setenv("CLERK_AUTHORIZED_PARTIES", json.dumps([CLERK_PARTY]))
     monkeypatch.setenv("CLERK_ORG_PROVIDERS", json.dumps(CLERK_ORG_PROVIDERS))
     monkeypatch.setenv("CLERK_COVAL_ORG", COVAL_ORG)
+    monkeypatch.setenv("CLERK_SECRET_KEY", "sk_test_not_real")
     stub_jwks(monkeypatch)
     # Battle generation screens prompts through the moderation API. Without this the
     # suite would reach the network on any machine that has the key exported.

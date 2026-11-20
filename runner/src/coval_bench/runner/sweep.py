@@ -87,6 +87,7 @@ class SweepSummary:
 
 
 _PROGRESS_EVERY_S = 600.0
+_SWEEP_TTS_TIMEOUT_S = 120
 
 
 @dataclass
@@ -219,7 +220,7 @@ async def _run_tts(
             if not held:
                 log.warning("sweep_item_skipped", reason="model busy")
                 return None
-            async with asyncio.timeout(_TTS_TIMEOUT_S):
+            async with asyncio.timeout(_SWEEP_TTS_TIMEOUT_S):
                 result = await provider_cls(
                     settings=settings, model=entry.model, voice=item.voice or None
                 ).synthesize(item.raw.transcript)

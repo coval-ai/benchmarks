@@ -43,7 +43,7 @@ def _model(benchmark: Benchmark, **fields: Any) -> RegisteredModel:
         provider="acme",
         model="fast-1",
         collected=True,
-        published=False,
+        visibility="partner",
         **fields,
     )
 
@@ -257,10 +257,18 @@ async def test_run_probes_every_collected_model_and_stores_each(
     roster = [
         _model(Benchmark.TTS),
         RegisteredModel(
-            benchmark=Benchmark.TTS, provider="acme", model="off", collected=False, published=False
+            benchmark=Benchmark.TTS,
+            provider="acme",
+            model="off",
+            collected=False,
+            visibility="partner",
         ),
         RegisteredModel(
-            benchmark=Benchmark.TTS, provider="down", model="tts-2", collected=True, published=True
+            benchmark=Benchmark.TTS,
+            provider="down",
+            model="tts-2",
+            collected=True,
+            visibility="public",
         ),
         _model(Benchmark.STT),
     ]
@@ -312,7 +320,11 @@ def _wire_run(monkeypatch: pytest.MonkeyPatch, insert: Any) -> None:
     roster = [
         _model(Benchmark.TTS),
         RegisteredModel(
-            benchmark=Benchmark.TTS, provider="acme", model="fast-2", collected=True, published=True
+            benchmark=Benchmark.TTS,
+            provider="acme",
+            model="fast-2",
+            collected=True,
+            visibility="public",
         ),
     ]
 

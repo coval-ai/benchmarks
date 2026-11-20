@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import time
@@ -25,6 +26,23 @@ _VALID_VOICES = (
 )
 _WS_URL = "wss://stream.us.palabra.ai/tts-api/v1/text-to-speech/stream"
 _SAMPLE_RATE = 24000
+_INIT_TIMEOUT_S = 10.0
+
+
+async def _await_init_response(ws: ws_client.ClientConnection) -> None:
+    """Consume frames until the server acknowledges ``init``; raise on an error frame."""
+    async with asyncio.timeout(_INIT_TIMEOUT_S):
+        while True:
+            raw = await ws.recv()
+            if isinstance(raw, bytes):
+                continue
+            event: dict[str, Any] = json.loads(raw)
+            if event.get("message_type") == "error":
+                data_raw = event.get("data")
+                data: dict[str, Any] = data_raw if isinstance(data_raw, dict) else {}
+                raise RuntimeError(f"{data.get('code')}: {data.get('desc')}")
+            if event.get("message_type") == "init_response":
+                return
 
 
 class PalabraTTSProvider(TTSProvider):
@@ -68,6 +86,7 @@ class PalabraTTSProvider(TTSProvider):
                         }
                     )
                 )
+                await _await_init_response(ws)
 
                 synthesis.start = time.monotonic()
                 generation_id = f"coval_{uuid4().hex}"

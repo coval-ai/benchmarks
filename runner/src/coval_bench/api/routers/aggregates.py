@@ -50,7 +50,7 @@ from coval_bench.api.deps import (
     get_pool,
     get_posthog,
 )
-from coval_bench.api.internal import hidden_early_access
+from coval_bench.api.internal import hidden_early_access, visible_metrics
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
     AggregatesByDatasetResponse,
@@ -241,9 +241,13 @@ def _validate_percentile_request(
         raise HTTPException(status_code=422, detail="metric is not supported for benchmark")
 
 
-def _visible(row: dict[str, Any], hidden: frozenset[tuple[str, str]]) -> bool:
-    return (row["provider"], row["model"]) not in hidden and not is_metric_excluded(
-        row["provider"], row["model"], row["metric_type"]
+def _visible(
+    row: dict[str, Any], hidden: frozenset[tuple[str, str]], visible_metric_codes: frozenset[str]
+) -> bool:
+    return (
+        (row["provider"], row["model"]) not in hidden
+        and row["metric_type"] in visible_metric_codes
+        and not is_metric_excluded(row["provider"], row["model"], row["metric_type"])
     )
 
 
@@ -275,6 +279,7 @@ async def get_results_aggregates(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    visible_metric_codes: frozenset[str] = Depends(visible_metrics),
 ) -> AggregatesResponse:
     """Return per-model stats and per-bucket series for one benchmark.
 
@@ -319,11 +324,15 @@ async def get_results_aggregates(
         model_stats=[
             _flag_thin(ModelStatEntry.model_validate(r), benchmark)
             for r in stat_rows
-            if _visible(r, hidden)
+            if _visible(r, hidden, visible_metric_codes)
         ],
         # Series points are deliberately unflagged: one bucket holds a single
         # run's samples, so every point sits under the floor by design.
-        series=[SeriesPoint.model_validate(r) for r in series_rows if _visible(r, hidden)],
+        series=[
+            SeriesPoint.model_validate(r)
+            for r in series_rows
+            if _visible(r, hidden, visible_metric_codes)
+        ],
         snapshot=asdict(snapshot),
     )
     capture_api_event(
@@ -361,6 +370,7 @@ async def get_results_timeline(
     cache: TTLCache[Any, Any] = Depends(get_cache),
     cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    visible_metric_codes: frozenset[str] = Depends(visible_metrics),
 ) -> TimelineResponse:
     """Return run points or intervals using each metric's aggregation rule."""
     _validate_percentile_request(benchmark, statistic, metric_type)
@@ -416,7 +426,7 @@ async def get_results_timeline(
             rows = await (await conn.execute(sql, params)).fetchall()
             pending = await (await conn.execute(_STALE_QUEUE_SQL)).fetchone()
         materialization = DashboardMaterialization(stale=bool(pending and pending["stale"]))
-        visible_rows = [row for row in rows if _visible(row, hidden)]
+        visible_rows = [row for row in rows if _visible(row, hidden, visible_metric_codes)]
         return TimelineResponse(
             benchmark=benchmark,
             statistic=statistic,
@@ -459,6 +469,7 @@ async def get_results_timeline(
         # Preset keys intentionally omit request time; custom bounds are isolated.
         None if response_window is not None else (since, until),
         tuple(sorted(hidden)),
+        tuple(sorted(visible_metric_codes)),
     )
     response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
     capture_api_event(
@@ -488,6 +499,7 @@ async def get_results_aggregates_by_dataset(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    visible_metric_codes: frozenset[str] = Depends(visible_metrics),
 ) -> AggregatesByDatasetResponse:
     """Return per-model stats for every dataset of one benchmark and window.
 
@@ -505,7 +517,7 @@ async def get_results_aggregates_by_dataset(
 
     grouped: dict[str, list[ModelStatEntry]] = {}
     for row in rows:
-        if _visible(row, hidden):
+        if _visible(row, hidden, visible_metric_codes):
             grouped.setdefault(row["dataset_id"], []).append(
                 _flag_thin(ModelStatEntry.model_validate(row), benchmark)
             )

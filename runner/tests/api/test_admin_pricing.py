@@ -122,7 +122,7 @@ async def test_a_hidden_model_may_be_priced_ahead_of_launch(
         provider=EA_PROVIDER,
         model=EA_MODEL,
         collected=True,
-        published=False,
+        visibility="partner",
     )
     add_models(postgresql, hidden)
     app.dependency_overrides[deps.get_models] = lambda: [*TEST_ROSTER, hidden]

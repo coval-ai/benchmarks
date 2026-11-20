@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""GET /v3/latency and /v3/latency/points over HTTP."""
+"""GET /v3/{modality}/latency, its points and its probes over HTTP."""
 
 from __future__ import annotations
 
@@ -9,11 +9,21 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
+from fastapi import FastAPI
 from httpx import AsyncClient
 
 from coval_bench.registries import RegisteredModel
 from coval_bench.registries.benchmarks import Benchmark
-from tests.api.conftest import EA_MODEL, EA_ORG, EA_PROVIDER, _make_db_url, add_models, bearer
+from tests.api.conftest import (
+    COVAL_ORG,
+    EA_MODEL,
+    EA_ORG,
+    EA_PROVIDER,
+    _make_db_url,
+    add_models,
+    bearer,
+    set_company_org,
+)
 
 NOW = datetime.now(UTC)
 
@@ -67,11 +77,11 @@ async def test_latency_is_percentiles_per_model_and_metric(
 ) -> None:
     stt, tts = _seed(postgresql)
 
-    response = await client.get("/v3/latency")
+    response = await client.get("/v3/stt/latency")
 
     assert response.status_code == 200
     rows = {(row["model_id"], row["metric"]): row for row in response.json()["latency"]}
-    assert set(rows) == {(stt, "TTFT"), (stt, "TTFS"), (tts, "TTFA")}
+    assert set(rows) == {(stt, "TTFT"), (stt, "TTFS")}
     assert rows[(stt, "TTFT")] == {
         "model_id": stt,
         "provider": "seed",
@@ -88,20 +98,18 @@ async def test_latency_is_percentiles_per_model_and_metric(
         "failed_count": 1,
     }
     assert rows[(stt, "TTFS")]["p50"] == 100.0
-    down = rows[(tts, "TTFA")]
+    (down,) = (await client.get("/v3/tts/latency")).json()["latency"]
+    assert (down["model_id"], down["metric"]) == (tts, "TTFA")
     assert (down["p50"], down["sample_count"], down["failed_count"]) == (None, 0, 1)
 
 
-async def test_latency_filters_by_modality_metric_and_window(
-    client: AsyncClient, postgresql: Any
-) -> None:
-    stt, tts = _seed(postgresql)
+async def test_latency_filters_by_metric_and_window(client: AsyncClient, postgresql: Any) -> None:
+    stt, _ = _seed(postgresql)
 
     async def rows(query: str) -> dict[tuple[int, str], Any]:
-        body = (await client.get(f"/v3/latency?{query}")).json()
+        body = (await client.get(f"/v3/stt/latency?{query}")).json()
         return {(row["model_id"], row["metric"]): row for row in body["latency"]}
 
-    assert set(await rows("modality=TTS")) == {(tts, "TTFA")}
     assert set(await rows("metric=TTFS")) == {(stt, "TTFS")}
     week = (await rows("window=7d"))[(stt, "TTFT")]
     assert (week["sample_count"], week["max"]) == (4, 9000.0)
@@ -117,15 +125,16 @@ async def test_an_unpublished_model_is_only_in_its_own_orgs_latency(
             provider=EA_PROVIDER,
             model=EA_MODEL,
             collected=True,
-            published=False,
+            visibility="partner",
         ),
     )
+    set_company_org(postgresql, EA_PROVIDER, "org_test_linked")
     with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
         hidden = _model_id(conn, EA_PROVIDER, EA_MODEL)
         _probe(conn, hidden, 1, ttft=150.0, ttfs=80.0)
 
-    public = await client.get("/v3/latency")
-    partner = await client.get("/v3/latency", headers=bearer(sub="u", org_id=EA_ORG))
+    public = await client.get("/v3/stt/latency")
+    partner = await client.get("/v3/stt/latency", headers=bearer(sub="u", org_id="org_test_linked"))
 
     assert hidden not in {row["model_id"] for row in public.json()["latency"]}
     assert hidden in {row["model_id"] for row in partner.json()["latency"]}
@@ -133,19 +142,38 @@ async def test_an_unpublished_model_is_only_in_its_own_orgs_latency(
 
 
 async def test_a_bad_parameter_is_named_in_the_error(client: AsyncClient) -> None:
-    response = await client.get("/v3/latency?modality=S2S")
+    response = await client.get("/v3/stt/latency?window=2h")
 
     assert response.status_code == 400
     error = response.json()["error"]
-    assert (error["code"], error["param"]) == ("invalid_parameter", "modality")
-    assert "STT" in error["message"]
+    assert (error["code"], error["param"]) == ("invalid_parameter", "window")
+    assert "24h" in error["message"]
+
+
+async def test_a_metric_of_another_modality_has_no_points(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    _seed(postgresql)
+
+    for path in ("/v3/tts/latency/points?metric=TTFT", "/v3/stt/latency/points?metric=TTFA"):
+        body = (await client.get(path)).json()
+        assert (body["points"], body["bucket_seconds"]) == ([], 1800)
+
+
+def test_the_schema_lists_the_modalities_and_the_not_found(app: FastAPI) -> None:
+    for path in ("/v3/{modality}/quality", "/v3/{modality}/latency", "/v3/{modality}/sweeps"):
+        get = app.openapi()["paths"][path]["get"]
+        (modality,) = [p for p in get["parameters"] if p["name"] == "modality"]
+        assert modality["schema"]["enum"] == ["llm", "s2s", "stt", "tts"]
+        assert "404" in get["responses"]
 
 
 async def test_an_unknown_v3_path_is_a_not_found_error(client: AsyncClient) -> None:
-    response = await client.get("/v3/nope")
+    for path in ("/v3/nope", "/v3/video/latency", "/v3/STT/latency"):
+        response = await client.get(path)
 
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "not_found"
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "not_found"
 
 
 async def test_points_are_one_per_tick_with_a_null_for_a_provider_failure(
@@ -153,7 +181,7 @@ async def test_points_are_one_per_tick_with_a_null_for_a_provider_failure(
 ) -> None:
     stt, _ = _seed(postgresql)
 
-    response = await client.get("/v3/latency/points?metric=TTFT")
+    response = await client.get("/v3/stt/latency/points?metric=TTFT")
 
     assert response.status_code == 200
     body = response.json()
@@ -174,8 +202,8 @@ async def test_longer_windows_average_points_into_buckets(
         for minute, ttfa in ((0, 100.0), (30, 300.0)):
             _probe(conn, tts, (NOW - day).total_seconds() / 3600 - minute / 60, ttfa=ttfa)
 
-    week = (await client.get("/v3/latency/points?metric=TTFA&window=7d")).json()
-    month = (await client.get("/v3/latency/points?metric=TTFA&window=30d")).json()
+    week = (await client.get("/v3/tts/latency/points?metric=TTFA&window=7d")).json()
+    month = (await client.get("/v3/tts/latency/points?metric=TTFA&window=30d")).json()
 
     assert week["bucket_seconds"] == 3600
     assert [point["value"] for point in week["points"]] == [200.0]
@@ -195,19 +223,72 @@ async def test_points_need_a_metric_and_hide_unpublished_models(
             provider=EA_PROVIDER,
             model=EA_MODEL,
             collected=True,
-            published=False,
+            visibility="partner",
         ),
     )
+    set_company_org(postgresql, EA_PROVIDER, "org_test_linked")
     with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
         _probe(conn, _model_id(conn, EA_PROVIDER, EA_MODEL), 1, ttft=150.0)
 
-    missing = await client.get("/v3/latency/points")
-    public = await client.get("/v3/latency/points?metric=TTFT")
+    missing = await client.get("/v3/stt/latency/points")
+    public = await client.get("/v3/stt/latency/points?metric=TTFT")
     partner = await client.get(
-        "/v3/latency/points?metric=TTFT", headers=bearer(sub="u", org_id=EA_ORG)
+        "/v3/stt/latency/points?metric=TTFT", headers=bearer(sub="u", org_id="org_test_linked")
     )
 
     assert missing.status_code == 400
     assert missing.json()["error"]["param"] == "metric"
     assert public.json()["points"] == []
     assert [point["value"] for point in partner.json()["points"]] == [150.0]
+
+
+async def test_a_coval_only_metric_is_left_out_for_the_public(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    stt, _ = _seed(postgresql)
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        conn.execute("UPDATE benchmarks_v2.metrics SET visibility = 'coval' WHERE code = 'TTFS'")
+    staff = bearer(org_id=COVAL_ORG)
+
+    public = {
+        (row["model_id"], row["metric"])
+        for row in (await client.get("/v3/stt/latency")).json()["latency"]
+    }
+    internal = (await client.get("/v3/stt/latency", headers=staff)).json()["latency"]
+
+    assert (stt, "TTFT") in public
+    assert (stt, "TTFS") not in public
+    assert (stt, "TTFS") in {(row["model_id"], row["metric"]) for row in internal}
+    assert (await client.get("/v3/stt/latency/points?metric=TTFS")).json()["points"] == []
+    assert (await client.get("/v3/stt/latency/points?metric=TTFS", headers=staff)).json()["points"]
+
+
+async def test_coval_sees_every_probe_of_a_model_and_no_one_else_does(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    stt, _ = _seed(postgresql)
+    staff = bearer(sub="u", org_id=COVAL_ORG)
+    url = f"/v3/stt/latency/probes?model_id={stt}"
+
+    day = (await client.get(url, headers=staff)).json()["probes"]
+    week = (await client.get(f"{url}&window=7d", headers=staff)).json()["probes"]
+    anonymous = await client.get(url)
+    partner = await client.get(url, headers=bearer(sub="u", org_id=EA_ORG))
+    other_modality = await client.get(f"/v3/tts/latency/probes?model_id={stt}", headers=staff)
+
+    assert [probe["ttft_ms"] for probe in day] == [None, None, 250.0, 300.0, 200.0, 100.0]
+    assert len(week) == 7
+    assert day[1].pop("scheduled_at") == day[1].pop("sent_at")
+    assert day[1] == {
+        "voice": None,
+        "status": "failed",
+        "ttft_ms": None,
+        "ttfs_ms": None,
+        "ttfa_ms": None,
+        "error": "request failed",
+        "failure_origin": "runner",
+        "status_code": 401,
+    }
+    assert anonymous.status_code == 403
+    assert partner.status_code == 403
+    assert other_modality.status_code == 404

@@ -55,7 +55,7 @@ def early_access_registry(postgresql: Any) -> None:
                 provider=_EA_PROVIDER,
                 model=model,
                 collected=True,
-                published=False,
+                visibility="partner",
             )
             for model in (_EA_MODEL, EA_MODEL_OTHER)
         ),
