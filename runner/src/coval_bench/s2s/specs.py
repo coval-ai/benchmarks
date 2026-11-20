@@ -89,6 +89,7 @@ SCENARIO_MODELS: tuple[tuple[str, str], ...] = (
     ("elevenlabs", "eleven_realtime_v1_max"),
     ("rime", "prism"),
     ("phonic", "phonic-1"),
+    ("resia", "resia-fullplex-1"),
 )
 
 
