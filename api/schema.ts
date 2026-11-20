@@ -628,7 +628,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v3/latency": {
+    "/v3/{modality}/latency": {
         parameters: {
             query?: never;
             header?: never;
@@ -644,7 +644,7 @@ export interface paths {
          *     credit or our rate limit is in neither. ``failed_count`` is the model's, so it is the
          *     same on each of a model's rows and adding it up across them counts it twice.
          */
-        get: operations["get_latency_v3_latency_get"];
+        get: operations["get_latency_v3__modality__latency_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -653,7 +653,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v3/latency/points": {
+    "/v3/{modality}/latency/points": {
         parameters: {
             query?: never;
             header?: never;
@@ -662,13 +662,14 @@ export interface paths {
         };
         /**
          * Get Latency Points
-         * @description Every model's *metric* over the window, as points for a chart.
+         * @description Every model of the modality's *metric* over the window, as points for a chart.
          *
          *     The last 24 hours has one point per probe tick. Seven days is averaged by the hour and
          *     thirty by the day, and ``bucket_seconds`` says which. A point with a null value is a
-         *     tick or bucket where every probe failed on the provider's side.
+         *     tick or bucket where every probe failed on the provider's side. A metric the modality
+         *     doesn't have has no points.
          */
-        get: operations["get_latency_points_v3_latency_points_get"];
+        get: operations["get_latency_points_v3__modality__latency_points_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -677,7 +678,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v3/latency/probes": {
+    "/v3/{modality}/latency/probes": {
         parameters: {
             query?: never;
             header?: never;
@@ -691,13 +692,59 @@ export interface paths {
          *     Unlike ``/latency``, a probe that failed on our side is listed too, with a
          *     ``failure_origin`` of ``runner``.
          */
-        get: operations["get_probes_v3_latency_probes_get"];
+        get: operations["get_probes_v3__modality__latency_probes_get"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v3/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Metrics
+         * @description Every metric the caller may see, in code order.
+         *
+         *     The public sees public metrics, a partner org also sees partner-level ones, and
+         *     coval staff see every metric with whether it is collected.
+         */
+        get: operations["get_metrics_v3_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v3/metrics/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update
+         * @description Change who sees a metric, whether it is collected, or both. Coval staff only.
+         *
+         *     ``visibility`` takes effect on the next request. ``collected`` is stored but no job
+         *     reads it yet, so changing it does not start or stop a metric being scored.
+         */
+        patch: operations["update_v3_metrics__code__patch"];
         trace?: never;
     };
     "/v3/models": {
@@ -751,7 +798,7 @@ export interface paths {
         patch: operations["update_v3_models__model_id__patch"];
         trace?: never;
     };
-    "/v3/quality": {
+    "/v3/{modality}/quality": {
         parameters: {
             query?: never;
             header?: never;
@@ -760,7 +807,7 @@ export interface paths {
         };
         /**
          * Get Quality
-         * @description One row per model, benchmark and metric, pooled across the benchmark's conditions.
+         * @description One row per model, benchmark and metric of the modality, pooled across conditions.
          *
          *     ``breakdown=condition`` returns one row per condition instead, each naming its
          *     ``condition``; a response never holds both levels. ``value`` is pooled: ``errors``
@@ -773,7 +820,7 @@ export interface paths {
          *     not listed for a benchmark it has never finished. A sweep scored under more than one
          *     metric version has a row for each.
          */
-        get: operations["get_quality_v3_quality_get"];
+        get: operations["get_quality_v3__modality__quality_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -782,7 +829,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v3/sweeps": {
+    "/v3/{modality}/sweeps": {
         parameters: {
             query?: never;
             header?: never;
@@ -791,14 +838,14 @@ export interface paths {
         };
         /**
          * Get Sweeps
-         * @description One row per sweep, oldest first, finished or not.
+         * @description One row per sweep of the modality, oldest first, finished or not.
          *
          *     ``result_count`` items have run, ``queued_count`` are still to run and
          *     ``gave_up_count`` ran out of tries. A sweep with ``completed_at`` set has nothing
          *     left to run. A model has a sweep per dataset for each of its versions, so an old
          *     version's sweeps are listed too.
          */
-        get: operations["get_sweeps_v3_sweeps_get"];
+        get: operations["get_sweeps_v3__modality__sweeps_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -807,7 +854,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v3/sweeps/{sweep_id}/items": {
+    "/v3/{modality}/sweeps/{sweep_id}/items": {
         parameters: {
             query?: never;
             header?: never;
@@ -823,7 +870,7 @@ export interface paths {
          *     model's. For TTS it is what the model's audio was heard to say. A ``queued`` item
          *     hasn't run yet or is waiting to retry, and a ``gave_up`` item ran out of tries.
          */
-        get: operations["get_sweep_items_v3_sweeps__sweep_id__items_get"];
+        get: operations["get_sweep_items_v3__modality__sweeps__sweep_id__items_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1634,7 +1681,7 @@ export interface components {
         };
         /**
          * LatencyPointsResponse
-         * @description Response schema for GET /v3/latency/points.
+         * @description Response schema for GET /v3/{modality}/latency/points.
          */
         LatencyPointsResponse: {
             /**
@@ -1655,7 +1702,7 @@ export interface components {
         };
         /**
          * LatencyResponse
-         * @description Response schema for GET /v3/latency.
+         * @description Response schema for GET /v3/{modality}/latency.
          */
         LatencyResponse: {
             /** Latency */
@@ -1709,6 +1756,41 @@ export interface components {
          * @enum {string}
          */
         Licensing: "proprietary" | "open-weight";
+        /**
+         * MetricOut
+         * @description A metric on ``/v3``. ``collected`` is null unless coval staff ask.
+         */
+        MetricOut: {
+            /** Code */
+            code: string;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "partner" | "coval";
+            /** Collected */
+            collected?: boolean | null;
+        };
+        /**
+         * MetricPatch
+         * @description Request body for PATCH /v3/metrics/{code}. A field left out is not changed.
+         */
+        MetricPatch: {
+            /** Visibility */
+            visibility?: ("public" | "partner" | "coval") | null;
+            /** Collected */
+            collected?: boolean | null;
+        };
+        /**
+         * MetricsResponse
+         * @description Response schema for GET /v3/metrics.
+         */
+        MetricsResponse: {
+            /** Metrics */
+            metrics: components["schemas"]["MetricOut"][];
+        };
         /**
          * ModelCreate
          * @description POST body for /v3/models. The defaults land the model unpublished.
@@ -2089,7 +2171,7 @@ export interface components {
         };
         /**
          * ProbesResponse
-         * @description Response schema for GET /v3/latency/probes.
+         * @description Response schema for GET /v3/{modality}/latency/probes.
          */
         ProbesResponse: {
             /** Probes */
@@ -2171,7 +2253,7 @@ export interface components {
         };
         /**
          * QualityResponse
-         * @description Response schema for GET /v3/quality.
+         * @description Response schema for GET /v3/{modality}/quality.
          */
         QualityResponse: {
             /** Quality */
@@ -2441,7 +2523,7 @@ export interface components {
         };
         /**
          * SweepItemsResponse
-         * @description Response schema for GET /v3/sweeps/{sweep_id}/items.
+         * @description Response schema for GET /v3/{modality}/sweeps/{sweep_id}/items.
          */
         SweepItemsResponse: {
             /** Items */
@@ -2504,7 +2586,7 @@ export interface components {
         };
         /**
          * SweepsResponse
-         * @description Response schema for GET /v3/sweeps.
+         * @description Response schema for GET /v3/{modality}/sweeps.
          */
         SweepsResponse: {
             /** Sweeps */
@@ -3982,17 +4064,18 @@ export interface operations {
             };
         };
     };
-    get_latency_v3_latency_get: {
+    get_latency_v3__modality__latency_get: {
         parameters: {
             query?: {
-                modality?: ("STT" | "TTS") | null;
                 metric?: ("TTFT" | "TTFS" | "TTFA") | null;
                 window?: "24h" | "7d" | "30d";
             };
             header?: {
                 authorization?: string | null;
             };
-            path?: never;
+            path: {
+                modality: "llm" | "s2s" | "stt" | "tts";
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -4015,6 +4098,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -4026,7 +4118,7 @@ export interface operations {
             };
         };
     };
-    get_latency_points_v3_latency_points_get: {
+    get_latency_points_v3__modality__latency_points_get: {
         parameters: {
             query: {
                 metric: "TTFT" | "TTFS" | "TTFA";
@@ -4035,7 +4127,9 @@ export interface operations {
             header?: {
                 authorization?: string | null;
             };
-            path?: never;
+            path: {
+                modality: "llm" | "s2s" | "stt" | "tts";
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -4058,6 +4152,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -4069,7 +4172,7 @@ export interface operations {
             };
         };
     };
-    get_probes_v3_latency_probes_get: {
+    get_probes_v3__modality__latency_probes_get: {
         parameters: {
             query: {
                 model_id: number;
@@ -4078,7 +4181,9 @@ export interface operations {
             header?: {
                 authorization?: string | null;
             };
-            path?: never;
+            path: {
+                modality: "llm" | "s2s" | "stt" | "tts";
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -4103,6 +4208,110 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_metrics_v3_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_v3_metrics__code__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetricPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4290,10 +4499,9 @@ export interface operations {
             };
         };
     };
-    get_quality_v3_quality_get: {
+    get_quality_v3__modality__quality_get: {
         parameters: {
             query?: {
-                modality?: ("STT" | "TTS") | null;
                 benchmark?: string | null;
                 metric?: string | null;
                 model_id?: number | null;
@@ -4302,7 +4510,9 @@ export interface operations {
             header?: {
                 authorization?: string | null;
             };
-            path?: never;
+            path: {
+                modality: "llm" | "s2s" | "stt" | "tts";
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -4325,6 +4535,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -4336,13 +4555,15 @@ export interface operations {
             };
         };
     };
-    get_sweeps_v3_sweeps_get: {
+    get_sweeps_v3__modality__sweeps_get: {
         parameters: {
             query?: never;
             header?: {
                 authorization?: string | null;
             };
-            path?: never;
+            path: {
+                modality: "llm" | "s2s" | "stt" | "tts";
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -4365,6 +4586,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -4376,7 +4606,7 @@ export interface operations {
             };
         };
     };
-    get_sweep_items_v3_sweeps__sweep_id__items_get: {
+    get_sweep_items_v3__modality__sweeps__sweep_id__items_get: {
         parameters: {
             query?: never;
             header?: {
@@ -4384,6 +4614,7 @@ export interface operations {
             };
             path: {
                 sweep_id: number;
+                modality: "llm" | "s2s" | "stt" | "tts";
             };
             cookie?: never;
         };
