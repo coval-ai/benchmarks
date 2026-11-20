@@ -919,6 +919,30 @@ class CompaniesResponse(BaseModel):
     companies: list[CompanyOut]
 
 
+class MetricOut(BaseModel):
+    """A metric on ``/v3``. ``collected`` is null unless coval staff ask."""
+
+    code: str
+    display_name: str
+    visibility: Visibility
+    collected: bool | None = None
+
+
+class MetricsResponse(BaseModel):
+    """Response schema for GET /v3/metrics."""
+
+    metrics: list[MetricOut]
+
+
+class MetricPatch(BaseModel):
+    """Request body for PATCH /v3/metrics/{code}. A field left out is not changed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    visibility: Visibility | None = None
+    collected: bool | None = None
+
+
 class ErrorOut(BaseModel):
     """What went wrong with a ``/v3`` request."""
 
