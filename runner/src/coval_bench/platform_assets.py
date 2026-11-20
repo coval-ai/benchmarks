@@ -24,7 +24,6 @@ from coval_bench.scenarios import (
     contract_sha256,
     has_private_contract,
     load_stack,
-    read_contract_file,
     read_system_prompt,
 )
 from coval_bench.variants.platforms import read_retell, redact, retell_engine
@@ -36,7 +35,6 @@ TELNYX_SIP_SUFFIX = ".sip.telnyx.com"
 TELNYX_SIP_RECEIVE = "from_anyone"
 COVAL_API_BASE = "https://api.coval.dev/v1"
 COVAL_MODEL_TYPE = "MODEL_TYPE_VOICE"
-COVAL_PROMPT_FILE = "_source/coval-prompt.txt"
 _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 COVAL_API_KEY = SecretRef(
@@ -892,7 +890,7 @@ def coval_agent_body(spec: PlatformAgentSpec) -> dict[str, Any]:
         "customer_agent_id": spec.key,
         "model_type": COVAL_MODEL_TYPE,
         "phone_number": spec.dial_target.resolve(),
-        "prompt": read_contract_file(spec.suite, COVAL_PROMPT_FILE),
+        "prompt": read_system_prompt(spec.suite),
         "language": "en",
         "metadata": {"audio_codec": stack.media.codec},
         "attributes": {

@@ -31,7 +31,6 @@ from coval_bench.s2s.check import check_s2s
 from coval_bench.s2s.fetch_v2v import fetch_s2s
 from coval_bench.s2s.reimport import reimport_s2s
 from coval_bench.s2s.sync import sync_s2s
-from coval_bench.variants.pull import pull_contract
 
 # Backstop so a stalled connection can't hang a smoke probe forever. Loose enough
 # for a cold dedicated endpoint (handshake + cold inference); the production paths
@@ -53,10 +52,9 @@ def cli() -> None:
     configure_metrics(settings)
     click.get_current_context().call_on_close(shutdown_metrics)
     # Every command that reads or hashes a contract gets the same fixture sources
-    # the API has. `pull-contract` prints the hash today and the voice-agent
-    # ingest will write it onto result rows; a runner that could not see the
-    # fixtures would publish the hash of a run that had none, which is the one
-    # thing the hash exists to prevent.
+    # the API has. `platform-assets` labels runs and agents with the hash; a
+    # runner that could not see the fixtures would publish the hash of a run
+    # that had none, which is the one thing the hash exists to prevent.
     install_fixture_providers(settings)
 
 
@@ -131,7 +129,6 @@ cli.add_command(check_s2s, name="check-s2s")
 cli.add_command(sync_llm, name="sync-llm")
 cli.add_command(sync_s2s, name="sync-s2s")
 cli.add_command(reimport_s2s, name="reimport-s2s")
-cli.add_command(pull_contract, name="pull-contract")
 cli.add_command(platform_assets, name="platform-assets")
 
 
