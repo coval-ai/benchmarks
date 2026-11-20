@@ -1209,6 +1209,13 @@ def test_a_plan_never_prints_the_dial_target(capsys: pytest.CaptureFixture[str])
     assert "[REDACTED]" in printed
 
 
+def test_a_plan_never_prints_the_coval_prompt(capsys: pytest.CaptureFixture[str]) -> None:
+    platform_assets._echo_plan(Plan(update={"prompt": (None, PROMPT)}))
+    printed = capsys.readouterr().out
+    assert PROMPT not in printed
+    assert "[REDACTED]" in printed
+
+
 def test_prepare_steps_are_printed_by_kind_without_the_dial_target(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -15,7 +15,7 @@ SECRET_KEY = re.compile(r"(api[_-]?key|[_-]key$|secret|token|password|bearer|aut
 
 
 def redact(node: Any, found: list[str], path: str = "") -> Any:  # noqa: ANN401
-    """Replace secret-looking values before a vendor config is written to disk."""
+    """Replace secret-looking values before a config is printed."""
     if isinstance(node, dict):
         out: dict[str, Any] = {}
         for key, value in node.items():

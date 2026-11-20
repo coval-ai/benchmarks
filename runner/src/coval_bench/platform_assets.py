@@ -885,6 +885,7 @@ def published_contract_sha256(suite: str) -> str:
 def coval_agent_body(spec: PlatformAgentSpec) -> dict[str, Any]:
     """The Coval-side agent every variant registers: same call, only the dial target differs."""
     stack = load_stack()
+    sha = published_contract_sha256(spec.suite)
     return {
         "display_name": spec.key,
         "customer_agent_id": spec.key,
@@ -896,7 +897,7 @@ def coval_agent_body(spec: PlatformAgentSpec) -> dict[str, Any]:
         "attributes": {
             "platform": spec.platform,
             "suite": spec.suite,
-            "contract_sha256": published_contract_sha256(spec.suite),
+            "contract_sha256": sha,
         },
         "tags": ["orchestration", spec.suite, spec.platform],
     }
@@ -1029,7 +1030,7 @@ _coval_agent_option = click.option(
 )
 
 
-MASKED_PATHS = frozenset({"phone_number"})
+MASKED_PATHS = frozenset({"phone_number", "prompt"})
 
 
 def _shown(path: str, value: Any) -> Any:  # noqa: ANN401

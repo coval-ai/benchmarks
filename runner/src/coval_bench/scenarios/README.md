@@ -23,21 +23,16 @@ scenarios/
   id_roulette/
     _private/              tools.json: Corral's tools and answers, published from the
                            assets in benchmark-infra, never committed
-  platforms/
-    <platform>-agent.json  the only permitted difference, published for audit
 ```
 
-## The two rules
+## The rule
 
-1. **The pinned stack and the suite contract are shared across variants.** A
-   platform config may not restate a pinned value; it references this. If two
-   platforms could drift apart, the comparison is void.
-2. **`platforms/` holds the declared difference.** Each file records how one
-   vendor was wired, so a reader can audit the tested configuration rather than
-   infer it from results.
+**The pinned stack and the suite contract are shared across variants.** A
+platform config may not restate a pinned value; it references this. If two
+platforms could drift apart, the comparison is void.
 
-Transport is in neither. It is declared per variant on the registry row, because
-it is the one layer not pinned to a single value.
+Transport is not pinned here. It is declared per variant on the registry row,
+because it is the one layer not pinned to a single value.
 
 ## Rationale keys
 
@@ -82,5 +77,5 @@ The agent definition is public; the evaluator is not.
 
 | File | Published | Why |
 |---|---|---|
-| `system-prompt.txt`, `first-message.txt`, `tool-definitions.json` | yes | The agent under test. A reader must be able to audit what the agent was told in order to trust a result |
-| `_private/` | **no, gitignored as a directory** | The evaluator. `input_str` is the caller's script, `expected_behaviors` are the assertions, and `mock-tools.json` encodes the expected availability and patient identities. Publishing them would let a platform optimise for the test rather than the task |
+| `bank/system-prompt.txt`, `bank/tool-definitions.json` | yes | The agent under test. A reader must be able to audit what the agent was told in order to trust a result. |
+| `_private/` | **no, gitignored as a directory** | The evaluator: the tools and their answers (`tools.json`, `mock-tools.json`) and, for ID Roulette, the system prompt. Published from the assets in benchmark-infra. Publishing the answers would let a platform optimise for the test rather than the task. |
