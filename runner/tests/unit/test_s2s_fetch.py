@@ -546,6 +546,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
                     "gemini-3.8-live-extended-thinking": "b12",
                     "prism": "b13",
                     "phonic-1": "b14",
+                    "resia-fullplex-1": "b15",
                 },
             )
         },
@@ -567,6 +568,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
         ("google", "gemini-3.8-live-extended-thinking"),
         ("rime", "prism"),
         ("phonic", "phonic-1"),
+        ("resia", "resia-fullplex-1"),
     }
 
 
