@@ -24,7 +24,6 @@ from coval_bench.scenarios import (
     contract_sha256,
     has_private_contract,
     load_stack,
-    read_contract_file,
     read_system_prompt,
 )
 from coval_bench.variants.platforms import read_retell, redact, retell_engine
@@ -36,7 +35,6 @@ TELNYX_SIP_SUFFIX = ".sip.telnyx.com"
 TELNYX_SIP_RECEIVE = "from_anyone"
 COVAL_API_BASE = "https://api.coval.dev/v1"
 COVAL_MODEL_TYPE = "MODEL_TYPE_VOICE"
-COVAL_PROMPT_FILE = "_source/coval-prompt.txt"
 _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 COVAL_API_KEY = SecretRef(
@@ -887,18 +885,19 @@ def published_contract_sha256(suite: str) -> str:
 def coval_agent_body(spec: PlatformAgentSpec) -> dict[str, Any]:
     """The Coval-side agent every variant registers: same call, only the dial target differs."""
     stack = load_stack()
+    sha = published_contract_sha256(spec.suite)
     return {
         "display_name": spec.key,
         "customer_agent_id": spec.key,
         "model_type": COVAL_MODEL_TYPE,
         "phone_number": spec.dial_target.resolve(),
-        "prompt": read_contract_file(spec.suite, COVAL_PROMPT_FILE),
+        "prompt": read_system_prompt(spec.suite),
         "language": "en",
         "metadata": {"audio_codec": stack.media.codec},
         "attributes": {
             "platform": spec.platform,
             "suite": spec.suite,
-            "contract_sha256": published_contract_sha256(spec.suite),
+            "contract_sha256": sha,
         },
         "tags": ["orchestration", spec.suite, spec.platform],
     }
@@ -1031,7 +1030,7 @@ _coval_agent_option = click.option(
 )
 
 
-MASKED_PATHS = frozenset({"phone_number"})
+MASKED_PATHS = frozenset({"phone_number", "prompt"})
 
 
 def _shown(path: str, value: Any) -> Any:  # noqa: ANN401

@@ -132,9 +132,9 @@ def test_the_cli_installs_the_same_providers_the_api_does(
 ) -> None:
     """The runner hashes contracts too.
 
-    `pull-contract` prints the hash today and the voice-agent ingest will write
-    it onto result rows. A runner that could not see the fixtures would publish
-    the hash of a run that had none — the one thing the hash exists to prevent.
+    `platform-assets` labels runs and agents with the hash. A runner that could
+    not see the fixtures would publish the hash of a run that had none — the one
+    thing the hash exists to prevent.
     """
     from click.testing import CliRunner
 
@@ -150,7 +150,7 @@ def test_the_cli_installs_the_same_providers_the_api_does(
         # A subcommand's help runs the group callback first, then exits before
         # the subcommand does anything. `--help` on the *group* would not: click
         # handles that eagerly and never reaches the callback.
-        result = CliRunner().invoke(cli, ["pull-contract", "--help"])
+        result = CliRunner().invoke(cli, ["platform-assets", "--help"])
         assert result.exit_code == 0, result.output
         assert len(contracts_module._FIXTURE_PROVIDERS) == 1
     finally:

@@ -20,9 +20,7 @@ The pieces:
     contract adds a route, and no tool gets a hand-written one.
 ``codecs``
     Per-platform wire translation: each platform's request envelope in, its
-    reply shape out. The mirror of ``variants.platforms.FETCHERS`` — that is
-    how we talk to a platform, this is how a platform talks to us. Nothing past
-    a codec knows a vendor's name.
+    reply shape out. Nothing past a codec knows a vendor's name.
 ``keyterms``
     Domain vocabulary read back out of the fixtures for STT keyterm prompting.
 

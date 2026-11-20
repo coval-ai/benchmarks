@@ -57,7 +57,7 @@ CONTRACT = vendor_tool_definitions(TOOLS)
 PROMPT = "You look up a caller's detail. Begin with: What can I look up for you?"
 VAPI = spec_for("vapi/pinned")
 # The full Coval reconcile, for an agent the assets do not own.
-UNMAPPED = VAPI.model_copy(update={"suite": "dental", "scenario": None})
+UNMAPPED = VAPI.model_copy(update={"scenario": None})
 
 
 def _published(suite: str, name: str) -> bytes:
@@ -150,12 +150,10 @@ def test_code_managed_agent_still_registers_with_coval(
 ) -> None:
     target = "sip:+15550100001@example.sip.livekit.cloud;transport=tcp"
     monkeypatch.setenv("LIVEKIT_ID_ROULETTE_DIAL_TARGET", target)
-    body = coval_agent_body(
-        spec_for("livekit/pinned").model_copy(update={"suite": "dental", "scenario": None})
-    )
+    body = coval_agent_body(spec_for("livekit/pinned").model_copy(update={"scenario": None}))
     assert body["phone_number"] == target
     assert body["attributes"]["platform"] == "livekit"
-    assert body["tags"] == ["orchestration", "dental", "livekit"]
+    assert body["tags"] == ["orchestration", "id_roulette", "livekit"]
 
 
 def test_mock_base_url_is_optional_only_where_a_code_managed_arm_never_reads_it() -> None:
@@ -377,8 +375,8 @@ def test_coval_agent_body_dials_the_target_with_the_pinned_codec(env: None) -> N
     assert body["metadata"] == {"audio_codec": "PCMU"}
     assert body["customer_agent_id"] == "vapi/pinned"
     assert body["attributes"]["platform"] == "vapi"
-    assert body["tags"] == ["orchestration", "dental", "vapi"]
-    assert body["prompt"].startswith("BrightSmile Dental")
+    assert body["tags"] == ["orchestration", "id_roulette", "vapi"]
+    assert body["prompt"] == PROMPT
 
 
 def test_dial_target_is_required_and_named_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -500,7 +498,7 @@ def test_register_reconciles_display_name_and_tags_too(env: None) -> None:
     assert sorted(result.update) == ["display_name", "tags"]
     assert state["patched"] == {
         "display_name": "vapi/pinned",
-        "tags": ["orchestration", "dental", "vapi"],
+        "tags": ["orchestration", "id_roulette", "vapi"],
     }
 
 
@@ -1208,6 +1206,13 @@ def test_a_plan_never_prints_the_dial_target(capsys: pytest.CaptureFixture[str])
     printed = capsys.readouterr().out
     assert "secret-target" not in printed
     assert "+15550100000" not in printed
+    assert "[REDACTED]" in printed
+
+
+def test_a_plan_never_prints_the_coval_prompt(capsys: pytest.CaptureFixture[str]) -> None:
+    platform_assets._echo_plan(Plan(update={"prompt": (None, PROMPT)}))
+    printed = capsys.readouterr().out
+    assert PROMPT not in printed
     assert "[REDACTED]" in printed
 
 
