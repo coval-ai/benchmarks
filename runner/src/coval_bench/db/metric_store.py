@@ -38,14 +38,29 @@ class MetricStore:
 
     async def update(
         self, code: str, *, visibility: Visibility | None, collected: bool | None
-    ) -> RegisteredMetric | None:
-        """Change the fields that are given; None when there is no such metric."""
-        sql = f"""
-            UPDATE benchmarks_v2.metrics
-            SET visibility = COALESCE(%s, visibility), collected = COALESCE(%s, collected)
-            WHERE code = %s
-            RETURNING {_COLUMNS}
-        """  # noqa: S608 — constant columns
+    ) -> tuple[RegisteredMetric, RegisteredMetric] | None:
+        """Change the fields that are given.
+
+        Returns the metric before and after, or None when there is no such metric.
+        """
+        sql = """
+            WITH before AS (
+                SELECT code, display_name, visibility, collected
+                FROM benchmarks_v2.metrics WHERE code = %s
+            )
+            UPDATE benchmarks_v2.metrics m
+            SET visibility = COALESCE(%s, m.visibility), collected = COALESCE(%s, m.collected)
+            FROM before
+            WHERE m.code = before.code
+            RETURNING m.code, m.display_name, m.visibility, m.collected,
+                      before.visibility AS was_visibility, before.collected AS was_collected
+        """
         async with self._pool.connection() as conn:
-            row = await (await conn.execute(sql, (visibility, collected, code))).fetchone()
-        return None if row is None else RegisteredMetric.model_validate(dict(row))
+            row = await (await conn.execute(sql, (code, visibility, collected))).fetchone()
+        if row is None:
+            return None
+        after = RegisteredMetric.model_validate(dict(row))
+        before = after.model_copy(
+            update={"visibility": row["was_visibility"], "collected": row["was_collected"]}
+        )
+        return before, after

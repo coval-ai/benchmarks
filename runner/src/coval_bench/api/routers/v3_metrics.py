@@ -72,20 +72,27 @@ async def update(
     who: Caller = Depends(coval_only),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> MetricOut:
-    """Change who sees a metric, whether it is collected, or both. Coval staff only."""
+    """Change who sees a metric, whether it is collected, or both. Coval staff only.
+
+    ``visibility`` takes effect on the next request. ``collected`` is stored but no job
+    reads it yet, so changing it does not start or stop a metric being scored.
+    """
     org = writer(who)
     if body.visibility is None and body.collected is None:
         raise HTTPException(400, "give visibility, collected or both")
-    metric = await _guarded(
+    changed = await _guarded(
         MetricStore(pool).update(code, visibility=body.visibility, collected=body.collected)
     )
-    if metric is None:
+    if changed is None:
         raise HTTPException(404, "no such metric")
+    before, after = changed
     logger.info(
         "metric_changed",
-        code=metric.code,
-        visibility=metric.visibility,
-        collected=metric.collected,
+        code=after.code,
+        visibility=after.visibility,
+        collected=after.collected,
+        was_visibility=before.visibility,
+        was_collected=before.collected,
         org=org,
     )
-    return _out(metric, who)
+    return _out(after, who)
