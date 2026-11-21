@@ -741,8 +741,10 @@ export interface paths {
          * Update
          * @description Change who sees a metric, whether it is collected, or both. Coval staff only.
          *
-         *     ``visibility`` takes effect on the next request. ``collected`` is stored but no job
-         *     reads it yet, so changing it does not start or stop a metric being scored.
+         *     ``visibility`` takes effect on the next request. A ``collected`` change starts the
+         *     S2S sync, which sets the daily workflow-bank templates' metrics; nothing else reads
+         *     the flag yet. The daily datasets' anchor metric cannot be turned off: the fetch writes
+         *     nothing for a run without it.
          */
         patch: operations["update_v3_metrics__code__patch"];
         trace?: never;
