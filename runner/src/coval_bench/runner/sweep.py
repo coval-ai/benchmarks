@@ -49,7 +49,7 @@ from coval_bench.db.sweep_store import (
     store_score,
     unfinished_sweeps,
 )
-from coval_bench.metrics import compute_wer
+from coval_bench.metrics import compute_ttfs, compute_wer
 from coval_bench.metrics.wer import NORM_VERSION
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.registries import Benchmark, Metric
@@ -174,11 +174,18 @@ async def _run_stt(
                 )
     except Exception as exc:
         return _Output(error=_truncate(str(exc) or type(exc).__name__))
+    final = result.audio_to_final_seconds
+    offset_ms = clip.speech_end_offset_ms
     return _Output(
         transcript=result.complete_transcript,
         timings={
             "ttft_seconds": result.ttft_seconds,
-            "audio_to_final_seconds": result.audio_to_final_seconds,
+            "audio_to_final_seconds": final,
+            "ttfs_seconds": (
+                None
+                if final is None or offset_ms is None
+                else compute_ttfs(final, offset_ms / 1000.0)
+            ),
         },
         error=result.error or _stt_silent_failure(result),
     )

@@ -56,7 +56,7 @@ def _wire(
         wav.setsampwidth(2)
         wav.setframerate(16000)
         wav.writeframes(b"\x00\x00" * 1600)
-    clip = SimpleNamespace(path=path, duration_sec=0.1, speech_end_offset_ms=None)
+    clip = SimpleNamespace(path=path, duration_sec=0.1, speech_end_offset_ms=250.0)
     items = [
         SimpleNamespace(sample_id=name, path=f"audio/{name}.wav", transcript="hello world")
         for name in ("s1", "s2")
@@ -180,7 +180,7 @@ async def test_a_sweep_runs_each_item_once_stores_it_and_completes(
     assert _query(pg_conn, _RESULTS) == [("s1", "hello world"), ("s2", "hello world")]
     assert _query(pg_conn, _QUEUE) == []
     assert _query(pg_conn, "SELECT timings FROM benchmarks_v2.sweep_results LIMIT 1") == [
-        ({"ttft_seconds": 0.2, "audio_to_final_seconds": 0.5},)
+        ({"ttft_seconds": 0.2, "audio_to_final_seconds": 0.5, "ttfs_seconds": 0.25},)
     ]
 
 
