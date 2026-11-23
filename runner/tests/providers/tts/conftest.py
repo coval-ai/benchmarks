@@ -35,6 +35,7 @@ def fake_settings(tmp_path: Path) -> Settings:
         cartesia_api_key=SecretStr("test-cartesia-key"),
         elevenlabs_api_key=SecretStr("test-elevenlabs-key"),
         atlas_api_key=SecretStr("test-atlas-key"),
+        avartha_api_key=SecretStr("test-avartha-key"),
         nari_api_key=SecretStr("test-nari-key"),
         stepfun_api_key=SecretStr("test-stepfun-key"),
         cloudflare_api_key=SecretStr("test-cloudflare-key"),

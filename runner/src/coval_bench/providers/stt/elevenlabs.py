@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-from typing import Any
+from typing import Any, ClassVar
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TranscriptionResult
@@ -60,10 +60,11 @@ class ElevenLabsSTTProvider(WebSocketSTTProvider):
     _SAMPLE_RATE = 16000
     # No committed transcript: score the last partial rather than fail the clip.
     _PARTIAL_FALLBACK = "last"
+    _KEY_FIELD: ClassVar[str] = "elevenlabs_api_key"
 
     def __init__(self, settings: Settings, model: str = "scribe_v2_realtime") -> None:
         super().__init__(settings, model)
-        self._api_key = self._require_secret("elevenlabs_api_key")
+        self._api_key = self._require_secret(self._KEY_FIELD)
 
     @property
     def name(self) -> str:

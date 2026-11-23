@@ -14,9 +14,10 @@ from __future__ import annotations
 import base64
 import json
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 import websockets.asyncio.client as ws_client
+from pydantic import SecretStr
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
@@ -33,19 +34,21 @@ class ElevenLabsTTSProvider(TTSProvider):
     """ElevenLabs TTS provider over per-model WebSocket endpoints."""
 
     _DIALOGUE_MODELS = frozenset({"eleven_v3_conversational", "eleven_v4_turbo"})
+    _PROVIDER: ClassVar[str] = "elevenlabs"
+    _KEY_FIELD: ClassVar[str] = "elevenlabs_api_key"
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         self._model = model
         self._voice = voice
 
-        api_key_secret = settings.elevenlabs_api_key
+        api_key_secret: SecretStr | None = getattr(settings, self._KEY_FIELD)
         if api_key_secret is None:
-            raise ValueError("elevenlabs_api_key is required in Settings")
+            raise ValueError(f"{self._KEY_FIELD} is required in Settings")
         self._api_key = api_key_secret.get_secret_value()
 
     @property
     def name(self) -> str:
-        return f"elevenlabs-{self._model}"
+        return f"{self._PROVIDER}-{self._model}"
 
     @property
     def model(self) -> str:
@@ -72,7 +75,7 @@ class ElevenLabsTTSProvider(TTSProvider):
         return url, setup, inputs
 
     async def synthesize(self, text: str) -> TTSResult:
-        synthesis = Synthesis("elevenlabs", self._model, self._voice, SAMPLE_RATE)
+        synthesis = Synthesis(self._PROVIDER, self._model, self._voice, SAMPLE_RATE)
 
         url, setup_frames, text_frames = self._session_frames(text)
 
