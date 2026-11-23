@@ -75,4 +75,5 @@ PROVIDER_ENV: dict[str, str] = {
     "cloudflare": "CLOUDFLARE_API_KEY",
     "telnyx": "TELNYX_API_KEY",
     "saidwire": "SAIDWIRE_API_KEY",
+    "avartha": "AVARTHA_API_KEY",
 }

@@ -19,6 +19,7 @@ from coval_bench.providers.tts.airy import AiryTTSProvider
 from coval_bench.providers.tts.alibaba import AlibabaTTSProvider
 from coval_bench.providers.tts.assemblyai import AssemblyAITTSProvider
 from coval_bench.providers.tts.atlas import AtlasTTSProvider
+from coval_bench.providers.tts.avartha import AvarthaTTSProvider
 from coval_bench.providers.tts.azure import AzureTTSProvider
 from coval_bench.providers.tts.baseten import BasetenTTSProvider
 from coval_bench.providers.tts.cartesia import CartesiaTTSProvider
@@ -64,6 +65,7 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "airy": AiryTTSProvider,
     "assemblyai": AssemblyAITTSProvider,
     "atlas": AtlasTTSProvider,
+    "avartha": AvarthaTTSProvider,
     "cartesia": CartesiaTTSProvider,
     "cloudflare": CloudflareTTSProvider,
     "elevenlabs": ElevenLabsTTSProvider,
@@ -107,6 +109,7 @@ __all__ = [
     "GOOGLE_TTS_AVAILABLE",
     "AlibabaTTSProvider",
     "AtlasTTSProvider",
+    "AvarthaTTSProvider",
     "AzureTTSProvider",
     "BasetenTTSProvider",
     "CloudflareTTSProvider",
