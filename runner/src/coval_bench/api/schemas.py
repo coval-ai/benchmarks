@@ -844,6 +844,7 @@ class SweepOut(BaseModel):
     """One sweep: a model version run over one version of a dataset.
 
     ``benchmark`` and ``condition`` are null for a dataset no benchmark owns.
+    ``calling_count`` and ``scoring_count`` are only ever above zero for S2S.
     """
 
     id: int
@@ -860,6 +861,8 @@ class SweepOut(BaseModel):
     completed_at: datetime | None
     result_count: int
     queued_count: int
+    calling_count: int = 0
+    scoring_count: int = 0
     gave_up_count: int
 
 
@@ -901,6 +904,41 @@ class SweepItemsResponse(BaseModel):
     """Response schema for GET /v3/{modality}/sweeps/{sweep_id}/items."""
 
     items: list[SweepItemOut]
+
+
+class S2SScoreOut(BaseModel):
+    """One call's score on a metric, as a value over reference units."""
+
+    metric: str
+    metric_version: str
+    value: float
+    reference_units: int
+
+
+class S2SCallOut(BaseModel):
+    """One call of an S2S sweep: a test case, a persona and which repeat it is.
+
+    A ``done`` call has its ``scores``. ``queued`` is waiting for a worker, ``calling``
+    has been claimed, ``scoring`` has a ``simulation_id`` and is waiting on Coval, and
+    ``gave_up`` ran out of tries.
+    """
+
+    test_case: str
+    persona: str
+    repeat: int
+    status: Literal["done", "queued", "calling", "scoring", "gave_up"]
+    simulation_id: str | None
+    claimed_at: datetime | None
+    ran_at: datetime | None
+    tries_left: int | None
+    last_error: str | None
+    scores: list[S2SScoreOut]
+
+
+class S2SCallsResponse(BaseModel):
+    """Response schema for GET /v3/s2s/sweeps/{sweep_id}/calls."""
+
+    calls: list[S2SCallOut]
 
 
 class CompanyOut(BaseModel):
