@@ -17,13 +17,20 @@ from coval_bench.api.deps import get_pool
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
     ErrorResponse,
+    S2SCallOut,
+    S2SCallsResponse,
     SweepItemOut,
     SweepItemsResponse,
     SweepOut,
     SweepsResponse,
 )
 from coval_bench.api.v3_access import coval_only
-from coval_bench.db.sweep_store import fetch_sweep_items, fetch_sweeps
+from coval_bench.db.sweep_store import (
+    fetch_s2s_calls,
+    fetch_s2s_sweeps,
+    fetch_sweep_items,
+    fetch_sweeps,
+)
 from coval_bench.registries import Benchmark
 
 router = APIRouter(tags=["sweeps"], dependencies=[Depends(coval_only)])
@@ -42,9 +49,16 @@ async def get_sweeps(
     ``gave_up_count`` ran out of tries. A sweep with ``completed_at`` set has nothing
     left to run. A model has a sweep per dataset for each of its versions, so an old
     version's sweeps are listed too.
+
+    An S2S item is a call. ``queued_count`` calls are waiting for a worker,
+    ``calling_count`` are being made and ``scoring_count`` are made and waiting on
+    their scores.
     """
     try:
-        rows = await fetch_sweeps(pool)
+        if modality is Benchmark.S2S:
+            rows = await fetch_s2s_sweeps(pool)
+        else:
+            rows = await fetch_sweeps(pool)
     except psycopg.Error as exc:
         raise HTTPException(503, "sweeps are unavailable") from exc
     return SweepsResponse(sweeps=[SweepOut(**row) for row in rows if row["modality"] == modality])
@@ -76,3 +90,33 @@ async def get_sweep_items(
     if rows is None:
         raise HTTPException(404, "no such sweep")
     return SweepItemsResponse(items=[SweepItemOut(**row) for row in rows])
+
+
+@router.get(
+    "/sweeps/{sweep_id}/calls",
+    response_model=S2SCallsResponse,
+    responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
+)
+@limiter.limit("60/minute")
+async def get_sweep_calls(
+    request: Request,  # required by slowapi
+    sweep_id: int,
+    modality: Benchmark = Depends(v3.path_modality),
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+) -> S2SCallsResponse:
+    """Every call of an S2S sweep in test case, persona and repeat order. S2S only.
+
+    A ``queued`` call is waiting for a worker and a ``calling`` one has been claimed
+    since ``claimed_at``. A ``scoring`` call was made, has its ``simulation_id`` and is
+    waiting on Coval. A ``done`` call has each metric's ``scores``. A ``gave_up`` call
+    ran out of tries and has its ``last_error``.
+    """
+    if modality is not Benchmark.S2S:
+        raise HTTPException(404, "only S2S sweeps have calls")
+    try:
+        rows = await fetch_s2s_calls(pool, sweep_id)
+    except psycopg.Error as exc:
+        raise HTTPException(503, "sweeps are unavailable") from exc
+    if rows is None:
+        raise HTTPException(404, "no such sweep")
+    return S2SCallsResponse(calls=[S2SCallOut(**row) for row in rows])

@@ -413,6 +413,36 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 last_error text,
                 PRIMARY KEY (sweep_id, sample_id, voice)
             );
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.s2s_queue (
+                sweep_id      bigint NOT NULL REFERENCES benchmarks_v2.sweeps (id),
+                test_case     text NOT NULL,
+                persona       text NOT NULL,
+                repeat        integer NOT NULL,
+                tries_left    integer NOT NULL DEFAULT 3,
+                last_error    text,
+                claimed_at    timestamptz,
+                simulation_id text UNIQUE,
+                PRIMARY KEY (sweep_id, test_case, persona, repeat)
+            );
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.s2s_results (
+                id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                sweep_id      bigint NOT NULL REFERENCES benchmarks_v2.sweeps (id),
+                test_case     text NOT NULL,
+                persona       text NOT NULL,
+                repeat        integer NOT NULL,
+                simulation_id text NOT NULL UNIQUE,
+                created_at    timestamptz NOT NULL DEFAULT now(),
+                UNIQUE (sweep_id, test_case, persona, repeat)
+            );
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.s2s_scores (
+                id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                s2s_result_id   bigint NOT NULL REFERENCES benchmarks_v2.s2s_results (id),
+                metric          text NOT NULL,
+                metric_version  text NOT NULL,
+                value           double precision NOT NULL,
+                reference_units integer NOT NULL,
+                UNIQUE (s2s_result_id, metric, metric_version)
+            );
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.model_history (

@@ -338,3 +338,95 @@ async def fetch_sweep_items(
         await cur.execute(_SWEEP_ITEMS, {"sweep_id": sweep_id})
         rows: list[dict[str, Any]] = await cur.fetchall()
         return rows
+
+
+_S2S_SWEEPS = """
+    SELECT s.id, s.model_id, m.modality, m.provider, m.model, s.model_version,
+           bd.benchmark, bd.condition, s.dataset_id, s.dataset_version,
+           s.created_at, s.completed_at,
+           (SELECT count(*) FROM benchmarks_v2.s2s_results r WHERE r.sweep_id = s.id)
+             AS result_count,
+           q.queued_count, q.calling_count, q.scoring_count, q.gave_up_count
+    FROM benchmarks_v2.sweeps s
+    JOIN benchmarks_v2.models m ON m.id = s.model_id AND m.modality = 'S2S'
+    LEFT JOIN benchmarks_v2.benchmark_datasets bd ON bd.dataset_id = s.dataset_id
+    CROSS JOIN LATERAL (
+        SELECT count(*) FILTER (WHERE q.simulation_id IS NOT NULL) AS scoring_count,
+               count(*) FILTER (WHERE q.simulation_id IS NULL AND q.claimed_at IS NOT NULL)
+                 AS calling_count,
+               count(*) FILTER (WHERE q.claimed_at IS NULL AND q.tries_left > 0)
+                 AS queued_count,
+               count(*) FILTER (WHERE q.claimed_at IS NULL AND q.tries_left = 0)
+                 AS gave_up_count
+        FROM benchmarks_v2.s2s_queue q
+        WHERE q.sweep_id = s.id
+    ) q
+    ORDER BY s.created_at, s.id
+"""
+
+
+async def fetch_s2s_sweeps(pool: Pool) -> list[dict[str, Any]]:
+    """Every S2S sweep, oldest first, with where its calls are.
+
+    ``result_count`` calls are scored. Of the rest, ``queued_count`` are waiting for a
+    worker, ``calling_count`` are claimed and being made, ``scoring_count`` are made and
+    waiting on their scores, and ``gave_up_count`` ran out of tries. Raises
+    ``QueryCanceled`` after ten seconds.
+    """
+    async with (
+        pool.connection() as conn,
+        conn.transaction(),
+        conn.cursor(row_factory=dict_row) as cur,
+    ):
+        await cur.execute("SET LOCAL statement_timeout = '10s'")
+        await cur.execute(_S2S_SWEEPS)
+        rows: list[dict[str, Any]] = await cur.fetchall()
+        return rows
+
+
+_S2S_CALLS = """
+    SELECT r.test_case, r.persona, r.repeat, 'done' AS status, r.simulation_id,
+           NULL::timestamptz AS claimed_at, r.created_at AS ran_at,
+           NULL::integer AS tries_left, NULL::text AS last_error,
+           COALESCE((
+               SELECT jsonb_agg(jsonb_build_object(
+                          'metric', sc.metric, 'metric_version', sc.metric_version,
+                          'value', sc.value, 'reference_units', sc.reference_units)
+                        ORDER BY sc.metric, sc.metric_version)
+               FROM benchmarks_v2.s2s_scores sc WHERE sc.s2s_result_id = r.id
+           ), '[]'::jsonb) AS scores
+    FROM benchmarks_v2.s2s_results r
+    WHERE r.sweep_id = %(sweep_id)s
+    UNION ALL
+    SELECT q.test_case, q.persona, q.repeat,
+           CASE WHEN q.simulation_id IS NOT NULL THEN 'scoring'
+                WHEN q.claimed_at IS NOT NULL THEN 'calling'
+                WHEN q.tries_left > 0 THEN 'queued'
+                ELSE 'gave_up' END,
+           q.simulation_id, q.claimed_at, NULL, q.tries_left, q.last_error, '[]'::jsonb
+    FROM benchmarks_v2.s2s_queue q
+    WHERE q.sweep_id = %(sweep_id)s
+    ORDER BY test_case, persona, repeat
+"""
+
+
+async def fetch_s2s_calls(pool: Pool, sweep_id: int) -> list[dict[str, Any]] | None:
+    """An S2S sweep's calls in test case, persona and repeat order, or None if there is
+    no such S2S sweep.
+
+    A scored call is ``done`` and has its scores. One still in the queue is ``queued``
+    while it waits for a worker, ``calling`` once one has claimed it, ``scoring`` once it
+    has a simulation id, and ``gave_up`` when it has no tries left.
+    """
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT 1 FROM benchmarks_v2.sweeps sw"
+            " JOIN benchmarks_v2.models m ON m.id = sw.model_id"
+            " WHERE sw.id = %s AND m.modality = 'S2S'",
+            (sweep_id,),
+        )
+        if await cur.fetchone() is None:
+            return None
+        await cur.execute(_S2S_CALLS, {"sweep_id": sweep_id})
+        rows: list[dict[str, Any]] = await cur.fetchall()
+        return rows
