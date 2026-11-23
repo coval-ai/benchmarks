@@ -22,7 +22,7 @@ from coval_bench.config import Settings
 from coval_bench.db.model_lock import model_claim
 from coval_bench.db.registry_store import NewModel, RegistryStore
 from coval_bench.providers.base import TranscriptionResult, TTSResult
-from coval_bench.registries import Benchmark, Gender, Voice
+from coval_bench.registries import Benchmark, Gender, Source, Voice
 from coval_bench.runner import sweep
 from tests.unit.conftest import apply_migrations, open_pool
 
@@ -134,6 +134,37 @@ async def test_a_run_opens_one_sweep_per_dataset_queues_its_items_and_a_rerun_op
     assert (first.models, first.opened, second.opened) == (1, 2, 0)
     assert _query(pg_conn, _SWEEPS) == [(1, "ds-1", "1.0.0", False), (1, "ds-2", "1.0.0", False)]
     assert _query(pg_conn, _QUEUE) == [("s1", 3, None), ("s2", 3, None)] * 2
+
+
+async def test_an_uncollected_dedicated_model_is_swept_only_when_it_is_named(
+    pg_conn: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    swept = (
+        "SELECT count(*) FROM benchmarks_v2.sweeps s"
+        " JOIN benchmarks_v2.models m ON m.id = s.model_id WHERE m.model = 'boxed-1'"
+    )
+    pool = await _pool_with_model(pg_conn)
+    try:
+        boxed = NewModel(
+            modality=Benchmark.STT,
+            provider="acme",
+            model="boxed-1",
+            source=Source.DEDICATED_INFERENCE,
+            collected=False,
+        )
+        await RegistryStore(pool).insert_model(boxed, user_id="u", org_id=None, email=None)
+        _wire(monkeypatch, tmp_path, pool, {"ds-1": "1.0.0"})
+        await sweep.run_sweeps(settings=_SETTINGS, kind="stt", only=None, max_minutes=0)
+        unnamed = _query(pg_conn, swept)
+        named = await sweep.run_sweeps(
+            settings=_SETTINGS, kind="stt", only=frozenset({"acme/boxed-1"}), max_minutes=0
+        )
+    finally:
+        await pool.close()
+
+    assert unnamed == [(0,)]
+    assert (named.models, named.opened) == (1, 1)
+    assert _query(pg_conn, swept) == [(1,)]
 
 
 async def test_a_model_version_bump_or_a_new_dataset_version_opens_a_new_sweep(

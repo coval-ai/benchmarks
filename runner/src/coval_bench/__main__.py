@@ -302,7 +302,8 @@ def probe_latency(kind: str, selectors: tuple[str, ...]) -> None:
     "--only",
     "selectors",
     multiple=True,
-    help="provider/model to sweep (repeatable). Defaults to every collected shared model.",
+    help="provider/model to sweep (repeatable), whether or not it is shared or collected. "
+    "Defaults to every collected shared model.",
 )
 @click.option(
     "--max-minutes",

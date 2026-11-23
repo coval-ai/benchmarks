@@ -364,6 +364,28 @@ async def _report_queued(
         logger.warning("sweep_queue_not_reported", exc_info=True)
 
 
+def _shared(roster: list[RegisteredModel], kind: Kind) -> list[RegisteredModel]:
+    stt_models, tts_models = _select_models(
+        roster if kind == "stt" else [],
+        roster if kind == "tts" else [],
+        source="shared",
+        benchmark_kind=kind,
+        only=None,
+    )
+    return stt_models if kind == "stt" else tts_models
+
+
+def _named(
+    roster: list[RegisteredModel], only: frozenset[str], kind: Kind
+) -> list[RegisteredModel]:
+    """The models *only* names, collected or not and on a dedicated endpoint or not."""
+    models = [m for m in roster if f"{m.provider}/{m.model}" in only]
+    missing = only - {f"{m.provider}/{m.model}" for m in models}
+    if missing:
+        raise ValueError(f"--only matched no {kind} model: {sorted(missing)}")
+    return models
+
+
 async def run_sweeps(
     *,
     settings: Settings,
@@ -371,7 +393,11 @@ async def run_sweeps(
     only: frozenset[str] | None = None,
     max_minutes: float,
 ) -> SweepSummary:
-    """Open any missing sweeps for the collected shared *kind* models, then work on them."""
+    """Open any missing sweeps for the collected shared *kind* models, then work on them.
+
+    *only* names the models to sweep instead. A named model is swept even if it is on a
+    dedicated endpoint or isn't collected.
+    """
     benchmark = Benchmark.STT if kind == "stt" else Benchmark.TTS
     datasets = SWEEP_STT_DATASETS if kind == "stt" else SWEEP_TTS_DATASETS
     summary = SweepSummary()
@@ -382,14 +408,7 @@ async def run_sweeps(
         records = [r for r in await RegistryStore(pool).list_models() if r.modality is benchmark]
         ids = {(r.provider, r.model): r.id for r in records}
         roster = [_registered(r) for r in records]
-        stt_models, tts_models = _select_models(
-            roster if kind == "stt" else [],
-            roster if kind == "tts" else [],
-            source="shared",
-            benchmark_kind=kind,
-            only=only,
-        )
-        models = stt_models if kind == "stt" else tts_models
+        models = _named(roster, only, kind) if only else _shared(roster, kind)
         entries = {ids[(m.provider, m.model)]: m for m in models}
         manifests = {dataset_id: dataset_manifest(dataset_id) for dataset_id in datasets}
         summary.models = len(models)
