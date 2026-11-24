@@ -688,8 +688,10 @@ export interface paths {
          * Get Latency Points
          * @description Every model of the modality's *metric* over the window, as points for a chart.
          *
-         *     The last 24 hours has one point per probe tick. Seven days is averaged by the hour and
-         *     thirty by the day, and ``bucket_seconds`` says which. A point with a null value is a
+         *     The last 24 hours has one point per probe tick. Seven days is bucketed by the hour and
+         *     thirty by the day, and ``bucket_seconds`` says which. A point is the mean of its
+         *     bucket's probes, or with ``statistic`` a percentile or (``p100``) the maximum; a tick
+         *     is one probe, so every statistic gives the same 24-hour points. A point with a null value is a
          *     tick or bucket where every probe failed on the provider's side. A metric the modality
          *     doesn't have has no points.
          */
@@ -1750,6 +1752,12 @@ export interface components {
              * @enum {string}
              */
             metric: "TTFT" | "TTFS" | "TTFA";
+            /**
+             * Statistic
+             * @default default
+             * @enum {string}
+             */
+            statistic: "default" | "p50" | "p90" | "p95" | "p100";
             /**
              * Unit
              * @default milliseconds
@@ -4357,6 +4365,7 @@ export interface operations {
             query: {
                 metric: "TTFT" | "TTFS" | "TTFA";
                 window?: "24h" | "7d" | "30d";
+                statistic?: "default" | "p50" | "p90" | "p95" | "p100";
             };
             header?: {
                 authorization?: string | null;
