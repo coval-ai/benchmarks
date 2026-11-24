@@ -653,6 +653,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v3/{modality}/latency/sweep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sweep Latency
+         * @description One row per model and metric: percentiles over the items of its quality sweep.
+         *
+         *     This is the latency the model had while its quality scores were measured. It covers
+         *     the model's completed sweeps at its current version, so it has no time range and
+         *     changes only when the model is swept again.
+         */
+        get: operations["get_sweep_latency_v3__modality__latency_sweep_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v3/{modality}/latency/points": {
         parameters: {
             query?: never;
@@ -2616,6 +2640,51 @@ export interface components {
             items: components["schemas"]["SweepItemOut"][];
         };
         /**
+         * SweepLatencyOut
+         * @description One model's latency on one metric across its quality sweep.
+         */
+        SweepLatencyOut: {
+            /** Model Id */
+            model_id: number;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "TTFT" | "TTFS" | "TTFA";
+            /**
+             * Unit
+             * @default milliseconds
+             * @constant
+             */
+            unit: "milliseconds";
+            /** P50 */
+            p50?: number | null;
+            /** P90 */
+            p90?: number | null;
+            /** P95 */
+            p95?: number | null;
+            /** Mean */
+            mean?: number | null;
+            /** Min */
+            min?: number | null;
+            /** Max */
+            max?: number | null;
+            /** Sample Count */
+            sample_count: number;
+        };
+        /**
+         * SweepLatencyResponse
+         * @description Response schema for GET /v3/{modality}/latency/sweep.
+         */
+        SweepLatencyResponse: {
+            /** Latency */
+            latency: components["schemas"]["SweepLatencyOut"][];
+        };
+        /**
          * SweepOut
          * @description One sweep: a model version run over one version of a dataset.
          *
@@ -4184,6 +4253,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LatencyResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sweep_latency_v3__modality__latency_sweep_get: {
+        parameters: {
+            query?: {
+                metric?: ("TTFT" | "TTFS" | "TTFA") | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                modality: "llm" | "s2s" | "stt" | "tts";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SweepLatencyResponse"];
                 };
             };
             /** @description Bad Request */
