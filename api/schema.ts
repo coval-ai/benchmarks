@@ -846,6 +846,10 @@ export interface paths {
          *     ``gave_up_count`` ran out of tries. A sweep with ``completed_at`` set has nothing
          *     left to run. A model has a sweep per dataset for each of its versions, so an old
          *     version's sweeps are listed too.
+         *
+         *     An S2S item is a call. ``queued_count`` calls are waiting for a worker,
+         *     ``calling_count`` are being made and ``scoring_count`` are made and waiting on
+         *     their scores.
          */
         get: operations["get_sweeps_v3__modality__sweeps_get"];
         put?: never;
@@ -873,6 +877,31 @@ export interface paths {
          *     hasn't run yet or is waiting to retry, and a ``gave_up`` item ran out of tries.
          */
         get: operations["get_sweep_items_v3__modality__sweeps__sweep_id__items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v3/{modality}/sweeps/{sweep_id}/calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sweep Calls
+         * @description Every call of an S2S sweep in test case, persona and repeat order. S2S only.
+         *
+         *     A ``queued`` call is waiting for a worker and a ``calling`` one has been claimed
+         *     since ``claimed_at``. A ``scoring`` call was made, has its ``simulation_id`` and is
+         *     waiting on Coval. A ``done`` call has each metric's ``scores``. A ``gave_up`` call
+         *     ran out of tries and has its ``last_error``.
+         */
+        get: operations["get_sweep_calls_v3__modality__sweeps__sweep_id__calls_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2370,6 +2399,47 @@ export interface components {
             next_before?: number | null;
         };
         /**
+         * S2SCallOut
+         * @description One call of an S2S sweep: a test case, a persona and which repeat it is.
+         *
+         *     A ``done`` call has its ``scores``. ``queued`` is waiting for a worker, ``calling``
+         *     has been claimed, ``scoring`` has a ``simulation_id`` and is waiting on Coval, and
+         *     ``gave_up`` ran out of tries.
+         */
+        S2SCallOut: {
+            /** Test Case */
+            test_case: string;
+            /** Persona */
+            persona: string;
+            /** Repeat */
+            repeat: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "done" | "queued" | "calling" | "scoring" | "gave_up";
+            /** Simulation Id */
+            simulation_id: string | null;
+            /** Claimed At */
+            claimed_at: string | null;
+            /** Ran At */
+            ran_at: string | null;
+            /** Tries Left */
+            tries_left: number | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Scores */
+            scores: components["schemas"]["S2SScoreOut"][];
+        };
+        /**
+         * S2SCallsResponse
+         * @description Response schema for GET /v3/s2s/sweeps/{sweep_id}/calls.
+         */
+        S2SCallsResponse: {
+            /** Calls */
+            calls: components["schemas"]["S2SCallOut"][];
+        };
+        /**
          * S2SSampleAudioOut
          * @description A freshly signed URL for one recording, with the moment it stops working.
          *
@@ -2444,6 +2514,20 @@ export interface components {
             start_offset?: number | null;
             /** End Offset */
             end_offset?: number | null;
+        };
+        /**
+         * S2SScoreOut
+         * @description One call's score on a metric, as a value over reference units.
+         */
+        S2SScoreOut: {
+            /** Metric */
+            metric: string;
+            /** Metric Version */
+            metric_version: string;
+            /** Value */
+            value: number;
+            /** Reference Units */
+            reference_units: number;
         };
         /**
          * SeriesPoint
@@ -2536,6 +2620,7 @@ export interface components {
          * @description One sweep: a model version run over one version of a dataset.
          *
          *     ``benchmark`` and ``condition`` are null for a dataset no benchmark owns.
+         *     ``calling_count`` and ``scoring_count`` are only ever above zero for S2S.
          */
         SweepOut: {
             /** Id */
@@ -2569,6 +2654,16 @@ export interface components {
             result_count: number;
             /** Queued Count */
             queued_count: number;
+            /**
+             * Calling Count
+             * @default 0
+             */
+            calling_count: number;
+            /**
+             * Scoring Count
+             * @default 0
+             */
+            scoring_count: number;
             /** Gave Up Count */
             gave_up_count: number;
         };
@@ -4629,6 +4724,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SweepItemsResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sweep_calls_v3__modality__sweeps__sweep_id__calls_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                sweep_id: number;
+                modality: "llm" | "s2s" | "stt" | "tts";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["S2SCallsResponse"];
                 };
             };
             /** @description Forbidden */
