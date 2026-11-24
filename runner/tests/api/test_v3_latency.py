@@ -265,6 +265,25 @@ async def test_longer_windows_average_points_into_buckets(
     assert month["points"][0]["scheduled_at"].startswith(day.strftime("%Y-%m-%dT00:00:00"))
 
 
+async def test_points_take_a_percentile_or_the_maximum_of_each_bucket(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        tts = _model_id(conn, "seed", "tts-a")
+        day = NOW.replace(hour=12, minute=0, second=0, microsecond=0) - timedelta(days=3)
+        for minute, ttfa in ((0, 100.0), (30, 300.0)):
+            _probe(conn, tts, (NOW - day).total_seconds() / 3600 - minute / 60, ttfa=ttfa)
+
+    async def week(statistic: str) -> tuple[str, list[float]]:
+        path = f"/v3/tts/latency/points?metric=TTFA&window=7d&statistic={statistic}"
+        body = (await client.get(path)).json()
+        return body["statistic"], [point["value"] for point in body["points"]]
+
+    assert await week("p90") == ("p90", [280.0])
+    assert await week("p100") == ("p100", [300.0])
+    assert (await client.get("/v3/tts/latency/points?metric=TTFA&statistic=p99")).status_code == 400
+
+
 async def test_points_need_a_metric_and_hide_unpublished_models(
     client: AsyncClient, postgresql: Any
 ) -> None:
