@@ -25,10 +25,13 @@ from coval_bench.api.schemas import (
     LatencyResponse,
     ProbeOut,
     ProbesResponse,
+    SweepLatencyOut,
+    SweepLatencyResponse,
 )
 from coval_bench.api.v3_access import Sees, coval_only, visible
 from coval_bench.config import Settings
 from coval_bench.db.probe_store import fetch_latency, fetch_latency_points, fetch_probes
+from coval_bench.db.sweep_store import fetch_sweep_latency
 from coval_bench.registries import Benchmark, RegisteredModel, is_metric_excluded
 
 router = APIRouter(tags=["latency"])
@@ -110,6 +113,54 @@ async def get_latency(
 
     rows.sort(key=lambda row: (row.model_id, row.metric))
     return LatencyResponse(latency=rows)
+
+
+@router.get(
+    "/latency/sweep",
+    response_model=SweepLatencyResponse,
+    responses={400: {"model": ErrorResponse}},
+)
+@limiter.limit("60/minute")
+async def get_sweep_latency(
+    request: Request,  # required by slowapi
+    modality: Benchmark = Depends(v3.path_modality),
+    metric: MetricLiteral | None = Query(default=None),
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    sees: Sees = Depends(visible),
+) -> SweepLatencyResponse:
+    """One row per model and metric: percentiles over the items of its quality sweep.
+
+    This is the latency the model had while its quality scores were measured. It covers
+    the model's completed sweeps at its current version, so it has no time range and
+    changes only when the model is swept again.
+    """
+    try:
+        stats = await fetch_sweep_latency(pool)
+    except psycopg.Error as exc:
+        raise HTTPException(503, "latency results are unavailable") from exc
+
+    rows = [
+        SweepLatencyOut(
+            model_id=row["model_id"],
+            provider=row["provider"],
+            model=row["model"],
+            metric=row["metric"],
+            p50=round(row["p50"], 1),
+            p90=round(row["p90"], 1),
+            p95=round(row["p95"], 1),
+            mean=round(row["mean"], 1),
+            min=round(row["min"], 1),
+            max=round(row["max"], 1),
+            sample_count=row["sample_count"],
+        )
+        for row in stats
+        if sees(row["model_id"], row["metric"])
+        and row["modality"] == modality
+        and metric in (None, row["metric"])
+        and not is_metric_excluded(row["provider"], row["model"], row["metric"])
+    ]
+    rows.sort(key=lambda row: (row.model_id, row.metric))
+    return SweepLatencyResponse(latency=rows)
 
 
 @router.get(

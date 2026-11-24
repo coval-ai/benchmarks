@@ -744,8 +744,8 @@ class AdminRateCreate(BaseModel):
     notes: str | None = None
 
 
-class LatencyOut(BaseModel):
-    """One model's latency on one metric over a time range."""
+class SweepLatencyOut(BaseModel):
+    """One model's latency on one metric across its quality sweep."""
 
     model_id: int
     provider: str
@@ -759,6 +759,17 @@ class LatencyOut(BaseModel):
     min: float | None = None
     max: float | None = None
     sample_count: int
+
+
+class SweepLatencyResponse(BaseModel):
+    """Response schema for GET /v3/{modality}/latency/sweep."""
+
+    latency: list[SweepLatencyOut]
+
+
+class LatencyOut(SweepLatencyOut):
+    """One model's latency on one metric over a time range."""
+
     failed_count: int
 
 
