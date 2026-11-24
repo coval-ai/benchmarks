@@ -122,6 +122,7 @@ class ModelRecord(NewModel):
 
     id: int
     version: int = 1
+    price_usd: float | None = None
     updated_by_user_id: str | None = None
     updated_by_org_id: str | None = None
     updated_by_email: str | None = None
@@ -148,7 +149,7 @@ _SELECT_MODELS = """
     SELECT m.id, m.modality, m.provider, m.model, m.voice, m.voices, m.creator,
            m.source, m.licensing, m.on_prem, m.region, m.arena_enabled,
            m.collected, m.visibility, m.color, m.display_name,
-           m.architecture, m.orchestration, m.version, m.updated_by_user_id,
+           m.architecture, m.orchestration, m.version, m.price_usd, m.updated_by_user_id,
            m.updated_by_org_id, m.updated_by_email, m.updated_at,
            COALESCE(t.tags, '{}') AS tags
     FROM benchmarks_v2.models m
@@ -196,7 +197,8 @@ _INSERT_HISTORY = """
 # the read behind /v1/providers and the orchestrator's roster — the whole site
 # goes dark if it fails for the window between the two. Each missing column
 # reads as unset until it exists.
-_SELECT_MODELS_BEFORE_UPDATED_BY_ORG = _SELECT_MODELS.replace(
+_SELECT_MODELS_BEFORE_PRICE = _SELECT_MODELS.replace("m.price_usd,", "NULL AS price_usd,")
+_SELECT_MODELS_BEFORE_UPDATED_BY_ORG = _SELECT_MODELS_BEFORE_PRICE.replace(
     "m.updated_by_org_id,", "NULL AS updated_by_org_id,"
 )
 _SELECT_MODELS_BEFORE_VISIBILITY = _SELECT_MODELS_BEFORE_UPDATED_BY_ORG.replace(
@@ -216,6 +218,7 @@ _SELECT_MODELS_BEFORE_COLOR = _SELECT_MODELS_BEFORE_DISPLAY_NAME.replace(
 )
 _SELECT_MODELS_SHAPES = (
     _SELECT_MODELS,
+    _SELECT_MODELS_BEFORE_PRICE,
     _SELECT_MODELS_BEFORE_UPDATED_BY_ORG,
     _SELECT_MODELS_BEFORE_VISIBILITY,
     _SELECT_MODELS_BEFORE_VERSION,

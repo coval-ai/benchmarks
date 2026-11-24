@@ -641,6 +641,7 @@ class ModelOut(BaseModel):
     architecture: Architecture | None = None
     orchestration: Orchestration | None = None
     version: int
+    price_usd: float | None = None
     visibility: Visibility
     collected: bool | None = None
     arena_enabled: bool | None = None

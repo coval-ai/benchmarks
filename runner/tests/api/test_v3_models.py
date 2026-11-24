@@ -81,6 +81,24 @@ async def test_each_caller_lists_the_models_it_may_see(
     assert (staff[0]["collected"], staff[0]["updated_by_org"]) == (True, COVAL_ORG)
 
 
+async def test_a_models_price_is_listed_and_is_null_before_the_column_exists(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    await _model(client, "acme", "open", "public")
+    await _model(client, "acme", "free", "public")
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        conn.execute("UPDATE benchmarks_v2.models SET price_usd = 0.45 WHERE model = 'open'")
+
+    priced = {m["model"]: m["price_usd"] for m in await _models(client, None)}
+
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        conn.execute("ALTER TABLE benchmarks_v2.models DROP COLUMN price_usd")
+    unmigrated = {m["model"]: m["price_usd"] for m in await _models(client, None)}
+
+    assert priced == {"open": 0.45, "free": None}
+    assert unmigrated == {"open": None, "free": None}
+
+
 async def test_only_staff_write_models_and_the_org_is_recorded(
     client: AsyncClient, postgresql: Any
 ) -> None:
