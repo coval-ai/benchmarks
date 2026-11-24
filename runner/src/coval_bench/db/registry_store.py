@@ -64,6 +64,7 @@ EDITABLE_FIELDS = frozenset(
         "architecture",
         "orchestration",
         "version",
+        "price_usd",
     }
 )
 
@@ -176,6 +177,7 @@ _UPDATE_MODEL = """
         source = %s, licensing = %s, on_prem = %s, region = %s,
         arena_enabled = %s, collected = %s, visibility = %s, color = %s,
         display_name = %s, architecture = %s, orchestration = %s, version = %s,
+        price_usd = %s,
         updated_by_user_id = %s, updated_by_org_id = %s, updated_by_email = %s,
         -- Strictly monotonic per row: the 412 stale check compares this exactly,
         -- so same-microsecond updates must still produce a new value.
@@ -436,6 +438,7 @@ class RegistryStore:
                             merged.architecture,
                             merged.orchestration,
                             merged.version,
+                            merged.price_usd,
                             user_id,
                             org_id,
                             email,
