@@ -11,6 +11,7 @@ from typing import Any
 import psycopg
 from fastapi import FastAPI
 from httpx import AsyncClient
+from psycopg.types.json import Jsonb
 
 from coval_bench.registries import RegisteredModel
 from coval_bench.registries.benchmarks import Benchmark
@@ -101,6 +102,53 @@ async def test_latency_is_percentiles_per_model_and_metric(
     (down,) = (await client.get("/v3/tts/latency")).json()["latency"]
     assert (down["model_id"], down["metric"]) == (tts, "TTFA")
     assert (down["p50"], down["sample_count"], down["failed_count"]) == (None, 0, 1)
+
+
+def _sweep(conn: Any, model_id: int, timings: list[dict[str, float]], completed: bool) -> None:
+    sweep_id = conn.execute(
+        "INSERT INTO benchmarks_v2.sweeps"
+        " (model_id, model_version, dataset_id, dataset_version, completed_at)"
+        " VALUES (%s, 1, %s, '1.0.0', CASE WHEN %s THEN now() END) RETURNING id",
+        (model_id, f"ds-{completed}", completed),
+    ).fetchone()[0]
+    for n, timing in enumerate(timings):
+        conn.execute(
+            "INSERT INTO benchmarks_v2.sweep_results (sweep_id, sample_id, timings)"
+            " VALUES (%s, %s, %s)",
+            (sweep_id, f"s{n}", Jsonb(timing)),
+        )
+
+
+async def test_sweep_latency_is_percentiles_over_a_models_completed_sweeps(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        stt = _model_id(conn, "seed", "stt")
+        tts = _model_id(conn, "seed", "tts-a")
+        _sweep(conn, stt, [{"ttfs_seconds": 0.1}, {"ttfs_seconds": 0.3}], completed=True)
+        _sweep(conn, stt, [{"ttfs_seconds": 9.0}], completed=False)
+        _sweep(conn, tts, [{"ttfa_ms": 80.0}], completed=True)
+
+    (swept,) = (await client.get("/v3/stt/latency/sweep")).json()["latency"]
+    (spoken,) = (await client.get("/v3/tts/latency/sweep")).json()["latency"]
+    probed = (await client.get("/v3/stt/latency")).json()["latency"]
+
+    assert swept == {
+        "model_id": stt,
+        "provider": "seed",
+        "model": "stt",
+        "metric": "TTFS",
+        "unit": "milliseconds",
+        "p50": 200.0,
+        "p90": 280.0,
+        "p95": 290.0,
+        "mean": 200.0,
+        "min": 100.0,
+        "max": 300.0,
+        "sample_count": 2,
+    }
+    assert (spoken["model_id"], spoken["metric"], spoken["p50"]) == (tts, "TTFA", 80.0)
+    assert probed == []
 
 
 async def test_latency_filters_by_metric_and_window(client: AsyncClient, postgresql: Any) -> None:

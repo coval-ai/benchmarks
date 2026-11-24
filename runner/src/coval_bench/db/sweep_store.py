@@ -259,6 +259,43 @@ async def fetch_quality(pool: Pool) -> list[dict[str, Any]]:
         return rows
 
 
+_LATENCY = """
+    SELECT m.id AS model_id, m.modality, m.provider, m.model, v.metric,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY v.value) AS p50,
+           percentile_cont(0.9) WITHIN GROUP (ORDER BY v.value) AS p90,
+           percentile_cont(0.95) WITHIN GROUP (ORDER BY v.value) AS p95,
+           avg(v.value) AS mean, min(v.value) AS min, max(v.value) AS max,
+           count(*) AS sample_count
+    FROM benchmarks_v2.sweeps s
+    JOIN benchmarks_v2.models m ON m.id = s.model_id AND m.version = s.model_version
+    JOIN benchmarks_v2.sweep_results r ON r.sweep_id = s.id
+    CROSS JOIN LATERAL (
+        VALUES ('TTFT', (r.timings->>'ttft_seconds')::float8 * 1000),
+               ('TTFS', (r.timings->>'ttfs_seconds')::float8 * 1000),
+               ('TTFA', (r.timings->>'ttfa_ms')::float8)
+    ) AS v(metric, value)
+    WHERE s.completed_at IS NOT NULL AND v.value IS NOT NULL
+    GROUP BY m.id, v.metric
+"""
+
+
+async def fetch_sweep_latency(pool: Pool) -> list[dict[str, Any]]:
+    """Latency stats per model and metric, from the timings its sweep items recorded.
+
+    They cover the model's completed sweeps at its current version, in milliseconds.
+    Raises ``QueryCanceled`` after ten seconds.
+    """
+    async with (
+        pool.connection() as conn,
+        conn.transaction(),
+        conn.cursor(row_factory=dict_row) as cur,
+    ):
+        await cur.execute("SET LOCAL statement_timeout = '10s'")
+        await cur.execute(_LATENCY)
+        rows: list[dict[str, Any]] = await cur.fetchall()
+        return rows
+
+
 _SWEEPS = """
     SELECT s.id, s.model_id, m.modality, m.provider, m.model, s.model_version,
            bd.benchmark, bd.condition, s.dataset_id, s.dataset_version,
