@@ -90,7 +90,9 @@ async def fetch_health(pool: AsyncConnectionPool[Any]) -> list[dict[str, Any]]:
 
 _LATENCY = """
     SELECT m.id AS model_id, m.modality, m.provider, m.model, v.metric,
+           percentile_cont(0.25) WITHIN GROUP (ORDER BY v.value) AS p25,
            percentile_cont(0.5) WITHIN GROUP (ORDER BY v.value) AS p50,
+           percentile_cont(0.75) WITHIN GROUP (ORDER BY v.value) AS p75,
            percentile_cont(0.9) WITHIN GROUP (ORDER BY v.value) AS p90,
            percentile_cont(0.95) WITHIN GROUP (ORDER BY v.value) AS p95,
            avg(v.value) AS mean, min(v.value) AS min, max(v.value) AS max,

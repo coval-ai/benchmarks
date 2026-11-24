@@ -752,12 +752,14 @@ class SweepLatencyOut(BaseModel):
     model: str
     metric: Literal["TTFT", "TTFS", "TTFA"]
     unit: Literal["milliseconds"] = "milliseconds"
+    min: float | None = None
+    p25: float | None = None
     p50: float | None = None
+    p75: float | None = None
     p90: float | None = None
     p95: float | None = None
-    mean: float | None = None
-    min: float | None = None
     max: float | None = None
+    mean: float | None = None
     sample_count: int
 
 
