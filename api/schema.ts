@@ -1304,6 +1304,8 @@ export interface components {
             orchestration?: components["schemas"]["Orchestration"] | null;
             /** Version */
             version?: number | null;
+            /** Price Usd */
+            price_usd?: number | null;
             /** Published */
             published?: boolean | null;
         };
@@ -1698,18 +1700,22 @@ export interface components {
              * @constant
              */
             unit: "milliseconds";
+            /** Min */
+            min?: number | null;
+            /** P25 */
+            p25?: number | null;
             /** P50 */
             p50?: number | null;
+            /** P75 */
+            p75?: number | null;
             /** P90 */
             p90?: number | null;
             /** P95 */
             p95?: number | null;
-            /** Mean */
-            mean?: number | null;
-            /** Min */
-            min?: number | null;
             /** Max */
             max?: number | null;
+            /** Mean */
+            mean?: number | null;
             /** Sample Count */
             sample_count: number;
             /** Failed Count */
@@ -1964,6 +1970,8 @@ export interface components {
             orchestration?: components["schemas"]["Orchestration"] | null;
             /** Version */
             version: number;
+            /** Price Usd */
+            price_usd?: number | null;
             /**
              * Visibility
              * @enum {string}
@@ -1988,6 +1996,7 @@ export interface components {
          *
          *     ``color`` null returns the model to the site's built-in palette; ``display_name``
          *     null returns it to the site's built-in label. ``version`` only moves up by one.
+         *     ``price_usd`` is per hour of audio for STT and per 1M characters for TTS; null clears it.
          */
         ModelPatch: {
             /** Provider */
@@ -2022,6 +2031,8 @@ export interface components {
             orchestration?: components["schemas"]["Orchestration"] | null;
             /** Version */
             version?: number | null;
+            /** Price Usd */
+            price_usd?: number | null;
         };
         /**
          * ModelStatEntry
@@ -2661,18 +2672,22 @@ export interface components {
              * @constant
              */
             unit: "milliseconds";
+            /** Min */
+            min?: number | null;
+            /** P25 */
+            p25?: number | null;
             /** P50 */
             p50?: number | null;
+            /** P75 */
+            p75?: number | null;
             /** P90 */
             p90?: number | null;
             /** P95 */
             p95?: number | null;
-            /** Mean */
-            mean?: number | null;
-            /** Min */
-            min?: number | null;
             /** Max */
             max?: number | null;
+            /** Mean */
+            mean?: number | null;
             /** Sample Count */
             sample_count: number;
         };
