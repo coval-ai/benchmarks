@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import pytest
 from httpx import AsyncClient
 
 
@@ -118,6 +119,31 @@ async def test_cors_vercel_hash_preview_allowed(client: AsyncClient) -> None:
     )
     assert response.status_code in (200, 204)
     assert response.headers.get("access-control-allow-origin") == origin
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://benchmarks-abc123def.app-staging.coval.dev",
+        "https://benchmarks-git-feat-foo.app-staging.coval.dev",
+    ],
+)
+async def test_cors_staging_domain_preview_allowed(client: AsyncClient, origin: str) -> None:
+    response = await client.options(
+        "/v1/runs", headers={"Origin": origin, "Access-Control-Request-Method": "GET"}
+    )
+    assert response.headers.get("access-control-allow-origin") == origin
+
+
+async def test_cors_staging_domain_other_project_disallowed(client: AsyncClient) -> None:
+    response = await client.options(
+        "/v1/runs",
+        headers={
+            "Origin": "https://other-project.app-staging.coval.dev",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert "access-control-allow-origin" not in response.headers
 
 
 async def test_cors_vercel_other_project_disallowed(client: AsyncClient) -> None:

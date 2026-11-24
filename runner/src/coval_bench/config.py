@@ -357,11 +357,13 @@ class Settings(BaseSettings):
         "http://localhost:3002",
     ]
     # Matches Vercel preview deploys for the covalai/benchmarks project:
-    # branch URLs (`benchmarks-git-<branch>-covalai.vercel.app`) and
-    # per-deployment hash URLs (`benchmarks-<hash>-covalai.vercel.app`).
+    # branch URLs (`benchmarks-git-<branch>`) and per-deployment hash URLs
+    # (`benchmarks-<hash>`), on `-covalai.vercel.app` or `.app-staging.coval.dev`.
     # The canonical project URL is in cors_origins above; this regex is for
     # ephemeral preview deploys only.
-    cors_origin_regex: str | None = r"^https://benchmarks-[a-z0-9-]+-covalai\.vercel\.app$"
+    cors_origin_regex: str | None = (
+        r"^https://benchmarks-[a-z0-9-]+(-covalai\.vercel\.app|\.app-staging\.coval\.dev)$"
+    )
     rate_limit_per_minute: int = 60
     # Clerk instance whose JWKS verifies provider-org session tokens.
     # Unset means no bearer token unlocks anything.
