@@ -487,6 +487,9 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(updated_by_org, "op", SimpleNamespace(execute=conn.execute)):
             updated_by_org.upgrade()
+        model_price = import_module("coval_bench.db.migrations.versions.20261124_0072_model_price")
+        with patch.object(model_price, "op", SimpleNamespace(execute=conn.execute)):
+            model_price.upgrade()
         metric_collected = import_module(
             "coval_bench.db.migrations.versions.20261120_0070_metric_collected"
         )
