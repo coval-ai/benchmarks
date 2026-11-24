@@ -72,6 +72,14 @@ async def test_avartha_synthesizes_over_stream_input(fake_settings: Settings) ->
     ]
 
 
+def test_avartha_skips_fresh_take_outside_drama(fake_settings: Settings) -> None:
+    provider = AvarthaTTSProvider(
+        fake_settings, model="qwen/qwen3-tts-12hz-1.7b-base", voice="emily"
+    )
+    url, _, _ = provider._session_frames("Hello world")
+    assert "fresh_take" not in parse_qs(urlsplit(url).query)
+
+
 def test_avartha_registered_and_needs_its_own_key(fake_settings: Settings) -> None:
     assert TTS_PROVIDERS["avartha"] is AvarthaTTSProvider
     settings = fake_settings.model_copy(update={"avartha_api_key": None})
