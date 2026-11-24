@@ -14,7 +14,7 @@ from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
 from coval_bench.api import v3
-from coval_bench.api.common import WINDOW_DURATIONS, WindowLiteral
+from coval_bench.api.common import WINDOW_DURATIONS, StatisticLiteral, WindowLiteral
 from coval_bench.api.deps import get_models_by_id, get_pool, get_settings
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
@@ -39,6 +39,13 @@ router = APIRouter(tags=["latency"])
 MetricLiteral = Literal["TTFT", "TTFS", "TTFA"]
 
 _METRICS: dict[str, tuple[MetricLiteral, ...]] = {"STT": ("TTFT", "TTFS"), "TTS": ("TTFA",)}
+_FRACTIONS: dict[str, float | None] = {
+    "default": None,
+    "p50": 0.5,
+    "p90": 0.9,
+    "p95": 0.95,
+    "p100": 1.0,
+}
 
 
 @router.get("/latency", response_model=LatencyResponse, responses={400: {"model": ErrorResponse}})
@@ -178,14 +185,17 @@ async def get_latency_points(
     modality: Benchmark = Depends(v3.path_modality),
     metric: MetricLiteral = Query(...),
     window: WindowLiteral = Query(default="24h"),
+    statistic: StatisticLiteral = Query(default="default"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     settings: Settings = Depends(get_settings),
     sees: Sees = Depends(visible),
 ) -> LatencyPointsResponse:
     """Every model of the modality's *metric* over the window, as points for a chart.
 
-    The last 24 hours has one point per probe tick. Seven days is averaged by the hour and
-    thirty by the day, and ``bucket_seconds`` says which. A point with a null value is a
+    The last 24 hours has one point per probe tick. Seven days is bucketed by the hour and
+    thirty by the day, and ``bucket_seconds`` says which. A point is the mean of its
+    bucket's probes, or with ``statistic`` a percentile or (``p100``) the maximum; a tick
+    is one probe, so every statistic gives the same 24-hour points. A point with a null value is a
     tick or bucket where every probe failed on the provider's side. A metric the modality
     doesn't have has no points.
     """
@@ -196,7 +206,10 @@ async def get_latency_points(
     }[window]
     if metric not in _METRICS.get(modality, ()):
         return LatencyPointsResponse(
-            metric=metric, bucket_seconds=int(bucket.total_seconds()), points=[]
+            metric=metric,
+            statistic=statistic,
+            bucket_seconds=int(bucket.total_seconds()),
+            points=[],
         )
     try:
         rows = await fetch_latency_points(
@@ -205,6 +218,7 @@ async def get_latency_points(
             metric=metric,
             since=datetime.now(UTC) - WINDOW_DURATIONS[window],
             bucket=bucket,
+            fraction=_FRACTIONS[statistic],
         )
     except psycopg.Error as exc:
         raise HTTPException(503, "latency results are unavailable") from exc
@@ -222,7 +236,10 @@ async def get_latency_points(
         and not is_metric_excluded(row["provider"], row["model"], metric)
     ]
     return LatencyPointsResponse(
-        metric=metric, bucket_seconds=int(bucket.total_seconds()), points=points
+        metric=metric,
+        statistic=statistic,
+        bucket_seconds=int(bucket.total_seconds()),
+        points=points,
     )
 
 

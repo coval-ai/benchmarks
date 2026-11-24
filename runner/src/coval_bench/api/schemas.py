@@ -798,6 +798,7 @@ class LatencyPointsResponse(BaseModel):
     """Response schema for GET /v3/{modality}/latency/points."""
 
     metric: Literal["TTFT", "TTFS", "TTFA"]
+    statistic: Literal["default", "p50", "p90", "p95", "p100"] = "default"
     unit: Literal["milliseconds"] = "milliseconds"
     bucket_seconds: int
     points: list[LatencyPointOut]

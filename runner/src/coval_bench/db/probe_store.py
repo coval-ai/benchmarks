@@ -140,7 +140,11 @@ async def fetch_latency(
 _POINTS = """
     SELECT model_id, provider, model,
            date_bin(%(bucket)s, scheduled_at, TIMESTAMPTZ '2000-01-01 00:00:00+00') AS scheduled_at,
-           avg(value) FILTER (WHERE status = 'succeeded') AS value
+           CASE WHEN %(fraction)s::float8 IS NULL
+                THEN avg(value) FILTER (WHERE status = 'succeeded')
+                ELSE percentile_cont(COALESCE(%(fraction)s::float8, 0.5))
+                     WITHIN GROUP (ORDER BY value) FILTER (WHERE status = 'succeeded')
+           END AS value
     FROM (
         SELECT m.id AS model_id, m.provider, m.model, p.scheduled_at, p.status,
                CASE %(metric)s::text
@@ -166,14 +170,22 @@ async def fetch_latency_points(
     metric: str,
     since: datetime,
     bucket: timedelta,
+    fraction: float | None = None,
 ) -> list[dict[str, Any]]:
-    """One point per model and *bucket* since *since*: the mean of *metric* over its probes.
+    """One point per model and *bucket* since *since*: *metric* over the bucket's probes.
 
-    Buckets start on UTC boundaries. Only probes that succeeded count toward the mean, and
-    a bucket where every probe failed on the provider's side has a null value. A failure
+    A point is the mean, or the *fraction* percentile when one is given (1 is the
+    maximum). Buckets start on UTC boundaries. Only probes that succeeded count, and a
+    bucket where every probe failed on the provider's side has a null value. A failure
     the runner caused is left out. Raises ``QueryCanceled`` after ten seconds.
     """
-    params = {"modality": modality, "metric": metric, "since": since, "bucket": bucket}
+    params = {
+        "modality": modality,
+        "metric": metric,
+        "since": since,
+        "bucket": bucket,
+        "fraction": fraction,
+    }
     async with (
         pool.connection() as conn,
         conn.transaction(),
