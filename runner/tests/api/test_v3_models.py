@@ -99,6 +99,28 @@ async def test_a_models_price_is_listed_and_is_null_before_the_column_exists(
     assert unmigrated == {"open": None, "free": None}
 
 
+async def test_staff_set_and_clear_a_models_price_without_changing_its_version(
+    client: AsyncClient,
+) -> None:
+    created = await _model(client, "acme", "open", "public")
+    url = f"/v3/models/{created.json()['id']}"
+
+    async def patch(price: float | None, tag: str) -> Any:
+        return await client.patch(
+            url, json={"price_usd": price}, headers={**_staff(), "If-Match": tag}
+        )
+
+    negative = await patch(-1, created.headers["ETag"])
+    priced = await patch(0.45, created.headers["ETag"])
+    listed = (await _models(client, None))[0]
+    cleared = await patch(None, priced.headers["ETag"])
+
+    assert negative.status_code == 400
+    assert (priced.status_code, priced.json()["model"]["price_usd"]) == (200, 0.45)
+    assert (listed["price_usd"], listed["version"]) == (0.45, created.json()["version"])
+    assert (cleared.status_code, cleared.json()["model"]["price_usd"]) == (200, None)
+
+
 async def test_only_staff_write_models_and_the_org_is_recorded(
     client: AsyncClient, postgresql: Any
 ) -> None:

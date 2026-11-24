@@ -55,7 +55,16 @@ router = APIRouter(tags=["admin"], dependencies=[Depends(require_coval_admin)])
 
 # PATCH fields where null is a value, not an omission.
 _NULLABLE_FIELDS = frozenset(
-    {"voice", "creator", "region", "color", "display_name", "architecture", "orchestration"}
+    {
+        "voice",
+        "creator",
+        "region",
+        "color",
+        "display_name",
+        "architecture",
+        "orchestration",
+        "price_usd",
+    }
 )
 
 _SYNC_NOT_STARTED = (

@@ -595,6 +595,7 @@ class ModelPatch(BaseModel):
 
     ``color`` null returns the model to the site's built-in palette; ``display_name``
     null returns it to the site's built-in label. ``version`` only moves up by one.
+    ``price_usd`` is per hour of audio for STT and per 1M characters for TTS; null clears it.
     """
 
     provider: str | None = Field(default=None, min_length=1)
@@ -615,6 +616,7 @@ class ModelPatch(BaseModel):
     architecture: Architecture | None = None
     orchestration: Orchestration | None = None
     version: int | None = None
+    price_usd: float | None = Field(default=None, ge=0)
 
 
 class AdminModelPatch(ModelPatch):
