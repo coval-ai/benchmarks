@@ -5,17 +5,27 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 import psycopg
+from cachetools import TTLCache
 from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
 from coval_bench.api import v3
+from coval_bench.api.cache import get_or_fill
 from coval_bench.api.common import WINDOW_DURATIONS, StatisticLiteral, WindowLiteral
-from coval_bench.api.deps import get_models_by_id, get_pool, get_settings
+from coval_bench.api.deps import (
+    get_cache,
+    get_cache_locks,
+    get_models_by_id,
+    get_pool,
+    get_settings,
+)
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
     ErrorResponse,
@@ -136,15 +146,20 @@ async def get_sweep_latency(
     metric: MetricLiteral | None = Query(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     sees: Sees = Depends(visible),
+    cache: TTLCache[Any, Any] = Depends(get_cache),
+    cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
 ) -> SweepLatencyResponse:
     """One row per model and metric: percentiles over the items of its quality sweep.
 
     This is the latency the model had while its quality scores were measured. It covers
     the model's completed sweeps at its current version, so it has no time range and
-    changes only when the model is swept again.
+    changes only when the model is swept again. The rows are cached for every caller;
+    what each caller may see is decided after.
     """
     try:
-        stats = await fetch_sweep_latency(pool)
+        stats, _ = await get_or_fill(
+            cache, cache_locks, ("v3-sweep-latency",), lambda: fetch_sweep_latency(pool)
+        )
     except psycopg.Error as exc:
         raise HTTPException(503, "latency results are unavailable") from exc
 
