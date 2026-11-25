@@ -30,7 +30,7 @@ from coval_bench.registries import Benchmark
 
 router = APIRouter(tags=["models"])
 
-_STAFF_FIELDS = ("collected", "arena_enabled", "voice", "voices", "updated_at")
+_STAFF_FIELDS = ("arena_enabled", "voice", "voices", "updated_at")
 _WRITE_ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (400, 403, 409)
 }

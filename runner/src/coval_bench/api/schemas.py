@@ -627,7 +627,7 @@ class AdminModelPatch(ModelPatch):
 
 
 class ModelOut(BaseModel):
-    """A model on ``/v3``. The fields after ``visibility`` are null unless coval staff ask."""
+    """A model on ``/v3``. The fields after ``collected`` are null unless coval staff ask."""
 
     id: int
     modality: Benchmark

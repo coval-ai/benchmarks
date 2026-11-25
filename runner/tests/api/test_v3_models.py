@@ -68,11 +68,12 @@ async def test_each_caller_lists_the_models_it_may_see(
 
     public = await _models(client, None)
     assert _names(public) == ["acme/open"]
-    assert (public[0]["collected"], public[0]["updated_by_org"], public[0]["updated_at"]) == (
-        None,
+    assert (public[0]["collected"], public[0]["arena_enabled"], public[0]["updated_at"]) == (
+        True,
         None,
         None,
     )
+    assert public[0]["updated_by_org"] is None
     assert _names(await _models(client, _stranger())) == ["acme/open"]
     assert _names(await _models(client, _acme())) == ["acme/open", "acme/early"]
 
