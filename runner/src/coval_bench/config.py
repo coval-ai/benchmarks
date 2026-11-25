@@ -338,6 +338,7 @@ class Settings(BaseSettings):
     s2s_samples_bucket: str = ""
     alerts_topic: str = ""
     s2s_sync_job: str = ""
+    listed_models_uri: str = ""
 
     # --- Analytics ---
     posthog_project_token: str = ""
