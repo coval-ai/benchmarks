@@ -493,6 +493,20 @@ async def test_display_name_is_set_cleared_and_reaches_the_catalogue(client: Asy
     assert model["history"][0]["old"]["display_name"] == "Acme One"
 
 
+async def test_a_price_is_set_listed_and_cleared(client: AsyncClient) -> None:
+    created = (await _post_model(client)).json()
+    assert created["price_usd"] is None
+
+    priced = await _patch(client, created["id"], created["updated_at"], {"price_usd": 0.45})
+    assert (priced.status_code, priced.json()["model"]["price_usd"]) == (200, 0.45)
+    (listed,) = (await client.get("/v1/admin/models", headers=_admin_headers())).json()["models"]
+    assert listed["price_usd"] == 0.45
+
+    stamp = priced.json()["model"]["updated_at"]
+    cleared = await _patch(client, created["id"], stamp, {"price_usd": None})
+    assert (cleared.status_code, cleared.json()["model"]["price_usd"]) == (200, None)
+
+
 async def test_an_empty_display_name_is_rejected(client: AsyncClient) -> None:
     assert (await _post_model(client, display_name="")).status_code == 422
     created = (await _post_model(client)).json()
