@@ -35,7 +35,7 @@ class ListedModel(BaseModel):
 def parse_listed_models(raw: object) -> tuple[list[ListedModel], list[str]]:
     """The list's valid S2S entries, and one problem per entry that isn't.
 
-    A problem names the entry's position and field, never a value from the list.
+    A problem names the entry's position and field, never a value or a key from the list.
     """
     entries = raw.get("s2s") if isinstance(raw, dict) else None
     if not isinstance(entries, list):
@@ -46,11 +46,14 @@ def parse_listed_models(raw: object) -> tuple[list[ListedModel], list[str]]:
         try:
             models.append(ListedModel.model_validate(entry))
         except ValidationError as exc:
-            problems.extend(
-                f"s2s[{index}].{'.'.join(str(part) for part in error['loc'])}: {error['type']}"
-                for error in exc.errors()
-            )
+            problems.extend(_problem(index, error["loc"], error["type"]) for error in exc.errors())
     return models, problems
+
+
+def _problem(index: int, loc: tuple[int | str, ...], kind: str) -> str:
+    unknown = kind == "extra_forbidden"
+    where = ".".join([f"s2s[{index}]", *(str(part) for part in (loc[:-1] if unknown else loc))])
+    return f"{where}: {'unknown field' if unknown else kind}"
 
 
 def read_listed_models(uri: str) -> tuple[list[ListedModel], list[str]]:

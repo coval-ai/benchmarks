@@ -11,12 +11,15 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
+import psycopg
 import pytest
 from click.testing import CliRunner
 from fastapi import HTTPException
+from google.auth.exceptions import GoogleAuthError
 from structlog.testing import capture_logs
 
 from coval_bench import register_listed_models as module
+from coval_bench.api.routers import admin_models
 from coval_bench.api.routers.admin_models import create_model
 from coval_bench.config import Settings
 from coval_bench.db.registry_store import (
@@ -91,9 +94,15 @@ def test_a_bad_entry_is_a_problem_and_the_rest_still_parse() -> None:
     assert [model.name for model in models] == ["model-a"]
     assert problems == [
         "s2s[1].registry.architecture: missing",
-        "s2s[2].registry.display_name: extra_forbidden",
+        "s2s[2].registry: unknown field",
     ]
     assert not any("secret" in problem or "acme" in problem for problem in problems)
+
+
+def test_a_problem_never_repeats_a_key_or_an_entry_that_is_not_a_table() -> None:
+    misnested = {**_entry(), "secret-model": {}}
+    _, problems = parse_listed_models({"s2s": [misnested, "secret-text"]})
+    assert problems == ["s2s[0]: unknown field", "s2s[1]: model_type"]
 
 
 @pytest.mark.parametrize("raw", [{}, {"s2s": {}}, []])
@@ -169,9 +178,38 @@ def test_a_refusal_keeps_its_status_and_the_rest_are_created(
             raise HTTPException(422, "model-a is not allowed")
         return await create_model(new, *args, **kwargs)
 
-    monkeypatch.setattr(module, "create_model", create)
+    monkeypatch.setattr(admin_models, "create_model", create)
     done = _register(_Store(), _entry(), _entry("model-b"))
-    assert done == module.Registered(created=(1,), existing=0, refused=(422,))
+    assert done == module.Registered(created=(1,), existing=0, refused=("s2s[0]: 422",))
+
+
+def test_creating_a_row_never_starts_the_sync(monkeypatch: pytest.MonkeyPatch) -> None:
+    started: list[str] = []
+
+    def start(job: str) -> bool:
+        started.append(job)
+        return True
+
+    monkeypatch.setattr(admin_models, "start_s2s_sync", start)
+    done = asyncio.run(
+        module.register_models(_listed(_entry()), _Store(), Settings(s2s_sync_job="s2s-sync"))
+    )
+    assert done.created == (1,)
+    assert started == []
+
+
+def test_a_database_failure_partway_reports_the_rows_already_created() -> None:
+    class _Failing(_Store):
+        async def insert_model(
+            self, new: NewModel, *, user_id: str | None, org_id: str | None, email: str | None
+        ) -> ModelRecord:
+            if new.model == "model-b":
+                raise psycopg.OperationalError("connection lost")
+            return await super().insert_model(new, user_id=user_id, org_id=org_id, email=email)
+
+    with pytest.raises(module.Stopped) as caught:
+        _register(_Failing(), _entry(), _entry("model-b"))
+    assert caught.value.created == (1,)
 
 
 def _invoke(
@@ -201,21 +239,47 @@ def test_an_empty_list_exits_clean(monkeypatch: pytest.MonkeyPatch) -> None:
     assert (logs[-1]["created"], logs[-1]["existing"]) == ([], 0)
 
 
-def test_a_bad_entry_fails_the_command_after_the_good_ones_are_created(
+def test_a_bad_entry_stops_the_command_before_any_row_is_created(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = _Store()
     raw = {"s2s": [_entry("secret-a"), {"provider": "acme", "name": "secret-b", "registry": {}}]}
     code, output, logs = _invoke(monkeypatch, store, raw)
     assert code == 1
-    assert [new.model for new, _ in store.inserted] == ["secret-a"]
-    assert logs[-1]["created"] == [1]
+    assert store.inserted == []
+    assert logs == [
+        {
+            "event": "RUN_FAILED",
+            "invalid": ["s2s[1].registry.architecture: missing"],
+            "log_level": "error",
+        }
+    ]
+    assert "secret" not in output
+
+
+def test_a_refusal_fails_the_command_and_says_which_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def create(new: NewModel, *args: Any, **kwargs: Any) -> ModelRecord:
+        raise HTTPException(422, "secret-a is not allowed")
+
+    monkeypatch.setattr(admin_models, "create_model", create)
+    code, output, logs = _invoke(monkeypatch, _Store(), {"s2s": [_entry("secret-a")]})
+    assert code == 1
+    assert logs[-1] == {"event": "RUN_FAILED", "refused": ["s2s[0]: 422"], "log_level": "error"}
     assert "secret" not in output + repr(logs)
 
 
-def test_a_failed_read_names_no_address(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "error",
+    [
+        GoogleAuthError("token for sa@private-bucket"),  # type: ignore[no-untyped-call]
+        RuntimeError("gs://private-bucket"),
+    ],
+)
+def test_a_failed_read_names_no_address(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
     def read(uri: str) -> tuple[list[ListedModel], list[str]]:
-        raise RuntimeError("gs://private-bucket/list.json is gone")
+        raise error
 
     monkeypatch.setattr(module, "get_settings", lambda: Settings())
     monkeypatch.setattr(module, "configure_logging", lambda **_: None)
@@ -223,5 +287,5 @@ def test_a_failed_read_names_no_address(monkeypatch: pytest.MonkeyPatch) -> None
     with capture_logs() as logs:
         result = CliRunner().invoke(module.register_listed_models, [])
     assert result.exit_code == 1
-    assert logs == [{"event": "RUN_FAILED", "error": "RuntimeError", "log_level": "error"}]
+    assert logs == [{"event": "RUN_FAILED", "error": type(error).__name__, "log_level": "error"}]
     assert "private-bucket" not in result.output
