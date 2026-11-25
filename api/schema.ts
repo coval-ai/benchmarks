@@ -666,7 +666,8 @@ export interface paths {
          *
          *     This is the latency the model had while its quality scores were measured. It covers
          *     the model's completed sweeps at its current version, so it has no time range and
-         *     changes only when the model is swept again.
+         *     changes only when the model is swept again. The rows are cached for every caller;
+         *     what each caller may see is decided after.
          */
         get: operations["get_sweep_latency_v3__modality__latency_sweep_get"];
         put?: never;
@@ -846,7 +847,8 @@ export interface paths {
          *     A model's rows come from its newest version with a completed sweep of every
          *     condition, so it keeps its previous scores until the last condition finishes and is
          *     not listed for a benchmark it has never finished. A sweep scored under more than one
-         *     metric version has a row for each.
+         *     metric version has a row for each. The rows are cached for every caller; what each
+         *     caller may see is decided after.
          */
         get: operations["get_quality_v3__modality__quality_get"];
         put?: never;
@@ -1254,6 +1256,8 @@ export interface components {
             orchestration?: components["schemas"]["Orchestration"] | null;
             /** Version */
             version: number;
+            /** Price Usd */
+            price_usd?: number | null;
             /** Updated By User Id */
             updated_by_user_id?: string | null;
             /** Updated By Email */
@@ -1947,7 +1951,7 @@ export interface components {
         };
         /**
          * ModelOut
-         * @description A model on ``/v3``. The fields after ``visibility`` are null unless coval staff ask.
+         * @description A model on ``/v3``. The fields after ``collected`` are null unless coval staff ask.
          */
         ModelOut: {
             /** Id */
