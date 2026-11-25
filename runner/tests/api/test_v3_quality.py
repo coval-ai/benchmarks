@@ -9,6 +9,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from fastapi import FastAPI
 from httpx import AsyncClient
 
 from coval_bench.registries import RegisteredModel
@@ -175,7 +176,7 @@ async def test_quality_filters_by_model_and_metric(client: AsyncClient, postgres
 
 
 async def test_a_benchmark_stays_on_the_version_that_finished_every_condition(
-    client: AsyncClient, postgresql: Any
+    client: AsyncClient, app: FastAPI, postgresql: Any
 ) -> None:
     with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
         stt = _model_id(conn, "seed", "stt")
@@ -184,6 +185,7 @@ async def test_a_benchmark_stays_on_the_version_that_finished_every_condition(
         _sweep(conn, stt, [("a", "", 4, 10)], dataset="stt-wildasr-farfield")
         _sweep(conn, stt, [("a", "", 0, 10)], dataset="stt-wildasr-clean", model_version=2)
 
+    app.state.response_cache.clear()
     rows = (await client.get("/v3/stt/quality")).json()["quality"]
 
     assert unfinished == []
@@ -191,7 +193,7 @@ async def test_a_benchmark_stays_on_the_version_that_finished_every_condition(
 
 
 async def test_a_model_keeps_its_previous_score_while_a_new_version_is_swept(
-    client: AsyncClient, postgresql: Any
+    client: AsyncClient, app: FastAPI, postgresql: Any
 ) -> None:
     with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
         stt = _model_id(conn, "seed", "stt")
@@ -201,9 +203,12 @@ async def test_a_model_keeps_its_previous_score_while_a_new_version_is_swept(
     before = (await client.get("/v3/stt/quality")).json()["quality"]
     with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
         conn.execute("UPDATE benchmarks_v2.sweeps SET completed_at = now() WHERE model_version = 2")
+    cached = (await client.get("/v3/stt/quality")).json()["quality"]
+    app.state.response_cache.clear()
     after = (await client.get("/v3/stt/quality")).json()["quality"]
 
     assert [(row["model_version"], row["value"]) for row in before] == [(1, 10.0)]
+    assert cached == before
     assert [(row["model_version"], row["value"]) for row in after] == [(2, 50.0)]
 
 

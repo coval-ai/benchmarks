@@ -5,16 +5,20 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections import defaultdict
 from datetime import UTC
 from typing import Any, Literal
 
 import psycopg
+from cachetools import TTLCache
 from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
 from coval_bench.api import v3
-from coval_bench.api.deps import get_pool
+from coval_bench.api.cache import get_or_fill
+from coval_bench.api.deps import get_cache, get_cache_locks, get_pool
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ErrorResponse, QualityOut, QualityResponse
 from coval_bench.api.v3_access import Sees, visible
@@ -68,6 +72,8 @@ async def get_quality(
     breakdown: Literal["condition"] | None = Query(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     sees: Sees = Depends(visible),
+    cache: TTLCache[Any, Any] = Depends(get_cache),
+    cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
 ) -> QualityResponse:
     """One row per model, benchmark and metric of the modality, pooled across conditions.
 
@@ -80,10 +86,13 @@ async def get_quality(
     A model's rows come from its newest version with a completed sweep of every
     condition, so it keeps its previous scores until the last condition finishes and is
     not listed for a benchmark it has never finished. A sweep scored under more than one
-    metric version has a row for each.
+    metric version has a row for each. The rows are cached for every caller; what each
+    caller may see is decided after.
     """
     try:
-        rows = await fetch_quality(pool)
+        rows, _ = await get_or_fill(
+            cache, cache_locks, ("v3-quality",), lambda: fetch_quality(pool)
+        )
     except psycopg.Error as exc:
         raise HTTPException(503, "quality results are unavailable") from exc
 
