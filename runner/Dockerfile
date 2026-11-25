@@ -53,8 +53,12 @@ LABEL org.opencontainers.image.source="https://github.com/coval-ai/benchmarks" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="coval-bench-runner"
 
+# Bump the date to rebuild the layer below with current Debian packages.
+ARG APT_REFRESH=2026-11-25
+
 # Runtime native libs for soundfile / ffmpeg-based codecs
-RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+RUN echo "apt packages as of ${APT_REFRESH}" \
+    && apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         libsndfile1 \
         ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
