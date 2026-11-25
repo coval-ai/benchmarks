@@ -121,6 +121,23 @@ def _sweep(conn: Any, model_id: int, timings: list[dict[str, float]], completed:
         )
 
 
+async def test_sweep_latency_is_cached_between_requests(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        stt = _model_id(conn, "seed", "stt")
+        _sweep(conn, stt, [{"ttfs_seconds": 0.1}], completed=True)
+        first = (await client.get("/v3/stt/latency/sweep")).json()["latency"]
+        conn.execute(
+            "INSERT INTO benchmarks_v2.sweep_results (sweep_id, sample_id, timings)"
+            " SELECT id, 'late', %s FROM benchmarks_v2.sweeps",
+            (Jsonb({"ttfs_seconds": 0.9}),),
+        )
+
+    assert first[0]["sample_count"] == 1
+    assert (await client.get("/v3/stt/latency/sweep")).json()["latency"] == first
+
+
 async def test_sweep_latency_is_percentiles_over_a_models_completed_sweeps(
     client: AsyncClient, postgresql: Any
 ) -> None:
