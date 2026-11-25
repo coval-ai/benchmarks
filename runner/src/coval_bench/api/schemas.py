@@ -544,6 +544,7 @@ class AdminModelOut(BaseModel):
     architecture: Architecture | None = None
     orchestration: Orchestration | None = None
     version: int
+    price_usd: float | None = None
     updated_by_user_id: str | None = None
     updated_by_email: str | None = None
     updated_at: datetime
